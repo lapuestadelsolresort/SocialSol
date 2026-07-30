@@ -11,6 +11,7 @@ const runtimeValues = {
   '__RESORT_SOCIAL_CHANNEL__': process.env.RESORT_SOCIAL_CHANNEL || '',
   '__PROSPECTOR_SLACK_CHANNEL__': process.env.PROSPECTOR_SLACK_CHANNEL || '',
   '__OPENCLAW_SLACK_ACCOUNT__': process.env.OPENCLAW_SLACK_ACCOUNT || '',
+  '__GMAIL_IMPERSONATE_USER__': process.env.GMAIL_IMPERSONATE_USER || '',
 };
 const outputIndex = process.argv.indexOf('--output');
 const outputDir = outputIndex >= 0

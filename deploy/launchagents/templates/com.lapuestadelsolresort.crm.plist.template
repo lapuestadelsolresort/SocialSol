@@ -27,6 +27,8 @@
     <string>__PROSPECTOR_SLACK_CHANNEL__</string>
     <key>OPENCLAW_SLACK_ACCOUNT</key>
     <string>__OPENCLAW_SLACK_ACCOUNT__</string>
+    <key>GMAIL_IMPERSONATE_USER</key>
+    <string>__GMAIL_IMPERSONATE_USER__</string>
   </dict>
   <key>StandardOutPath</key>
   <string>__SOCIALSOL_ROOT__/crm/logs/crm.log</string>
