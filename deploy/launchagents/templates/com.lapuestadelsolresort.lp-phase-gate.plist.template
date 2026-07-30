@@ -15,6 +15,10 @@
   <dict>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>RESORT_SOCIAL_CHANNEL</key>
+    <string>__RESORT_SOCIAL_CHANNEL__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key>
+    <string>__OPENCLAW_SLACK_ACCOUNT__</string>
   </dict>
   <key>StartCalendarInterval</key>
   <dict>

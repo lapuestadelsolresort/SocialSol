@@ -19,6 +19,14 @@
   <dict>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>SOCIALSOL_ROOT</key>
+    <string>__SOCIALSOL_ROOT__</string>
+    <key>RESORT_SOCIAL_CHANNEL</key>
+    <string>__RESORT_SOCIAL_CHANNEL__</string>
+    <key>PROSPECTOR_SLACK_CHANNEL</key>
+    <string>__PROSPECTOR_SLACK_CHANNEL__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key>
+    <string>__OPENCLAW_SLACK_ACCOUNT__</string>
   </dict>
   <key>StandardOutPath</key>
   <string>__SOCIALSOL_ROOT__/crm/logs/crm.log</string>

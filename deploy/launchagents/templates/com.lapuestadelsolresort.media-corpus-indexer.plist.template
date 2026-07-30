@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lapuestadelsolresort.media-corpus-indexer</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__SOCIALSOL_ROOT__/media/scripts/index-media-corpus.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__SOCIALSOL_ROOT__/media</string>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>8</integer>
+    <key>Minute</key>
+    <integer>20</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__SOCIALSOL_ROOT__/media/logs/media-corpus-indexer.log</string>
+  <key>StandardErrorPath</key>
+  <string>__SOCIALSOL_ROOT__/media/logs/media-corpus-indexer.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>SOCIALSOL_ROOT</key>
+    <string>__SOCIALSOL_ROOT__</string>
+  </dict>
+</dict>
+</plist>

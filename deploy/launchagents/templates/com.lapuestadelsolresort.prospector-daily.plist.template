@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.lapuestadelsolresort.warmup-daily</string>
+  <string>com.lapuestadelsolresort.prospector-daily</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>__SOCIALSOL_ROOT__/warmup/scripts/warmup-daily.sh</string>
+    <string>__SOCIALSOL_ROOT__/prospector/scripts/daily-prospecting.sh</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -28,9 +28,9 @@
     <integer>30</integer>
   </dict>
   <key>StandardOutPath</key>
-  <string>__SOCIALSOL_ROOT__/warmup/logs/daily.log</string>
+  <string>__SOCIALSOL_ROOT__/prospector/logs/daily-prospecting.log</string>
   <key>StandardErrorPath</key>
-  <string>__SOCIALSOL_ROOT__/warmup/logs/daily.log</string>
+  <string>__SOCIALSOL_ROOT__/prospector/logs/daily-prospecting.log</string>
   <key>RunAtLoad</key>
   <false/>
 </dict>

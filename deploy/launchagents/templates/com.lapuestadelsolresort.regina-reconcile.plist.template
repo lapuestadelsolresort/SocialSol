@@ -27,6 +27,10 @@
   <dict>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>SOCIALSOL_ROOT</key>
+    <string>__SOCIALSOL_ROOT__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key>
+    <string>__OPENCLAW_SLACK_ACCOUNT__</string>
   </dict>
   <key>StartCalendarInterval</key>
   <dict>

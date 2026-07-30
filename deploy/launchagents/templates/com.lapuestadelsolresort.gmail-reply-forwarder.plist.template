@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.lapuestadelsolresort.warmup-daily</string>
+  <string>com.lapuestadelsolresort.gmail-reply-forwarder</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>__SOCIALSOL_ROOT__/warmup/scripts/warmup-daily.sh</string>
+    <string>__NODE_BIN__</string>
+    <string>__SOCIALSOL_ROOT__/crm/scripts/gmail-reply-forwarder.js</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -20,17 +20,12 @@
     <key>OPENCLAW_SLACK_ACCOUNT</key>
     <string>__OPENCLAW_SLACK_ACCOUNT__</string>
   </dict>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>8</integer>
-    <key>Minute</key>
-    <integer>30</integer>
-  </dict>
+  <key>StartInterval</key>
+  <integer>300</integer>
   <key>StandardOutPath</key>
-  <string>__SOCIALSOL_ROOT__/warmup/logs/daily.log</string>
+  <string>__SOCIALSOL_ROOT__/crm/logs/gmail-reply-forwarder.log</string>
   <key>StandardErrorPath</key>
-  <string>__SOCIALSOL_ROOT__/warmup/logs/daily.log</string>
+  <string>__SOCIALSOL_ROOT__/crm/logs/gmail-reply-forwarder.log</string>
   <key>RunAtLoad</key>
   <false/>
 </dict>

@@ -13,7 +13,11 @@
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>RESORT_SOCIAL_CHANNEL</key><string>__RESORT_SOCIAL_CHANNEL__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key><string>__OPENCLAW_SLACK_ACCOUNT__</string>
+  </dict>
   <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/job-watchdog.log</string>
   <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/job-watchdog.err</string>
 </dict>
