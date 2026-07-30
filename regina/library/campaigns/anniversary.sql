@@ -1,3 +1,12 @@
+-- Anniversary eligibility — past_guest_stayed contacts whose last_stay_date
+-- MM-DD matches :today. Annual cadence: NOT EXISTS uses created_at > -300d
+-- (vs. the campaign_kind status-set used by other campaigns) so a contact
+-- becomes eligible again the next year, with a 65-day buffer that protects
+-- against re-firing the same calendar year if something goes wrong.
+--
+-- The campaign_kind = 'reactivation_anniversary' filter on the join is
+-- essential — without it, an unrelated winback last month would block this
+-- year's anniversary, which is wrong.
 SELECT c.id
 FROM contacts c
 WHERE c.relationship_type = 'past_guest_stayed'

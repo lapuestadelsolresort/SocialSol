@@ -1,0 +1,20 @@
+{
+  "id": "paulina",
+  "name": "Prospector Paulina dispatcher",
+  "description": "Handles Block Kit interactions (Approve/Reject/Edit) for prospector drafts in #prospector-paulina, plus reply-classify buttons. Exposes POST /paulina/post-draft for the composer to render interactive Block Kit drafts.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "string",
+        "description": "Slack channel ID for the prospector channel (default: read from prospector/config.json)"
+      },
+      "crm_base_url": {
+        "type": "string",
+        "default": "http://localhost:3456",
+        "description": "Where the dispatcher posts the parsed action — defaults to the local CRM server."
+      }
+    }
+  }
+}

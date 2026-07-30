@@ -8,7 +8,8 @@
   "language": "en",
   "default_batch_size": 3,
   "eligibility_sql_path": "library/campaigns/vip.sql",
-  "description": "Premium re-engagement for repeat guests.",
+  "cadence_note": "Per-season, ~10/yr. Ships strategy-only in R6: contacts.reservation_count is 0 for all rows until the backfill sub-task lands (R6.5+).",
+  "description": "Premium re-engagement for repeat guests (>=2 reservations). Returns 0 contacts in R6 until reservation_count is backfilled.",
   "landing_page_url": "https://lapuestadelsolresort.com/",
-  "prompt_context": "Use a warm, familiar tone and only verified shared context. Keep under 120 words."
+  "prompt_context": "This guest has stayed at La Puesta del Sol multiple times — they're part of the family. Tone is warmer and more familiar than other campaigns. Reference a specific shared moment (the dossier has it), share something genuinely new (a specific seasonal offering, a dates window), and give them a reason to come back without making it transactional. Keep under 120 words. Sign as Sarah."
 }

@@ -1,0 +1,182 @@
+[
+  {
+    "id": "checkin-01",
+    "category": "check-in",
+    "subject": "hey",
+    "body": "hey {name} — how's it going over there? feels like forever.\n\n— sarah"
+  },
+  {
+    "id": "checkin-02",
+    "category": "check-in",
+    "subject": "hello",
+    "body": "hi {name}. no real reason for this email, you crossed my mind. hope things are good.\n\n— sarah"
+  },
+  {
+    "id": "checkin-03",
+    "category": "check-in",
+    "subject": "still alive",
+    "body": "hey {name}, still here. still doing the thing. how about you?\n\n— sarah"
+  },
+  {
+    "id": "checkin-04",
+    "category": "check-in",
+    "subject": "tuesday",
+    "body": "{name} — I keep thinking it's wednesday and it's not. anyway. how's the week going?\n\n— sarah"
+  },
+  {
+    "id": "checkin-05",
+    "category": "check-in",
+    "subject": "hi",
+    "body": "hey {name}. that's it. that's the whole email. hi.\n\n— sarah"
+  },
+  {
+    "id": "checkin-06",
+    "category": "check-in",
+    "subject": "update",
+    "body": "hey {name} — I owe you an update on like five things. short version: all good. long version later.\n\n— sarah"
+  },
+  {
+    "id": "article-01",
+    "category": "article-share",
+    "subject": "this forbes beach list",
+    "body": "hey {name} — fell into this and lost 20 minutes:\nhttps://www.forbes.com/sites/laurabegleybloom/2025/04/29/the-worlds-50-best-beaches-for-2025-according-to-a-new-report/\n\nsome of these I'd never heard of.\n\n— sarah"
+  },
+  {
+    "id": "article-02",
+    "category": "article-share",
+    "subject": "coral reef thing",
+    "body": "{name} — read this piece about coral restoration and it stuck with me:\nhttps://coral.org/en/blog/turning-the-tide-for-coral-reefs-in-2025/\n\nkind of hopeful actually.\n\n— sarah"
+  },
+  {
+    "id": "article-03",
+    "category": "article-share",
+    "subject": "food in mexico city",
+    "body": "ok {name} this eater list is dangerous:\nhttps://www.eater.com/maps/best-mexico-city-restaurants-38\n\nnow I need to go back.\n\n— sarah"
+  },
+  {
+    "id": "article-04",
+    "category": "article-share",
+    "subject": "bon appetit cdmx",
+    "body": "hey {name}, have you seen the bon appetit mexico city guide?\nhttps://www.bonappetit.com/story/where-to-eat-in-mexico-city\n\nthe hacienda de los morales rec is legit.\n\n— sarah"
+  },
+  {
+    "id": "article-05",
+    "category": "article-share",
+    "subject": "these sunset photos",
+    "body": "{name} — CN traveller did a piece on sunsets around the world. some of these photos are unreal.\nhttps://www.cntraveller.com/article/best-sunsets-in-the-world\n\n— sarah"
+  },
+  {
+    "id": "article-06",
+    "category": "article-share",
+    "subject": "podcast recs",
+    "body": "hey {name}, the new yorker did their best podcasts of the year list:\nhttps://www.newyorker.com/culture/2025-in-review/the-best-podcasts-of-2025\n\nadded three to my queue already.\n\n— sarah"
+  },
+  {
+    "id": "photo-01",
+    "category": "photo-reference",
+    "subject": "ocean is wild",
+    "body": "standing outside right now {name}, you wouldn't believe the swell. third storm system this month.\n\n— sarah"
+  },
+  {
+    "id": "photo-02",
+    "category": "photo-reference",
+    "subject": "sky",
+    "body": "the sky this morning was absurd. like someone spilled paint across the whole horizon. wish you saw it.\n\n— sarah"
+  },
+  {
+    "id": "photo-03",
+    "category": "photo-reference",
+    "subject": "pelicans",
+    "body": "hey {name} — a line of pelicans just flew past the window, maybe thirty of them. they do this every morning and I still stop and watch every time.\n\n— sarah"
+  },
+  {
+    "id": "photo-04",
+    "category": "photo-reference",
+    "subject": "golden hour",
+    "body": "{name}. the light right now. I can't even describe it. everything is orange.\n\n— sarah"
+  },
+  {
+    "id": "photo-05",
+    "category": "photo-reference",
+    "subject": "storm rolling in",
+    "body": "massive clouds building to the south. looks like it's going to be a real one tonight. kind of excited about it honestly.\n\n— sarah"
+  },
+  {
+    "id": "photo-06",
+    "category": "photo-reference",
+    "subject": "morning",
+    "body": "woke up before the alarm for once and caught the sunrise. worth it. coffee tastes better when the sky looks like that.\n\n— sarah"
+  },
+  {
+    "id": "question-01",
+    "category": "question",
+    "subject": "book",
+    "body": "that thing you said about the de waal book — you were right. couldn't put it down. what else have you read lately?\n\n— sarah"
+  },
+  {
+    "id": "question-02",
+    "category": "question",
+    "subject": "coffee",
+    "body": "hey {name}, switched to a new coffee and I think I ruined my old one forever. do you have a go-to brand or just whatever's there?\n\n— sarah"
+  },
+  {
+    "id": "question-03",
+    "category": "question",
+    "subject": "morning or evening",
+    "body": "morning walks or evening walks. I go back and forth. where do you land on this?\n\n— sarah"
+  },
+  {
+    "id": "question-04",
+    "category": "question",
+    "subject": "restaurant",
+    "body": "{name} — tried anywhere good lately? I'm in a rut and keep going to the same three places.\n\n— sarah"
+  },
+  {
+    "id": "question-05",
+    "category": "question",
+    "subject": "re: that question",
+    "body": "ok I thought about it. morning walks. obviously morning walks. sorry took me three days to answer this.\n\n— sarah"
+  },
+  {
+    "id": "question-06",
+    "category": "question",
+    "subject": "streaming",
+    "body": "hey {name}, have you watched anything good? I've scrolled through every app twice and picked nothing.\n\n— sarah"
+  },
+  {
+    "id": "thanks-01",
+    "category": "thank-you",
+    "subject": "thanks",
+    "body": "hey {name} — tried that place you mentioned. you were right.\n\n— sarah"
+  },
+  {
+    "id": "thanks-02",
+    "category": "thank-you",
+    "subject": "that rec",
+    "body": "{name}, that coffee shop you mentioned — the one with the weird hours? went twice this week. you were not exaggerating.\n\n— sarah"
+  },
+  {
+    "id": "thanks-03",
+    "category": "thank-you",
+    "subject": "you called it",
+    "body": "remember when you said I should go with the second option? yeah. you called it. thanks for that.\n\n— sarah"
+  },
+  {
+    "id": "thanks-04",
+    "category": "thank-you",
+    "subject": "the book",
+    "body": "finished that book you told me about. the ending. I mean. thank you for putting that on my radar.\n\n— sarah"
+  },
+  {
+    "id": "thanks-05",
+    "category": "thank-you",
+    "subject": "late reply",
+    "body": "hey {name}, I know this is late but that thing you said about not overthinking the small stuff — it actually changed how I handle mornings now.\n\n— sarah"
+  },
+  {
+    "id": "thanks-06",
+    "category": "thank-you",
+    "subject": "the spot",
+    "body": "went back to that spot you told me about. even better the second time. ordering the same thing every time now.\n\n— sarah"
+  }
+]

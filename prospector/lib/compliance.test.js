@@ -320,6 +320,14 @@ async function testItem6() {
   assert(r.failures.includes('item_6_no_disclosure_pattern'), 'disclosure_pattern code present');
   assert(r.pauseCampaign === true, 'item 6 pattern-fail triggers pauseCampaign');
 
+  // Known-contact reactivation (Regina) is not cold outreach. It still runs
+  // every other gate item but may explicitly bypass the cold-source
+  // disclosure requirement.
+  input.requiresWhyContactingDisclosure = false;
+  r = await compliance.evaluateCompliance(db, CONFIG, input);
+  assert(r.items[6] === true, 'item 6 bypasses disclosure for a known-contact workflow');
+  assert(!r.failures.includes('item_6_no_disclosure_pattern'), 'known-contact bypass has no item 6 failure');
+
   // Composer asserts whyContactingPresent = false → same failure.
   input = await buildBaseInput(db, 1001, 1, 'planner_outreach_v1');
   input.subject = 'Hello';

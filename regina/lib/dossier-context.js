@@ -18,15 +18,15 @@ const { sql } = require('@databases/sqlite');
 // Provenance hard rule: airbnb_thread_only contacts can NEVER receive direct
 // email — Regina forces send_method='manual_airbnb_thread' regardless of the
 // contact's preferred_channel.
-function resolveSendMethod(contact) {
+function resolveSendMethod(contact, { autoSendEnabled = false } = {}) {
   if (contact.contact_provenance === 'airbnb_thread_only') {
     return 'manual_airbnb_thread';
   }
   switch (contact.preferred_channel) {
-    case 'email':         return 'manual_email';
+    case 'email':         return autoSendEnabled ? 'resend' : 'manual_email';
     case 'whatsapp':      return 'manual_whatsapp';
     case 'airbnb_thread': return 'manual_airbnb_thread';
-    default:              return 'manual_email'; // safest fallback for rows missing the column
+    default:              return autoSendEnabled ? 'resend' : 'manual_email';
   }
 }
 
@@ -77,7 +77,7 @@ async function loadDossierForContact(db, contactId) {
  *   recipient_relationship?: string
  * }>}
  */
-async function buildContext(db, contactId, campaignConfig) {
+async function buildContext(db, contactId, campaignConfig, options = {}) {
   const contact = await loadContact(db, contactId);
   if (!contact) return { ok: false, skip_reason: 'contact_not_found' };
 
@@ -123,7 +123,7 @@ async function buildContext(db, contactId, campaignConfig) {
     ok: true,
     contact,
     dossier,
-    send_method: resolveSendMethod(contact),
+    send_method: resolveSendMethod(contact, options),
     message_context,
     recipient_relationship: campaignConfig.recipient_relationship || contact.relationship_type || null,
   };

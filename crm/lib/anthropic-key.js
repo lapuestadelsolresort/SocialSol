@@ -6,9 +6,8 @@
 //   1. process.env.ANTHROPIC_API_KEY
 //   2. workspace/secrets/anthropic.json  { "api_key": "sk-ant-..." }
 //
-// Paulina's prospector composer reads ANTHROPIC_API_KEY from ~/.openclaw/.env
-// via dotenv. R3's Voice Service follows the openai.json pattern instead.
-// Both readers will be unified in R5 when Paulina migrates to the Voice Service.
+// Paulina and the Voice Service both use the repository environment or the
+// private secrets directory.
 
 const fs = require('fs');
 const path = require('path');

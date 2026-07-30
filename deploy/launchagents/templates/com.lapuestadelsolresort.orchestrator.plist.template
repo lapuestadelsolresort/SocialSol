@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Prospector Paulina — send orchestrator
+  Fires every 5 minutes (StartInterval, NOT StartCalendarInterval — we want
+  ticks on a steady cadence regardless of wall-clock time).
+
+  RunAtLoad: false → first scheduled tick is up to 5 minutes after
+  `launchctl bootstrap`. Operator should run the orchestrator manually once
+  before relying on the agent — see install steps below.
+
+  Operator install:
+    Render this template with scripts/render-launchagents.sh.
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.lapuestadelsolresort.orchestrator.plist
+    launchctl enable gui/$(id -u)/com.lapuestadelsolresort.orchestrator
+    # Confirm running:
+    launchctl list | grep orchestrator
+    # Manual smoke (don't trust the agent until manual passes):
+    node __SOCIALSOL_ROOT__/prospector/orchestrator.js
+    tail -f __SOCIALSOL_ROOT__/prospector/logs/orchestrator.log
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lapuestadelsolresort.orchestrator</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BIN__</string>
+    <string>__SOCIALSOL_ROOT__/prospector/orchestrator.js</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>SOCIALSOL_ROOT</key>
+    <string>__SOCIALSOL_ROOT__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key>
+    <string>__OPENCLAW_SLACK_ACCOUNT__</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>StandardOutPath</key>
+  <string>__SOCIALSOL_ROOT__/prospector/logs/orchestrator.log</string>
+  <key>StandardErrorPath</key>
+  <string>__SOCIALSOL_ROOT__/prospector/logs/orchestrator.log</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

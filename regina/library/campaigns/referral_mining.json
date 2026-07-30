@@ -8,7 +8,8 @@
   "language": "en",
   "default_batch_size": 5,
   "eligibility_sql_path": "library/campaigns/referral_mining.sql",
-  "description": "Ask eligible five-star reviewers for a relevant referral.",
+  "cadence_note": "Operator-pull, ~5/wk over ~9 weeks until the 5-star reviewer pool is exhausted.",
+  "description": "Ask 5-star reviewers if they know anyone who'd love the property. Specific over generic.",
   "landing_page_url": "https://lapuestadelsolresort.com/",
-  "prompt_context": "Make a light referral ask grounded only in verified stay context. Keep under 120 words."
+  "prompt_context": "This guest left a 5-star review. Ask if they know anyone who'd love the property — wedding planners, friends planning a milestone, group trips. Be specific about the kind of trip La Puesta excels at (private buyouts, weddings, multi-generational family reunions) so the ask isn't generic. Keep under 120 words. Sign as Sarah."
 }

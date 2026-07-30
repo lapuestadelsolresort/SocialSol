@@ -8,7 +8,8 @@
   "language": "en",
   "default_batch_size": 5,
   "eligibility_sql_path": "library/campaigns/feedback_closure.sql",
-  "description": "Close the loop with guests who left private feedback.",
+  "cadence_note": "One-time, ~10-15 contacts over 3 weeks. Ships strategy-only in R6: contacts.has_private_feedback is 0 for all rows until the definition + backfill sub-task lands (R6.5+).",
+  "description": "Close the loop with guests who left private feedback. Channel is whatever Regina can reach them on (email, phone, or Airbnb thread); the provenance hard rule routes channel at draft time.",
   "landing_page_url": "https://lapuestadelsolresort.com/",
-  "prompt_context": "Acknowledge the verified feedback, describe a specific supported change, and thank the guest. Do not add a sales ask. Keep under 100 words."
+  "prompt_context": "This guest left private feedback after their stay. Acknowledge what they shared (the dossier has the gist), describe a specific change you've made or are making in response, and thank them. No ask. Keep under 100 words. Sign as Sarah."
 }

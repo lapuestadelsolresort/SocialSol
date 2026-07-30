@@ -14,10 +14,11 @@ from job_health import get_status, record
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = Path(os.environ.get("CRM_DB_PATH", ROOT / "crm" / "data" / "crm.db"))
-BACKUP_DIR = Path(os.environ.get("CRM_BACKUP_DIR", Path.home() / ".openclaw" / "backups" / "resort-crm"))
+BACKUP_DIR = Path(os.environ.get("CRM_BACKUP_DIR", ROOT / "backups" / "resort-crm"))
+SECRETS_DIR = Path(os.environ.get("SOCIALSOL_SECRETS_DIR", ROOT / "secrets"))
 CONFIG_PATH = Path(os.environ.get(
     "CRM_BACKUP_CONFIG",
-    Path.home() / ".openclaw" / "workspace" / "secrets" / "resort-backup.json",
+    SECRETS_DIR / "resort-backup.json",
 ))
 OPENSSL = "/opt/homebrew/bin/openssl"
 GOG = "/opt/homebrew/bin/gog"

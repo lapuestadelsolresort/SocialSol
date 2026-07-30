@@ -1,13 +1,16 @@
 'use strict';
 
 const { execFile } = require('child_process');
+const path = require('path');
+const {
+  OPENCLAW_BIN: OPENCLAW,
+} = require(path.resolve(__dirname, '..', '..', '..', '..', 'lib', 'runtime-paths'));
 
-const OPENCLAW = process.env.OPENCLAW_BIN || '/opt/homebrew/bin/openclaw';
 const SLACK_ACCOUNT = process.env.OPENCLAW_SLACK_ACCOUNT || '';
 
 function postToChannel(channel, message, { dryRun = false } = {}) {
   if (!SLACK_ACCOUNT) {
-    return Promise.resolve({ ok: false, error: 'Slack account is not configured', stderr: '' });
+    return Promise.resolve({ ok: false, error: 'OPENCLAW_SLACK_ACCOUNT is not configured', stderr: '' });
   }
   const args = [
     'message', 'send',

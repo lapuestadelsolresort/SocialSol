@@ -1,3 +1,7 @@
+-- Inquiry conversion eligibility — past_guest_inquired with a dossier-named
+-- addressable blocker. Confidence floor 0.6 keeps low-signal extractions
+-- out of the pool. Refuses why_no_book='went_elsewhere' implicitly via the
+-- IN-list (Project_Status.md:694, 748).
 SELECT c.id
 FROM contacts c
 WHERE c.relationship_type = 'past_guest_inquired'
@@ -15,8 +19,8 @@ WHERE c.relationship_type = 'past_guest_inquired'
     INNER JOIN outreach_campaigns oc ON oc.id = s.campaign_id
     WHERE s.contact_id = c.id
       AND oc.campaign_kind = 'reactivation_conversion'
-      AND (s.status IN ('sent', 'rejected', 'drafted')
-           OR (s.status = 'deferred' AND s.defer_until > date('now')))
+      AND ( s.status IN ('sent', 'rejected', 'drafted')
+            OR (s.status = 'deferred' AND s.defer_until > date('now')) )
   )
 ORDER BY c.last_stay_date DESC NULLS LAST
 LIMIT :batch_size;
