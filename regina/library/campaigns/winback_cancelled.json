@@ -8,7 +8,8 @@
   "language": "en",
   "default_batch_size": 5,
   "eligibility_sql_path": "library/campaigns/winback_cancelled.sql",
-  "description": "Invite contacts with an incomplete booking to revisit.",
+  "cadence_note": "Operator-pull, all 18 cancelled-booking contacts over ~4 weeks.",
+  "description": "Reach out to past_guest_cancelled contacts: their booking didn't complete (they cancelled, or we cancelled). Acknowledge gently, share what's changed, invite them to revisit.",
   "landing_page_url": "https://lapuestadelsolresort.com/",
-  "prompt_context": "Acknowledge the prior incomplete booking gently and offer one current, verified reason to revisit. Keep under 120 words."
+  "prompt_context": "This guest had a booking that didn't complete (they cancelled, or we cancelled). Acknowledge that gently without pressing on why. Share something current about La Puesta — a recent improvement, a date window, a specific reason now might be a better fit. Invite them to revisit. Keep under 120 words. Sign as Sarah."
 }

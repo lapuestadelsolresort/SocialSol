@@ -19,7 +19,10 @@ const fs = require('fs');
 const path = require('path');
 const { sql } = require('@databases/sqlite');
 
-const LANDING_ROOT = path.join(process.env.HOME, '.openclaw', 'landing', 'apps');
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const LANDING_ROOT = path.resolve(
+  process.env.LANDING_APPS_ROOT || path.join(REPO_ROOT, 'landing', 'apps'),
+);
 
 function isLocal(req) {
   const ip = req.ip || (req.connection && req.connection.remoteAddress) || '';

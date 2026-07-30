@@ -8,7 +8,8 @@
   "language": "en",
   "default_batch_size": 5,
   "eligibility_sql_path": "library/campaigns/anniversary.sql",
-  "description": "Anniversary-of-stay reactivation using one stable campaign row.",
+  "cadence_note": "Daily standing trigger via anniversary-cron.js at 09:00 local. ~0.6 anniversaries/day on average across 218 past guests; clusters around peak season.",
+  "description": "Daily anniversary-of-stay reactivation. Stable outreach_campaigns row shared across all daily fires.",
   "landing_page_url": "https://lapuestadelsolresort.com/",
-  "prompt_context": "Acknowledge the stay anniversary warmly, reference only verified dossier context, and invite the guest back without a hard ask. Keep under 100 words."
+  "prompt_context": "It's the anniversary of this guest's stay at La Puesta del Sol. Light-touch reach-out: acknowledge the date warmly, share something current about the property, invite them back without a hard ask. Reference something specific from their visit (the dossier note has the details). Keep under 100 words. Sign as Sarah."
 }

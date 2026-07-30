@@ -3,11 +3,27 @@
 .env.*
 !.env.example
 secrets/
+/secrets
 **/secrets/
 **/*.pem
 **/*.key
 **/*service-account*.json
 campaigns/active-campaigns.json
+
+# OpenClaw's local agent context. These files are copied into a production
+# checkout as a private runtime overlay and must never enter the public repo.
+/SOUL.md
+/USER.md
+/MEMORY.md
+/TOOLS.md
+/IDENTITY.md
+/HEARTBEAT.md
+/MARKETING_SETUP_GUIDE.md
+/META_SETUP.md
+/METRICS.md
+/PLAYBOOK.md
+/SOCIAL_SOL_REVIEW.md
+/.openclaw/
 
 # Runtime data
 **/data/
@@ -22,10 +38,26 @@ campaigns/active-campaigns.json
 **/*.log
 **/*.pid
 **/*.tmp
+/chroma-data/
+/chroma-venv/
+/chroma-data
+/chroma-venv
 prospector/state.json
 prospector/config.json
+prospector/orchestrator.lock
+prospector/research/cache/
+prospector/research/runs/
+prospector/research/query-history.json
+prospector/research/extract-compare.csv
+prospector/research/extract-compare-summary.md
+prospector/scripts/iteration-state.json
 regina/config.json
 sarah-coach/config.json
+warmup/recipients.json
+warmup/state.json
+warmup/sends.jsonl
+warmup/events.jsonl
+deploy/launchagents/generated/
 
 # Dependencies and generated output
 node_modules/
@@ -49,6 +81,22 @@ media/thumbs/
 media/transcripts/
 media/waveforms/
 media/photos-cache/
+media/brand/
+media/dining-lp/
+media/smoke/
+media/web-staging/
+/media/brand
+/media/dining-lp
+/media/logs
+/media/originals
+/media/photos-cache
+/media/proxies
+/media/renditions
+/media/smoke
+/media/thumbs
+/media/transcripts
+/media/waveforms
+/media/web-staging
 landing/apps/*/public/images/
 landing/apps/*/public/video/
 

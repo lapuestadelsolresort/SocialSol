@@ -7,7 +7,7 @@
 // pointing at the source file. No proxy is generated.
 //
 // Use this for:
-//   - Local Drive caches (~/.openclaw/workspace/tmp-photos/wedding-*.jpg)
+//   - A private local Drive cache supplied with --source-dir
 //   - Any directory of curated stills you want surfaced to agents
 //
 // Usage:

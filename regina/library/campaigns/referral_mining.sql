@@ -1,3 +1,7 @@
+-- Referral mining eligibility — 5-star reviewers, ordered by recency of stay.
+-- Already-contacted filter excludes contacts in any of:
+--   sent / rejected / drafted under reactivation_referral, or
+--   deferred under reactivation_referral with defer_until still in the future.
 SELECT c.id
 FROM contacts c
 WHERE c.review_rating = 5
@@ -13,8 +17,8 @@ WHERE c.review_rating = 5
     INNER JOIN outreach_campaigns oc ON oc.id = s.campaign_id
     WHERE s.contact_id = c.id
       AND oc.campaign_kind = 'reactivation_referral'
-      AND (s.status IN ('sent', 'rejected', 'drafted')
-           OR (s.status = 'deferred' AND s.defer_until > date('now')))
+      AND ( s.status IN ('sent', 'rejected', 'drafted')
+            OR (s.status = 'deferred' AND s.defer_until > date('now')) )
   )
 ORDER BY c.last_stay_date DESC
 LIMIT :batch_size;

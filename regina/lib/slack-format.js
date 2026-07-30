@@ -54,6 +54,49 @@ function buildFooter() {
   return '\nReply in thread: !sent | <edited text> + !sent | !skip [reason] | !defer N';
 }
 
+function buildAutoSentMessage({
+  campaignKind,
+  contact,
+  dossier,
+  draftText,
+  subject,
+  resendId,
+  maxChars = DEFAULT_MAX,
+}) {
+  const header = buildHeaderBlock({ campaignKind, contact, dossier });
+  const sentLine = `📤 *AUTO-SENT* via Resend (${resendId})`;
+  const subjectLine = subject ? `*Subject:* ${subject}` : '';
+  const body = `${header}${sentLine}\n${subjectLine}\n\n${draftText}`;
+  if (body.length <= maxChars) return { topLevel: body, bodyOverflow: null };
+  const topLevel = `${header}${sentLine}\n${subjectLine}\n\n(body in thread — too long)`;
+  const bodyOverflow = `${DRAFT_BODY_MARKER}\n${draftText}`;
+  return { topLevel, bodyOverflow };
+}
+
+function buildAutoSendFailedMessage({ contact, reason, detail }) {
+  return `⚠ Auto-send failed for ${contact.name || '(unknown)'} (id ${contact.id}): ${detail || reason}`;
+}
+
+function buildManualDraftMessage({
+  campaignKind,
+  contact,
+  dossier,
+  draftText,
+  sendMethod,
+  maxChars = DEFAULT_MAX,
+}) {
+  const header = buildHeaderBlock({ campaignKind, contact, dossier });
+  const channelNote = sendMethod === 'manual_airbnb_thread'
+    ? '📩 *Manual send required* — Airbnb thread only (no direct email)'
+    : `📩 *Manual send required* — channel: ${sendMethod}`;
+  const footer = buildFooter();
+  const body = `${header}${channelNote}\n\n${draftText}\n${footer}`;
+  if (body.length <= maxChars) return { topLevel: body, bodyOverflow: null };
+  const topLevel = `${header}${channelNote}\n\n(draft body in thread)\n${footer}`;
+  const bodyOverflow = `${DRAFT_BODY_MARKER}\n${draftText}`;
+  return { topLevel, bodyOverflow };
+}
+
 /**
  * Build the top-level draft message for a single contact.
  *
@@ -150,6 +193,9 @@ function buildAutoSuppressPost({ contact, draftDate }) {
 
 module.exports = {
   buildDraftMessage,
+  buildAutoSentMessage,
+  buildAutoSendFailedMessage,
+  buildManualDraftMessage,
   buildBatchSummary,
   buildEmptyAnniversaryPost,
   buildVoiceServiceDownPost,

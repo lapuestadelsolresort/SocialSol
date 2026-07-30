@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lapuestadelsolresort.warmup-daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__SOCIALSOL_ROOT__/warmup/scripts/warmup-daily.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>SOCIALSOL_ROOT</key>
+    <string>__SOCIALSOL_ROOT__</string>
+    <key>PROSPECTOR_SLACK_CHANNEL</key>
+    <string>__PROSPECTOR_SLACK_CHANNEL__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key>
+    <string>__OPENCLAW_SLACK_ACCOUNT__</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>8</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__SOCIALSOL_ROOT__/warmup/logs/daily.log</string>
+  <key>StandardErrorPath</key>
+  <string>__SOCIALSOL_ROOT__/warmup/logs/daily.log</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

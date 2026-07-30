@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lapuestadelsolresort.crm</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BIN__</string>
+    <string>__SOCIALSOL_ROOT__/crm/server.js</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>SOCIALSOL_ROOT</key>
+    <string>__SOCIALSOL_ROOT__</string>
+    <key>RESORT_SOCIAL_CHANNEL</key>
+    <string>__RESORT_SOCIAL_CHANNEL__</string>
+    <key>PROSPECTOR_SLACK_CHANNEL</key>
+    <string>__PROSPECTOR_SLACK_CHANNEL__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key>
+    <string>__OPENCLAW_SLACK_ACCOUNT__</string>
+    <key>GMAIL_IMPERSONATE_USER</key>
+    <string>__GMAIL_IMPERSONATE_USER__</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__SOCIALSOL_ROOT__/crm/logs/crm.log</string>
+  <key>StandardErrorPath</key>
+  <string>__SOCIALSOL_ROOT__/crm/logs/crm.log</string>
+  <key>WorkingDirectory</key>
+  <string>__SOCIALSOL_ROOT__/crm</string>
+</dict>
+</plist>
