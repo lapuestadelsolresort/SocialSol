@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 secrets/
+/secrets
 **/secrets/
 **/*.pem
 **/*.key
@@ -37,6 +38,8 @@ campaigns/active-campaigns.json
 **/*.log
 **/*.pid
 **/*.tmp
+/chroma-data/
+/chroma-venv/
 prospector/state.json
 prospector/config.json
 prospector/orchestrator.lock
