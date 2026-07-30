@@ -1,4 +1,5 @@
 {
+  "$comment": "Phase R5 smoke campaign — superseded in R6 by six real campaigns (anniversary, referral_mining, winback_cancelled, inquiry_conversion, vip, feedback_closure). Retained as the loader's escape-hatch reference: contact_ids array (no eligibility_sql_path) bypasses SQL and uses the static list. Useful for future smoke tests against new pipeline changes.",
   "slug": "smoke",
   "name": "regina_smoke",
   "campaign_kind": "ad_hoc",

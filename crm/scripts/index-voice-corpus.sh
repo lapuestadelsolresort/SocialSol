@@ -23,8 +23,8 @@ trap '"$HC_PING" voice-corpus-indexer fail 2>/dev/null; exit 1' ERR
 
 # Resolve OPENAI_API_KEY. Preference order:
 #   1. already exported in env
-#   2. workspace/secrets/openai.json  (recommended; matches resend.json pattern)
-#   3. ~/.openclaw/.env line 'OPENAI_API_KEY=...'
+#   2. SOCIALSOL_SECRETS_DIR/openai.json
+#   3. repository .env line 'OPENAI_API_KEY=...'
 # We pull values without `source`ing because other .env entries contain
 # unquoted shell metacharacters that break `set -a; source`.
 if [[ -z "${OPENAI_API_KEY:-}" && -f "$OPENAI_SECRET" ]]; then
@@ -36,7 +36,7 @@ if [[ -z "${OPENAI_API_KEY:-}" && -f "$ENV_FILE" ]]; then
   export OPENAI_API_KEY
 fi
 
-# Reject the placeholder value Jason left in .env so the wrapper fails loud
+# Reject a placeholder value so the wrapper fails loudly
 # rather than burning a Healthchecks fail-ping on a 401 from OpenAI.
 if [[ "${OPENAI_API_KEY:-}" == "not needed" || "${OPENAI_API_KEY:-}" == *"not needed"* ]]; then
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] FATAL: OPENAI_API_KEY in $ENV_FILE is the placeholder 'not needed'." >&2

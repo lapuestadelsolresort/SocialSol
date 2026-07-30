@@ -26,11 +26,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-
-require('dotenv').config({
-  path: process.env.SOCIALSOL_ENV_FILE || path.resolve(__dirname, '..', '.env'),
-});
 
 const Anthropic = require('@anthropic-ai/sdk');
 const createDB = require('@databases/sqlite');
@@ -40,6 +35,10 @@ const { execFile } = require('child_process');
 const { evaluateCompliance, loadDisclosurePatterns } = require('./lib/compliance');
 const { loadBannedPhrases, findBannedPhrase } = require('./lib/banned-phrases');
 const { loadSection4: loadVoiceSpecSection4 } = require('./lib/voice-spec-section');
+const {
+  DB_PATH,
+  OPENCLAW_BIN: OPENCLAW,
+} = require('../lib/runtime-paths');
 
 const PROSPECTOR_DIR = __dirname;
 const LIBRARY_DIR = path.join(PROSPECTOR_DIR, 'library');
@@ -47,9 +46,6 @@ const RECENT_SENDS_PATH = path.join(LIBRARY_DIR, 'recent-sends.jsonl');
 const CONFIG_PATH = path.join(PROSPECTOR_DIR, 'config.json');
 const VOICE_SPEC_PATH = path.join(PROSPECTOR_DIR, 'voice-spec.md');
 const PROMPT_TEMPLATE_PATH = path.join(PROSPECTOR_DIR, 'composer-prompt.md');
-const REPO_ROOT = path.resolve(__dirname, '..');
-const DB_PATH = process.env.DB_PATH || path.join(REPO_ROOT, 'crm', 'data', 'crm.db');
-const OPENCLAW = process.env.OPENCLAW_BIN || '/opt/homebrew/bin/openclaw';
 
 const SUBJECT_MIN = 15;
 const SUBJECT_MAX = 60;
@@ -282,7 +278,7 @@ function parseJsonResponse(text) {
 // <reason>` / `!edit <id>` instructions in the footer. The Slack message_ts
 // returned here is what the plugin uses for chat.update on click in Phase D.
 function buildDraftMessage({ draftId, contact, campaign, persona, hookAngle, subject, body }) {
-  const personaPath = path.relative(REPO_ROOT, persona.path);
+  const personaPath = path.relative(path.resolve(PROSPECTOR_DIR, '..'), persona.path);
   const reviewedDate = persona.frontMatter.last_reviewed_by_sarah || 'not yet';
   return [
     `📝 Draft #${draftId} — ready for review`,
@@ -307,7 +303,10 @@ function buildDraftMessage({ draftId, contact, campaign, persona, hookAngle, sub
 }
 
 function postToSlack(channelId, message) {
-  const slackAccount = process.env.OPENCLAW_SLACK_ACCOUNT || 'ig-drafts';
+  const slackAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
+  if (!slackAccount) {
+    return Promise.resolve({ ok: false, error: 'OPENCLAW_SLACK_ACCOUNT is not configured' });
+  }
   return new Promise((resolve) => {
     execFile(OPENCLAW, [
       'message', 'send',
@@ -465,9 +464,47 @@ async function compose({ persona_id, contact_id, campaign_id, options = {} } = {
       console.warn(`[composer] Draft #${draftId} written but Slack post failed: ${slack.error}`);
     }
 
+    // ── Auto-approve if config flag is set (standing order: skip manual review) ──
+    let autoApproved = false;
+    if (config.composer?.auto_approve) {
+      try {
+        const http = require('http');
+        const approveResult = await new Promise((resolve, reject) => {
+          const postData = JSON.stringify({ by: 'auto_approve:composer' });
+          const crmBaseUrl = new URL(process.env.CRM_BASE_URL || 'http://127.0.0.1:3456');
+          const req = http.request({
+            hostname: crmBaseUrl.hostname,
+            port: crmBaseUrl.port || undefined,
+            path: `${crmBaseUrl.pathname.replace(/\/$/, '')}/api/drafts/${draftId}/approve`,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+          }, (res) => {
+            let body = '';
+            res.on('data', (c) => body += c);
+            res.on('end', () => {
+              try { resolve({ status: res.statusCode, body: JSON.parse(body) }); }
+              catch { resolve({ status: res.statusCode, body }); }
+            });
+          });
+          req.on('error', reject);
+          req.write(postData);
+          req.end();
+        });
+        if (approveResult.status === 200) {
+          autoApproved = true;
+          console.log(`[composer] Draft #${draftId} auto-approved → scheduled_at=${approveResult.body?.scheduled_at || '?'}`);
+        } else {
+          console.warn(`[composer] Draft #${draftId} auto-approve failed (HTTP ${approveResult.status}): ${JSON.stringify(approveResult.body)}`);
+        }
+      } catch (err) {
+        console.warn(`[composer] Draft #${draftId} auto-approve error: ${err.message}`);
+      }
+    }
+
     return {
       ok: true,
       draft_id: draftId,
+      auto_approved: autoApproved,
       slack_message_ts: slack.messageId || null,
       slack_channel_id: slack.channelId || null,
       hook_angle: result.parsed.hook_angle,

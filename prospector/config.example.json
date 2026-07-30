@@ -18,7 +18,11 @@
     "model": "claude-sonnet-4-6",
     "max_recompose_attempts": 1,
     "compose_batch_max_n": 5,
-    "stale_draft_days": 7
+    "stale_draft_days": 7,
+    "auto_approve": false
+  },
+  "slack": {
+    "draft_review_channel_id": "replace-with-slack-channel-id"
   },
   "orchestrator": {
     "tick_limit": 5,
@@ -33,5 +37,23 @@
       "bounces_24h": 2,
       "complaints_7d": 1
     }
+  },
+  "research": {
+    "model": "claude-sonnet-4-6",
+    "cost_cap_usd": 5,
+    "row_cap_per_run": 100,
+    "min_text_chars": 800,
+    "fetch_concurrency": 3,
+    "fetch_timeout_ms": 20000,
+    "fetch_cache_ttl_days": 14,
+    "brave_request_interval_ms": 1100,
+    "exclude_domains": [],
+    "exclude_extensions": [
+      ".pdf",
+      ".doc",
+      ".docx"
+    ],
+    "max_results_per_query": 10,
+    "user_agent": "SocialSol Prospector/1.0"
   }
 }

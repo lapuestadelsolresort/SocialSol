@@ -7,6 +7,9 @@ Marketing infrastructure for La Puesta del Sol Resort:
 - SQLite CRM and landing-page experiment service
 - Daily reporting, campaign integrity checks, encrypted backups, and job monitoring
 - Cloudflare Pages landing applications
+- Prospector Paulina lead research, compliant composition, and outbound sending
+- Reengager Regina past-guest/inquiry campaigns and Sarah Coach reply assistance
+- Sender-domain warmup tooling
 
 This repository contains source code and safe configuration examples only. Live databases, credentials, customer records, Slack identifiers, media originals, logs, campaign state, and deployment caches are intentionally excluded.
 
@@ -17,7 +20,10 @@ This repository contains source code and safe configuration examples only. Live 
 - `automation/` — daily reports, campaign checks, budget guardrails, backups, and watchdogs
 - `lp/variants/` — versioned landing-page copy definitions
 - `media/` — source-only creative/media pipeline
-- `prospector/`, `regina/`, `sarah-coach/` — supporting voice and outreach modules used by the CRM
+- `prospector/` — Paulina research, composition, compliance, and send orchestration
+- `regina/` — the Reengager campaign engine and optional automated Resend path
+- `sarah-coach/` — inbound-reply drafting and outcome capture
+- `warmup/` — sender warmup templates and private-recipient driver
 - `campaigns/` — sanitized configuration template; live campaign state is ignored
 
 ## Local setup
@@ -34,9 +40,10 @@ cp .env.example .env
 cp prospector/config.example.json prospector/config.json
 cp regina/config.example.json regina/config.json
 cp sarah-coach/config.example.json sarah-coach/config.json
+cp warmup/recipients.example.json warmup/recipients.json
+cp warmup/state.example.json warmup/state.json
 npm install
-npm test
-npm run build:landing
+npm run check:stack
 ```
 
 Create runtime directories without committing them:
@@ -50,6 +57,10 @@ Production credentials belong in mode-600 JSON files under `SOCIALSOL_SECRETS_DI
 
 The committed voice spec and fixtures are sanitized public baselines. Do not
 commit generated voice-corpus output or exported customer data.
+
+The former `marketing-stack` repository is a migration source only. This
+repository does not depend on its checkout or legacy `workspace-resort` paths.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for ownership and data boundaries.
 
 ## Security defaults
 

@@ -1,0 +1,26 @@
+{
+  "name": "lapuestadelsol-prospector-research",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prospector research pipeline: Brave Search → fetch → Claude extract → CRM dedup → bulk-import",
+  "main": "scripts/run-research.js",
+  "scripts": {
+    "run": "node scripts/run-research.js",
+    "search": "node scripts/01-search.js",
+    "fetch": "node scripts/02-fetch.js",
+    "extract": "node scripts/03-extract.js",
+    "dedup": "node scripts/04-dedup.js",
+    "import": "node scripts/05-import.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "@databases/sqlite": "^4.0.2",
+    "@mozilla/readability": "^0.6.0",
+    "csv-stringify": "^6.5.0",
+    "dotenv": "^16.4.5",
+    "jsdom": "^24.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

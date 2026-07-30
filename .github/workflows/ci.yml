@@ -20,4 +20,5 @@ jobs:
       - run: npm run check:secrets
       - run: npm test
       - run: npm run test:prospector
+      - run: npm run test:regina
       - run: npm run build:landing

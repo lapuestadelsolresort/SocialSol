@@ -1,3 +1,6 @@
+-- Winback eligibility — past_guest_cancelled cohort. Set is finite at 18
+-- contacts; no ORDER BY (operator can re-run !batch winback_cancelled until
+-- the pool is exhausted, exclusion filter will narrow each pass).
 SELECT c.id
 FROM contacts c
 WHERE c.relationship_type = 'past_guest_cancelled'
@@ -13,7 +16,7 @@ WHERE c.relationship_type = 'past_guest_cancelled'
     INNER JOIN outreach_campaigns oc ON oc.id = s.campaign_id
     WHERE s.contact_id = c.id
       AND oc.campaign_kind = 'reactivation_winback'
-      AND (s.status IN ('sent', 'rejected', 'drafted')
-           OR (s.status = 'deferred' AND s.defer_until > date('now')))
+      AND ( s.status IN ('sent', 'rejected', 'drafted')
+            OR (s.status = 'deferred' AND s.defer_until > date('now')) )
   )
 LIMIT :batch_size;

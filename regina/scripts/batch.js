@@ -31,6 +31,7 @@ const slackFmt = require('../lib/slack-format');
 const hc = require('../lib/healthcheck');
 const { loadCampaign } = require('../lib/campaign-loader');
 const { findOrCreateCampaign, deleteCampaignIfEmpty } = require('../lib/outreach-campaign');
+const { autoSend } = require('../lib/auto-send');
 
 const REGINA_ROOT = path.resolve(__dirname, '..');
 const CONFIG_PATH = path.join(REGINA_ROOT, 'config.json');
@@ -155,7 +156,9 @@ async function run() {
     const contexts = [];
     const skipped = [];
     for (const contactId of contactIds) {
-      const ctx = await buildContext(db, contactId, campaign);
+      const ctx = await buildContext(db, contactId, campaign, {
+        autoSendEnabled: cfg.auto_send?.enabled === true,
+      });
       if (!ctx.ok) {
         skipped.push({ contactId, reason: ctx.skip_reason, contact: ctx.contact });
         continue;
@@ -221,10 +224,13 @@ async function run() {
       process.exit(1);
     }
 
-    // 7. For each result: insert outreach_sends on success; emit error post
-    //    on failure.
+    // 7. For each result: insert outreach_sends, then auto-send (email) or
+    //    post draft for manual handling (airbnb/whatsapp).
     const postedKinds = {};
     let postedCount = 0;
+    let sentCount = 0;
+    let manualCount = 0;
+    let failedCount = 0;
     for (let i = 0; i < results.length; i++) {
       const { contactId, ctx } = contexts[i];
       const r = results[i];
@@ -236,6 +242,7 @@ async function run() {
       }
 
       const draft = r.result;
+      const isAutoSend = ctx.send_method === 'resend';
 
       await db.query(sql`
         INSERT INTO outreach_sends
@@ -244,43 +251,81 @@ async function run() {
         VALUES
           (${contactId}, ${campaignId}, ${1}, ${''},
            ${draft.draft_text}, ${(draft.draft_text || '').slice(0, 200)},
-           ${'drafted'}, ${ctx.send_method}, ${draft.draft_text},
+           ${isAutoSend ? 'approved' : 'drafted'}, ${ctx.send_method}, ${draft.draft_text},
            ${draft.voice_drafts_log_id}, ${new Date().toISOString()})
       `);
       const [{ id: sendId }] = await db.query(sql`SELECT last_insert_rowid() AS id`);
 
-      const { topLevel, bodyOverflow } = slackFmt.buildDraftMessage({
-        campaignKind: campaign.campaign_kind,
-        contact: ctx.contact,
-        dossier: ctx.dossier,
-        draftText: draft.draft_text,
-        maxChars: cfg.batch.max_message_chars,
-      });
-      const topResult = await postSlackMessage(channelId, topLevel);
-      if (!topResult.ok || !topResult.ts) {
-        await db.query(sql`
-          UPDATE outreach_sends
-          SET error = ${'slack_post_failed:' + (topResult.error || 'no_ts')}
-          WHERE id = ${sendId}
-        `);
-        console.error(`[regina/batch] Slack post failed for contact ${contactId}; outreach_sends.id=${sendId} marked with error`);
-        continue;
-      }
+      if (isAutoSend && ctx.contact.email) {
+        // ── Auto-send path ──────────────────────────────────────────
+        const sendResult = await autoSend(db, {
+          sendId,
+          contact: ctx.contact,
+          dossier: ctx.dossier,
+          draftText: draft.draft_text,
+          campaignConfig: campaign,
+          campaignId,
+          channelId,
+          dryRun,
+        });
 
-      const draftTs = topResult.ts;
-      let bodyTs = null;
-      if (bodyOverflow) {
-        const bodyResult = await postSlackMessage(channelId, bodyOverflow, { threadTs: draftTs });
-        bodyTs = bodyResult.ok ? bodyResult.ts : null;
+        if (sendResult.ok && !sendResult.dry_run) {
+          // Post sent confirmation to Slack
+          const { topLevel, bodyOverflow } = slackFmt.buildAutoSentMessage({
+            campaignKind: campaign.campaign_kind,
+            contact: ctx.contact,
+            dossier: ctx.dossier,
+            draftText: draft.draft_text,
+            subject: sendResult.subject,
+            resendId: sendResult.resend_id,
+            maxChars: cfg.batch.max_message_chars,
+          });
+          const topResult = await postSlackMessage(channelId, topLevel);
+          if (topResult.ok && topResult.ts) {
+            if (bodyOverflow) {
+              await postSlackMessage(channelId, bodyOverflow, { threadTs: topResult.ts });
+            }
+            await db.query(sql`
+              UPDATE outreach_sends
+              SET slack_thread_ts = ${topResult.ts}, slack_channel_id = ${channelId}, posted_at = ${new Date().toISOString()}
+              WHERE id = ${sendId}
+            `);
+          }
+          sentCount++;
+        } else if (sendResult.ok && sendResult.dry_run) {
+          sentCount++;
+        } else {
+          // Auto-send failed — post failure notice
+          await postSlackMessage(channelId, slackFmt.buildAutoSendFailedMessage({
+            contact: ctx.contact,
+            reason: sendResult.reason,
+            detail: sendResult.detail || sendResult.error || sendResult.reason,
+          }));
+          failedCount++;
+        }
+      } else {
+        // ── Manual path (airbnb thread, whatsapp, no email) ─────────
+        const { topLevel, bodyOverflow } = slackFmt.buildManualDraftMessage({
+          campaignKind: campaign.campaign_kind,
+          contact: ctx.contact,
+          dossier: ctx.dossier,
+          draftText: draft.draft_text,
+          sendMethod: ctx.send_method,
+          maxChars: cfg.batch.max_message_chars,
+        });
+        const topResult = await postSlackMessage(channelId, topLevel);
+        if (topResult.ok && topResult.ts) {
+          if (bodyOverflow) {
+            await postSlackMessage(channelId, bodyOverflow, { threadTs: topResult.ts });
+          }
+          await db.query(sql`
+            UPDATE outreach_sends
+            SET slack_thread_ts = ${topResult.ts}, slack_channel_id = ${channelId}, posted_at = ${new Date().toISOString()}
+            WHERE id = ${sendId}
+          `);
+        }
+        manualCount++;
       }
-      await db.query(sql`
-        UPDATE outreach_sends
-        SET slack_thread_ts = ${draftTs},
-            slack_channel_id = ${channelId},
-            slack_body_ts = ${bodyTs},
-            posted_at = ${new Date().toISOString()}
-        WHERE id = ${sendId}
-      `);
 
       postedCount++;
       postedKinds[campaign.campaign_kind] = (postedKinds[campaign.campaign_kind] || 0) + 1;
@@ -294,12 +339,12 @@ async function run() {
 
     // 8. Summary.
     if (postedCount > 0) {
-      await postSlackMessage(channelId, slackFmt.buildBatchSummary({
-        slug: campaign.slug,
-        count: postedCount,
-        kindBreakdown: postedKinds,
-        runAt: new Date().toISOString(),
-      }));
+      const summaryParts = [`📦 Reactivation batch complete — ${postedCount} contact${postedCount === 1 ? '' : 's'} processed.`];
+      if (sentCount > 0) summaryParts.push(`✅ ${sentCount} auto-sent via Resend`);
+      if (manualCount > 0) summaryParts.push(`📩 ${manualCount} posted for manual send`);
+      if (failedCount > 0) summaryParts.push(`⚠ ${failedCount} auto-send failed`);
+      summaryParts.push(`Run by !batch ${campaign.slug} at ${new Date().toISOString()}.`);
+      await postSlackMessage(channelId, summaryParts.join('\n'));
     } else {
       await postSlackMessage(channelId, `📦 Batch ${campaign.slug} produced 0 drafts (all candidates skipped or failed).`);
       await deleteCampaignIfEmpty(db, campaignId);

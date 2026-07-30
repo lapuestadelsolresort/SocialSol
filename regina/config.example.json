@@ -21,6 +21,10 @@
     },
     "max_message_chars": 3500
   },
+  "auto_send": {
+    "enabled": false,
+    "send_method": "resend"
+  },
   "reconciliation": {
     "lookback_days": 30,
     "auto_mark_threshold": 0.95,
@@ -31,5 +35,12 @@
   "anniversary": {
     "hour_local": 9,
     "minute_local": 0
+  },
+  "healthchecks": {
+    "checks": {
+      "batch_run": "",
+      "anniversary_cron": "",
+      "reconciliation_cron": ""
+    }
   }
 }

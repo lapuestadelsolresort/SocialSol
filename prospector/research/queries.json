@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "updated": "2026-05-06",
+  "personas": {
+    "wedding_planner": {
+      "label": "Wedding planners (US-based, destination focus — Jalisco/Nayarit geography)",
+      "queries": [
+        "destination wedding planner Puerto Vallarta Mexico",
+        "destination wedding planner Punta Mita Nayarit",
+        "wedding planner Riviera Nayarit Mexico",
+        "destination wedding coordinator Guadalajara Mexico",
+        "intimate wedding planner Puerto Vallarta Mexico",
+        "small wedding planner Banderas Bay Mexico",
+        "elopement planner Puerto Vallarta Nayarit",
+        "micro wedding coordinator Mexico Pacific coast",
+        "luxury wedding planner Sayulita Nayarit",
+        "destination wedding planner Jalisco Mexico",
+        "boutique wedding planner Puerto Vallarta destination",
+        "all-inclusive wedding planner Riviera Nayarit Mexico"
+      ]
+    },
+    "houston_wedding_planner": {
+      "label": "Houston-based wedding planners (destination Mexico focus)",
+      "queries": [
+        "Houston wedding planner destination Mexico",
+        "Houston destination wedding planner Puerto Vallarta",
+        "Houston luxury wedding planner Mexico beach",
+        "Houston wedding coordinator destination international",
+        "Houston boutique wedding planner Mexico resort",
+        "Houston wedding planner Riviera Nayarit",
+        "Houston wedding planning company destination",
+        "Houston wedding planner villa Mexico",
+        "Texas destination wedding planner Mexico Pacific",
+        "Houston elopement planner Mexico beach"
+      ]
+    },
+    "corporate_retreat": {
+      "label": "Corporate retreat / executive offsite coordinators",
+      "queries": [
+        "corporate retreat planner California Mexico",
+        "executive offsite coordinator Bay Area",
+        "company retreat planning agency tech",
+        "leadership offsite planner destination"
+      ]
+    },
+    "family_retreat": {
+      "label": "Multi-generational / family retreat travel advisors",
+      "queries": [
+        "luxury family travel advisor Mexico beach",
+        "multi-generational vacation planner Riviera Nayarit",
+        "private villa rental advisor Mexico Pacific coast",
+        "family reunion travel planner Mexico"
+      ]
+    },
+    "luxury_travel_advisor": {
+      "label": "Boutique luxury travel advisors (Virtuoso / Signature / Travel Leaders)",
+      "queries": [
+        "Virtuoso travel advisor Mexico beach resort",
+        "luxury travel advisor Riviera Nayarit Punta Mita",
+        "boutique Mexico travel specialist private villa",
+        "high-end Mexico travel planner adults only"
+      ]
+    }
+  }
+}

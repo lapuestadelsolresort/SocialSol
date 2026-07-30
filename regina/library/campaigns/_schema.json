@@ -1,0 +1,128 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "regina/library/campaigns/_schema.json",
+  "title": "Regina campaign strategy file",
+  "description": "Validates regina/library/campaigns/<slug>.json. Source of truth for the intent enum is crm/lib/voice-intents.js — the loader's runtime validator imports INTENT_VALUES from there, and the descriptive `intent.enum` below is informational only. campaign_kind enum lives in crm/migrations/006_reactivation_and_voice.sh (column comment) plus 'ad_hoc' added in R5.",
+  "type": "object",
+  "required": [
+    "slug",
+    "name",
+    "campaign_kind",
+    "intent",
+    "owning_agent",
+    "recipient_relationship",
+    "language",
+    "description",
+    "landing_page_url",
+    "prompt_context"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "$comment": { "type": "string" },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Lowercase alphanumeric + underscores. Must match the .json filename and be referenced in eligibility_sql_path."
+    },
+    "name": { "type": "string" },
+    "campaign_kind": {
+      "type": "string",
+      "enum": [
+        "cold_outbound",
+        "reactivation_anniversary",
+        "reactivation_winback",
+        "reactivation_referral",
+        "reactivation_conversion",
+        "reactivation_vip",
+        "reactivation_feedback_closure",
+        "inbound_inquiry_response",
+        "ad_hoc"
+      ],
+      "description": "Persisted on outreach_campaigns.campaign_kind. Drives the 'already contacted' filter in non-anniversary eligibility queries."
+    },
+    "intent": {
+      "type": "string",
+      "description": "Voice Service request field. Runtime validator imports the canonical list from crm/lib/voice-intents.js — this enum is descriptive only.",
+      "enum": [
+        "reactivation_anniversary",
+        "reactivation_winback",
+        "reactivation_referral",
+        "reactivation_conversion",
+        "reactivation_vip",
+        "reactivation_feedback_closure",
+        "inbound_inquiry_response",
+        "cold_outbound_planner",
+        "ad_hoc"
+      ]
+    },
+    "owning_agent": {
+      "type": "string",
+      "enum": ["regina", "paulina", "sol", "adhoc"]
+    },
+    "recipient_relationship": {
+      "type": "string",
+      "enum": [
+        "past_guest_stayed",
+        "past_guest_inquired",
+        "past_guest_cancelled",
+        "prospect_planner",
+        "unknown"
+      ],
+      "description": "Overrides the contact's contacts.relationship_type when building the Voice Service payload."
+    },
+    "language": {
+      "type": "string",
+      "enum": ["en"],
+      "description": "Phase R is English-only. Spanish drafts deferred to v2."
+    },
+    "default_batch_size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Default LIMIT for the eligibility query. Operator can override via !batch <slug> n=N."
+    },
+    "eligibility_sql_path": {
+      "type": "string",
+      "description": "Path relative to regina/ root (e.g. 'library/campaigns/anniversary.sql'). The .sql file uses :batch_size and :today named params, bound by the loader's bindParams helper."
+    },
+    "cadence_note": {
+      "type": "string",
+      "description": "Human-readable cadence — for documentation, not consumed by code."
+    },
+    "description": { "type": "string" },
+    "landing_page_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Stored on outreach_campaigns row at create-time. Pure metadata; not threaded into the Voice Service payload."
+    },
+    "prompt_context": {
+      "type": "string",
+      "description": "Voice Service prompt addendum. Prepended to message_context in regina/lib/dossier-context.js."
+    },
+    "draft_length": {
+      "type": "object",
+      "description": "Optional per-campaign draft length override. Defaults come from regina/config.json batch.draft_length.",
+      "properties": {
+        "min": { "type": "integer" },
+        "max": { "type": "integer" }
+      }
+    },
+    "contact_ids": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "description": "Smoke escape hatch ONLY. If present, the loader uses this list directly and skips SQL execution. Real R6 campaigns must use eligibility_sql_path."
+    }
+  },
+  "oneOf": [
+    {
+      "description": "Real campaign: SQL-driven eligibility.",
+      "required": ["eligibility_sql_path", "default_batch_size"],
+      "not": { "required": ["contact_ids"] }
+    },
+    {
+      "description": "Smoke escape hatch: hand-picked contact_ids.",
+      "required": ["contact_ids"],
+      "not": { "required": ["eligibility_sql_path"] }
+    }
+  ]
+}

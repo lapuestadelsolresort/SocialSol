@@ -193,6 +193,7 @@ async function evaluateCompliance(db, config, input) {
     body,
     headers,
     whyContactingPresent,
+    requiresWhyContactingDisclosure = true,
     // whyContactingSource — unused at gate layer; surfaced in Slack draft-review post by composer
   } = input;
 
@@ -291,7 +292,9 @@ async function evaluateCompliance(db, config, input) {
   }
 
   // ── Item 6: why-contacting (pattern check + manual flag) ────────────
-  if (whyContactingPresent === false) {
+  if (!requiresWhyContactingDisclosure) {
+    items[6] = true;
+  } else if (whyContactingPresent === false) {
     items[6] = false;
     failures.push('item_6_no_disclosure_pattern');
   } else {

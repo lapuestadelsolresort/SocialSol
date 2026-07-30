@@ -24,8 +24,20 @@ campaigns/active-campaigns.json
 **/*.tmp
 prospector/state.json
 prospector/config.json
+prospector/orchestrator.lock
+prospector/research/cache/
+prospector/research/runs/
+prospector/research/query-history.json
+prospector/research/extract-compare.csv
+prospector/research/extract-compare-summary.md
+prospector/scripts/iteration-state.json
 regina/config.json
 sarah-coach/config.json
+warmup/recipients.json
+warmup/state.json
+warmup/sends.jsonl
+warmup/events.jsonl
+deploy/launchagents/generated/
 
 # Dependencies and generated output
 node_modules/
