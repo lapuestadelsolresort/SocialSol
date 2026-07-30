@@ -40,6 +40,8 @@ campaigns/active-campaigns.json
 **/*.tmp
 /chroma-data/
 /chroma-venv/
+/chroma-data
+/chroma-venv
 prospector/state.json
 prospector/config.json
 prospector/orchestrator.lock
@@ -83,6 +85,18 @@ media/brand/
 media/dining-lp/
 media/smoke/
 media/web-staging/
+/media/brand
+/media/dining-lp
+/media/logs
+/media/originals
+/media/photos-cache
+/media/proxies
+/media/renditions
+/media/smoke
+/media/thumbs
+/media/transcripts
+/media/waveforms
+/media/web-staging
 landing/apps/*/public/images/
 landing/apps/*/public/video/
 
