@@ -1,0 +1,14 @@
+{
+  "slug": "anniversary",
+  "name": "regina_anniversary",
+  "campaign_kind": "reactivation_anniversary",
+  "intent": "reactivation_anniversary",
+  "owning_agent": "regina",
+  "recipient_relationship": "past_guest_stayed",
+  "language": "en",
+  "default_batch_size": 5,
+  "eligibility_sql_path": "library/campaigns/anniversary.sql",
+  "description": "Anniversary-of-stay reactivation using one stable campaign row.",
+  "landing_page_url": "https://lapuestadelsolresort.com/",
+  "prompt_context": "Acknowledge the stay anniversary warmly, reference only verified dossier context, and invite the guest back without a hard ask. Keep under 100 words."
+}

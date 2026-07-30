@@ -1,0 +1,351 @@
+<!-- La Puesta del Sol Resort — CRM + Meta Pixel Tracking v6 -->
+<!-- Webhook URL: https://webhook.lapuestadelsolresort.com -->
+<!-- Last updated: 2026-07-30 -->
+<!-- v6 fixes:
+  1. fbq('track','Lead') now fires ONLY on actual form submission success (not button clicks)
+  2. Form capture uses MutationObserver to detect Squarespace's JS-rendered form submission (useFormsJs)
+  3. Button clicks downgraded to fbq('trackCustom','ContactClick') — intent signal, not a Lead
+-->
+<script defer src="https://webhook.lapuestadelsolresort.com/lp/sq-tracker.js?v=7"></script>
+
+<script>
+(function() {
+  var CRM_WEBHOOK = 'https://webhook.lapuestadelsolresort.com/webhook/inquiry';
+
+  // ── UTM capture ──────────────────────────────────────────────────────────────
+  function getUTMs() {
+    var p = new URLSearchParams(window.location.search);
+    var stored = {};
+    try { stored = JSON.parse(sessionStorage.getItem('lpds_utm') || '{}'); } catch(e){}
+    var utms = {
+      utm_source:   p.get('utm_source')   || stored.utm_source   || null,
+      utm_medium:   p.get('utm_medium')   || stored.utm_medium   || null,
+      utm_campaign: p.get('utm_campaign') || stored.utm_campaign || null,
+    };
+    if (utms.utm_source) {
+      try { sessionStorage.setItem('lpds_utm', JSON.stringify(utms)); } catch(e){}
+    }
+    return utms;
+  }
+
+  function guessSource(utms) {
+    var src = utms.utm_source || '';
+    var med = utms.utm_medium || '';
+    var cmp = utms.utm_campaign || '';
+    if (src === 'instagram' && med === 'cpc') return 'instagram_ad';
+    if (src === 'facebook'  && med === 'cpc') return 'facebook_ad';
+    if (src === 'meta'      && med === 'paid') return 'meta_ad';
+    if (src === 'instagram' && med === 'organic') return 'organic_instagram';
+    if (src === 'google')    return 'organic';
+    if (cmp.indexOf('semana') !== -1 || cmp.indexOf('sf_') !== -1) {
+      return src === 'instagram' ? 'instagram_ad' : 'facebook_ad';
+    }
+    return 'direct';
+  }
+
+  // ── Contact/Book button click tracking (DOWNGRADED from Lead to ContactClick) ─
+  document.addEventListener('click', function(e) {
+    var el = e.target;
+    var text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+    var keywords = ['contact', 'book', 'reserve', 'inquire', 'inquiry', 'get in touch', 'availability'];
+    var matched = keywords.some(function(k) { return text.indexOf(k) !== -1; });
+    if (!matched && el.closest) {
+      var parent = el.closest('a,button');
+      if (parent) {
+        var pt = (parent.innerText || parent.textContent || '').trim().toLowerCase();
+        matched = keywords.some(function(k) { return pt.indexOf(k) !== -1; });
+      }
+    }
+    if (matched) {
+      var utms = getUTMs();
+      // v6: downgraded to custom event — NOT a Lead
+      if (typeof fbq === 'function') { fbq('trackCustom', 'ContactClick'); }
+      var img = new Image();
+      img.src = CRM_WEBHOOK.replace('/webhook/inquiry', '/webhook/pixel')
+        + '?event=contact_click'
+        + '&source=' + encodeURIComponent(guessSource(utms))
+        + '&campaign=' + encodeURIComponent(utms.utm_campaign || '');
+    }
+  });
+
+  // ── Contact page form_view tracking ──────────────────────────────────────────
+  if (window.location.pathname.indexOf('/contact') !== -1) {
+    var utms = getUTMs();
+    var img = new Image();
+    img.src = CRM_WEBHOOK.replace('/webhook/inquiry', '/webhook/pixel')
+      + '?event=form_view'
+      + '&source=' + encodeURIComponent(guessSource(utms))
+      + '&campaign=' + encodeURIComponent(utms.utm_campaign || '');
+    if (typeof fbq === 'function') { fbq('track', 'ViewContent', { content_name: 'contact_page' }); }
+  }
+
+  // ── Form submission capture (v6: works with Squarespace useFormsJs) ──────────
+  // Squarespace JS forms don't fire native submit events.
+  // Strategy: snapshot field values on interaction, then detect submission via
+  // MutationObserver watching for the success message or form-submission-success class.
+
+  var _capturedFields = {};
+  var _formSubmitted = false;
+
+  function captureFormFields() {
+    var data = {};
+    // Squarespace form fields have data-field-type and specific class patterns
+    var inputs = document.querySelectorAll(
+      '.form-wrapper input, .form-wrapper textarea, .form-wrapper select, ' +
+      '.sqs-block-form input, .sqs-block-form textarea, .sqs-block-form select'
+    );
+    inputs.forEach(function(f) {
+      var val = (f.value || '').trim();
+      if (!val) return;
+      var key = ((f.name || '') + ' ' + (f.id || '') + ' ' + (f.getAttribute('aria-label') || '') + ' ' + (f.placeholder || '')).toLowerCase();
+      var type = f.type || f.tagName.toLowerCase();
+
+      if (type === 'email' || key.indexOf('email') !== -1) { data.email = val; }
+      else if (key.indexOf('fname') !== -1 || key.indexOf('first') !== -1) {
+        data.fname = val;
+      }
+      else if (key.indexOf('lname') !== -1 || key.indexOf('last') !== -1) {
+        data.lname = val;
+      }
+      else if (key.indexOf('name') !== -1 && !data.name) { data.name = val; }
+      else if (type === 'tel' || key.indexOf('phone') !== -1) { data.phone = val; }
+      else if (f.tagName === 'TEXTAREA' || key.indexOf('message') !== -1 || key.indexOf('comment') !== -1) {
+        data.message = val;
+      }
+      else if (key.indexOf('checkin') !== -1 || key.indexOf('check-in') !== -1 || key.indexOf('arrival') !== -1) { data.checkin_date = val; }
+      else if (key.indexOf('checkout') !== -1 || key.indexOf('check-out') !== -1 || key.indexOf('departure') !== -1) { data.checkout_date = val; }
+    });
+
+    if (!data.name && (data.fname || data.lname)) {
+      data.name = [data.fname, data.lname].filter(Boolean).join(' ');
+    }
+    delete data.fname;
+    delete data.lname;
+
+    return data;
+  }
+
+  // Continuously snapshot fields on change so we have them when success fires
+  function watchFields() {
+    document.addEventListener('input', function() {
+      _capturedFields = captureFormFields();
+    }, true);
+    document.addEventListener('change', function() {
+      _capturedFields = captureFormFields();
+    }, true);
+  }
+
+  function sendFormSubmission(fields) {
+    if (_formSubmitted) return; // dedupe
+    _formSubmitted = true;
+
+    var utms = getUTMs();
+    var source = guessSource(utms);
+    var payload = {
+      name: fields.name || null,
+      email: fields.email || null,
+      phone: fields.phone || null,
+      message: fields.message || null,
+      checkin_date: fields.checkin_date || null,
+      checkout_date: fields.checkout_date || null,
+      source: source,
+      utm_source: utms.utm_source,
+      utm_medium: utms.utm_medium,
+      utm_campaign: utms.utm_campaign,
+    };
+
+    // v6: THIS is where Lead fires — on actual form submission, not button clicks
+    if (typeof fbq === 'function') { fbq('track', 'Lead', { content_name: 'form_submission' }); }
+
+    // Send to CRM webhook
+    var json = JSON.stringify(payload);
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(CRM_WEBHOOK, new Blob([json], { type: 'application/json' }));
+    } else {
+      fetch(CRM_WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json, keepalive: true }).catch(function(){});
+    }
+
+    // Also fire CRM pixel for analytics
+    var img = new Image();
+    img.src = CRM_WEBHOOK.replace('/webhook/inquiry', '/webhook/pixel')
+      + '?event=form_submission'
+      + '&source=' + encodeURIComponent(source)
+      + '&campaign=' + encodeURIComponent(utms.utm_campaign || '');
+  }
+
+  function watchForSubmission() {
+    // Method 1: Watch for Squarespace success message appearing
+    // Squarespace shows .sqs-form-block-submission-html or adds a success state
+    var observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(m) {
+        // Check for success class additions
+        if (m.type === 'attributes' && m.attributeName === 'class') {
+          var el = m.target;
+          var cls = el.className || '';
+          if (cls.indexOf('form-submission-success') !== -1 ||
+              cls.indexOf('submitted') !== -1 ||
+              cls.indexOf('form-sent') !== -1) {
+            sendFormSubmission(_capturedFields);
+          }
+        }
+        // Check for success HTML being shown (display change or content insertion)
+        if (m.type === 'childList') {
+          m.addedNodes.forEach(function(node) {
+            if (node.nodeType !== 1) return;
+            var text = (node.textContent || '').toLowerCase();
+            if (text.indexOf('thank you') !== -1 || text.indexOf('we\'ll be in touch') !== -1 || text.indexOf('message sent') !== -1) {
+              sendFormSubmission(_capturedFields);
+            }
+          });
+        }
+        // Check for style changes (display: block on success div)
+        if (m.type === 'attributes' && m.attributeName === 'style') {
+          var el = m.target;
+          if (el.classList && el.classList.contains('sqs-form-block-submission-html')) {
+            var style = window.getComputedStyle(el);
+            if (style.display !== 'none' && el.textContent.trim()) {
+              sendFormSubmission(_capturedFields);
+            }
+          }
+        }
+      });
+    });
+
+    // Observe the entire form area
+    var formBlocks = document.querySelectorAll('.sqs-block-form, .form-wrapper, .sqs-site-style-form, body');
+    formBlocks.forEach(function(block) {
+      observer.observe(block, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'data-submission-state']
+      });
+    });
+
+    // Method 2: Also intercept native form submit as a fallback
+    var forms = document.querySelectorAll('form');
+    forms.forEach(function(form) {
+      if (form._lpds_hooked) return;
+      form._lpds_hooked = true;
+      form.addEventListener('submit', function() {
+        _capturedFields = captureFormFields();
+        // Delay slightly — if MutationObserver catches the success, it dedupes via _formSubmitted
+        setTimeout(function() { sendFormSubmission(_capturedFields); }, 1500);
+      });
+    });
+
+    // Method 3: Intercept fetch/XHR to detect Squarespace's AJAX form submission
+    var origFetch = window.fetch;
+    if (origFetch) {
+      window.fetch = function() {
+        var url = arguments[0];
+        if (typeof url === 'string' && url.indexOf('/api/form-submission') !== -1) {
+          // Squarespace form submit detected — capture fields now
+          _capturedFields = captureFormFields();
+          return origFetch.apply(this, arguments).then(function(response) {
+            if (response.ok) {
+              sendFormSubmission(_capturedFields);
+            }
+            return response;
+          });
+        }
+        return origFetch.apply(this, arguments);
+      };
+    }
+  }
+
+  // Initialize on contact page
+  if (window.location.pathname.indexOf('/contact') !== -1) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() { watchFields(); watchForSubmission(); });
+    } else {
+      watchFields();
+      watchForSubmission();
+    }
+    // Retry after Squarespace's JS renders the form
+    setTimeout(function() { watchFields(); watchForSubmission(); }, 3000);
+  }
+
+  getUTMs();
+})();
+</script>
+
+<!-- Airbnb redirect tracking -->
+<script>
+(function() {
+  if (window.location.pathname === "/book-airbnb" || window.location.pathname === "/book-airbnb/") {
+    var AIRBNB_URL = "https://www.airbnb.com/rooms/869105818174917656?utm_source=instagram&utm_medium=link_in_bio&utm_campaign=bio_airbnb";
+    var CRM_PIXEL = "https://webhook.lapuestadelsolresort.com/webhook/pixel";
+    if (typeof fbq === "function") { fbq("track", "InitiateCheckout", {content_name: "Airbnb", content_category: "booking"}); }
+    try {
+      var img = new Image();
+      var p = new URLSearchParams(window.location.search);
+      img.src = CRM_PIXEL + "?event=airbnb_click&source=" + encodeURIComponent(p.get("utm_source") || "instagram") + "&campaign=" + encodeURIComponent(p.get("utm_campaign") || "bio_link");
+    } catch(e) {}
+    setTimeout(function() { window.location.replace(AIRBNB_URL); }, 200);
+  }
+})();
+</script>
+
+<!-- WhatsApp Floating Button -->
+<style>
+#lpds-wa-btn{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:10px;background:#25D366;color:#fff;border-radius:50px;padding:12px 20px 12px 14px;box-shadow:0 4px 16px rgba(0,0,0,.25);text-decoration:none;font-family:sans-serif;font-size:15px;font-weight:600;cursor:pointer;transition:transform .2s,box-shadow .2s}
+#lpds-wa-btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3);color:#fff;text-decoration:none}
+@media(max-width:600px){#lpds-wa-btn{padding:12px;border-radius:50%}#lpds-wa-btn span{display:none}}
+</style>
+<script>
+(function(){
+  var WA_URL = 'https://wa.me/15553526612?text=' + encodeURIComponent('Hi! I\'d love to learn more about booking La Puesta del Sol Resort.');
+  var CRM_PIXEL = 'https://webhook.lapuestadelsolresort.com/webhook/pixel';
+  var svg = '<svg width="26" height="26" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="#128C7E"/><path d="M23.5 8.5C21.6 6.6 19.1 5.5 16.4 5.5c-5.5 0-10 4.5-10 10 0 1.8.5 3.5 1.3 5l-1.4 5 5.2-1.4c1.5.8 3.1 1.2 4.8 1.2 5.5 0 10-4.5 10-10 0-2.7-1-5.2-2.8-7zm-7.1 15.4c-1.5 0-3-.4-4.3-1.2l-.3-.2-3.1.8.8-3-.2-.3c-.8-1.3-1.3-2.9-1.3-4.5 0-4.6 3.8-8.4 8.4-8.4 2.2 0 4.3.9 5.9 2.5s2.5 3.7 2.5 5.9c0 4.7-3.7 8.4-8.4 8.4zm4.6-6.3c-.3-.1-1.6-.8-1.8-.9-.3-.1-.5-.1-.7.1s-.8 1-.9 1.2c-.2.2-.3.2-.6.1s-1.1-.4-2.1-1.3c-.8-.7-1.3-1.5-1.4-1.8-.2-.3 0-.4.1-.6l.4-.5c.1-.2.2-.3.3-.5s0-.4-.1-.5c-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4s-1 1-1 2.4 1 2.8 1.2 3c.1.2 2 3 4.9 4.2.7.3 1.2.5 1.6.6.7.2 1.3.2 1.8.1.5-.1 1.6-.7 1.8-1.3.2-.6.2-1.2.2-1.3 0-.1-.3-.2-.6-.3z" fill="white"/></svg>';
+
+  function make() {
+    if (document.getElementById('lpds-wa-btn')) return;
+    var a = document.createElement('a');
+    a.id = 'lpds-wa-btn';
+    a.href = WA_URL;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.setAttribute('aria-label', 'Chat on WhatsApp');
+    a.innerHTML = svg + '<span>Chat on WhatsApp</span>';
+    if (window.LPDS_APPEND_WA_REF) window.LPDS_APPEND_WA_REF(a);
+
+    a.addEventListener('click', function() {
+      try {
+        if (window.LPDS_APPEND_WA_REF) window.LPDS_APPEND_WA_REF(a);
+        var stored = {};
+        try { stored = JSON.parse(sessionStorage.getItem('lpds_utm') || '{}'); } catch(e) {}
+        var src = stored.utm_source || '';
+        var med = stored.utm_medium || '';
+        var cmp = stored.utm_campaign || 'whatsapp_button';
+        var crmSrc = 'direct';
+        if (src === 'instagram' && med === 'cpc') crmSrc = 'instagram_ad';
+        else if (src === 'facebook' && med === 'cpc') crmSrc = 'facebook_ad';
+        else if (src === 'meta' && med === 'paid') crmSrc = 'meta_ad';
+        else if (src === 'instagram') crmSrc = 'organic_instagram';
+        else if (src === 'google') crmSrc = 'organic';
+
+        if (typeof fbq === 'function') {
+          fbq('trackCustom', 'WhatsAppClick', {
+            content_name: 'floating_button',
+            content_category: 'whatsapp'
+          });
+        }
+        var i = new Image();
+        i.src = CRM_PIXEL
+          + '?event=whatsapp_click'
+          + '&source=' + encodeURIComponent(crmSrc)
+          + '&campaign=' + encodeURIComponent(cmp);
+      } catch(e) {}
+    });
+
+    document.body.appendChild(a);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', make);
+  } else {
+    make();
+  }
+})();
+</script>

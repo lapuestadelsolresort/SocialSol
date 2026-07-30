@@ -1,0 +1,14 @@
+{
+  "slug": "winback_cancelled",
+  "name": "regina_winback_cancelled",
+  "campaign_kind": "reactivation_winback",
+  "intent": "reactivation_winback",
+  "owning_agent": "regina",
+  "recipient_relationship": "past_guest_cancelled",
+  "language": "en",
+  "default_batch_size": 5,
+  "eligibility_sql_path": "library/campaigns/winback_cancelled.sql",
+  "description": "Invite contacts with an incomplete booking to revisit.",
+  "landing_page_url": "https://lapuestadelsolresort.com/",
+  "prompt_context": "Acknowledge the prior incomplete booking gently and offer one current, verified reason to revisit. Keep under 120 words."
+}

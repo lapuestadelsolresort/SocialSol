@@ -1,0 +1,14 @@
+{
+  "slug": "referral_mining",
+  "name": "regina_referral_mining",
+  "campaign_kind": "reactivation_referral",
+  "intent": "reactivation_referral",
+  "owning_agent": "regina",
+  "recipient_relationship": "past_guest_stayed",
+  "language": "en",
+  "default_batch_size": 5,
+  "eligibility_sql_path": "library/campaigns/referral_mining.sql",
+  "description": "Ask eligible five-star reviewers for a relevant referral.",
+  "landing_page_url": "https://lapuestadelsolresort.com/",
+  "prompt_context": "Make a light referral ask grounded only in verified stay context. Keep under 120 words."
+}

@@ -1,0 +1,5 @@
+{
+  "user": "REPLACE_ME",
+  "pass": "REPLACE_ME_WITH_A_LONG_RANDOM_STRING",
+  "_comment": "Copy to workspace/secrets/resort-api-auth.json (shared) to allow REMOTE Basic-auth access to the resort CRM internal API (/api/leads, /api/email-threads, /api/proposals, /api/attribution, /api/stats, /api/visibility). Without it those routes are loopback-only (fail closed). Landing/webhook/track/lp endpoints are always public."
+}

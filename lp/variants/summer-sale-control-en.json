@@ -1,0 +1,31 @@
+{
+  "slug": "summer-sale-control-en",
+  "page_slug": "summer-sale",
+  "language": "en",
+  "source": null,
+  "audience": null,
+  "status": "live",
+  "traffic_weight": 100,
+  "type": "landing_page",
+  "is_control": true,
+  "bucket": "leads",
+  "funnel_stage": "cta",
+  "compliance_status": "passed",
+  "hero": {
+    "headline": "50% Off This Summer",
+    "sub": "Book the entire private beachfront resort at half price. June and July only."
+  },
+  "cta": {
+    "text": "Claim Your 50% Discount on WhatsApp",
+    "whatsapp_prefill": "Hi! I saw your summer sale. I would love to learn more about booking the resort."
+  },
+  "pricing": {
+    "normal": 35000,
+    "sale": 17500,
+    "discount_pct": 50
+  },
+  "urgency": {
+    "message": "Limited Time Offer. Message us to lock in your dates."
+  },
+  "airbnb_url": "https://www.airbnb.com/rooms/869105818174917656"
+}

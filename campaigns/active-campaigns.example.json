@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "budget_cap_daily_usd": 80,
+  "campaigns": [
+    {
+      "campaign_id": "replace-with-meta-campaign-id",
+      "name": "Example campaign",
+      "status": "PAUSED",
+      "daily_budget_usd": 10,
+      "budget_level": "campaign",
+      "page_slug": "retreats",
+      "utm_campaign": "example-campaign",
+      "experiment_slug": "exp-example-campaign"
+    }
+  ]
+}

@@ -1,0 +1,380 @@
+---
+/**
+ * La Puesta del Sol — Wedding Landing Page
+ * weddings.lapuestadelsolresort.com
+ *
+ * Astro 6 + Tailwind v4 port
+ *
+ * Photo manifest (place optimized WebP files in public/images/):
+ *   hero.webp        — Drone palapa shot
+ *   couple.webp      — B&W editorial, couple on platform
+ *   villa.webp       — Villa interior or exterior
+ *   pathway.webp     — Property walkway/bridges
+ *   food.webp        — Chef-prepared meal
+ *   ceremony.webp    — Ceremony setup or beach area
+ *   detail.webp      — Bridal details shot
+ *   pool.webp        — Pool or common area
+ *
+ * WhatsApp: resort business sender
+ * CRM webhook: https://webhook.lapuestadelsolresort.com/webhook/pixel
+ */
+import '../styles/global.css'
+
+const WHATSAPP_URL = 'https://wa.me/15553526612?text=' + encodeURIComponent(
+  "Hi Sarah, I'm interested in hosting a wedding at La Puesta del Sol. Could we set up a quick call?"
+);
+
+const CRM_WEBHOOK = 'https://webhook.lapuestadelsolresort.com/webhook/pixel';
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weddings at La Puesta del Sol — Private Beachfront Resort, Riviera Nayarit</title>
+  <meta name="description" content="Host your wedding at a private beachfront resort in Riviera Nayarit, Mexico. 22 bedrooms across 6 villas + bridal suite, full F&B service, on-site coordinator. Exclusive buyouts from $35K." />
+  <meta property="og:title" content="Weddings at La Puesta del Sol" />
+  <meta property="og:description" content="Private beachfront resort in Riviera Nayarit. 22 bedrooms, 6 villas + bridal suite, full buyout. 45 min from Puerto Vallarta." />
+  <meta property="og:image" content="/images/hero.webp" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://weddings.lapuestadelsolresort.com" />
+  <link rel="canonical" href="https://weddings.lapuestadelsolresort.com" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Meta Pixel — replace YOUR_PIXEL_ID with your actual Meta Pixel ID -->
+  <script is:inline>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '837757775519925');
+    fbq('track', 'PageView');
+  </script>
+  <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=837757775519925&ev=PageView&noscript=1" /></noscript>
+
+  <!-- Landing-page variant optimizer (WhatsApp-click funnel) — scripts served by the CRM -->
+  <script is:inline>
+    window.LPDS_BASE = 'https://webhook.lapuestadelsolresort.com';
+    window.LPDS_PAGE = 'weddings';
+  </script>
+  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/tracker.js?v=7"></script>
+  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/hydrate.js?v=7"></script>
+
+  <style is:global>
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font-body);
+      color: #2C2C2A;
+      background: #FAF8F5;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+  </style>
+</head>
+
+<body>
+  <nav class="absolute top-0 left-0 right-0 z-50 flex items-center justify-between px-6 md:px-12 py-4">
+    <a href="https://lapuestadelsolresort.com" class="homepage-link text-white/70 hover:text-white text-sm font-medium transition-colors" data-event="nav_homepage_click">← La Puesta del Sol</a>
+    <div class="flex gap-4 text-[11px] tracking-[2px] uppercase text-white/40">
+      <a href="https://dining.lapuestadelsolresort.com" class="hover:text-white/70 transition-colors">Dining</a>
+      <a href="https://retreats.lapuestadelsolresort.com" class="hover:text-white/70 transition-colors">Retreats</a>
+    </div>
+  </nav>
+
+  <!-- ============================================================
+       HERO
+       ============================================================ -->
+  <header class="relative w-full h-[85vh] min-h-[600px] max-h-[900px] overflow-hidden">
+    <img
+      src="/images/hero.webp"
+      alt="Aerial view of La Puesta del Sol's oceanfront palapa over the Pacific"
+      class="absolute inset-0 w-full h-full object-cover object-[center_80%]"
+      loading="eager"
+      fetchpriority="high"
+    />
+    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent"></div>
+
+    <div class="absolute bottom-0 left-0 right-0 px-6 pb-10 md:px-12 md:pb-14 max-w-3xl">
+      <p class="text-[11px] tracking-[3px] uppercase text-white/50 mb-2">Weddings at</p>
+      <h1 class="hero-headline font-display text-4xl md:text-5xl text-white font-normal leading-[1.1] mb-3">
+        La Puesta del Sol
+      </h1>
+      <p class="hero-sub text-base text-white/70 mb-8 max-w-lg leading-relaxed">
+        Private beachfront resort in Riviera Nayarit, Mexico. 45 minutes from Puerto Vallarta airport.
+      </p>
+
+      <!-- Key facts -->
+      <div class="flex flex-wrap gap-6 mb-8">
+        <div class="border-l border-white/25 pl-4">
+          <div class="text-lg font-medium text-white">22 bedrooms</div>
+          <div class="text-[11px] text-white/50 mt-0.5">6 villas + 4-BR bridal suite included</div>
+        </div>
+        <div class="border-l border-white/25 pl-4">
+          <div class="text-lg font-medium text-white">Up to 85 guests</div>
+          <div class="text-[11px] text-white/50 mt-0.5">Exclusive full-property buyout</div>
+        </div>
+        <div class="border-l border-white/25 pl-4">
+          <div class="text-lg font-medium text-white">From $35K</div>
+          <div class="text-[11px] text-white/50 mt-0.5">Typical 5-night wedding buyout</div>
+        </div>
+      </div>
+
+      <!-- Primary CTA -->
+      <a
+        href={WHATSAPP_URL}
+        target="_blank"
+        rel="noopener"
+        class="wa-cta inline-flex items-center gap-2.5 bg-[#25D366] hover:bg-[#1fb855] text-white text-sm font-medium px-7 py-3.5 rounded-lg transition-colors"
+        data-event="hero_whatsapp_click"
+      >
+        <svg class="w-5 h-5 fill-white shrink-0" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.243-1.21l-.29-.18-3.054.8.82-2.99-.193-.3A7.96 7.96 0 014 12a8 8 0 1116 0 8 8 0 01-8 8z"/></svg>
+        Message Us on WhatsApp
+      </a>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-6 md:px-12">
+
+    <!-- ============================================================
+         WHAT YOU GET
+         ============================================================ -->
+    <section class="py-16 md:py-20">
+      <p class="text-[11px] tracking-[3px] uppercase text-sand-500 mb-3">What you get</p>
+      <h2 class="font-display text-3xl md:text-[34px] text-sand-800 font-normal leading-tight mb-5">
+        The entire property is yours
+      </h2>
+      <p class="text-[15px] text-sand-600 leading-relaxed mb-4 max-w-xl">
+        Every wedding here is a full-property buyout. No other guests, no shared spaces. Your group
+        has the whole resort — oceanfront ceremony platform, reception terrace, pool, six private villas,
+        and the full staff — for the duration of your stay.
+      </p>
+      <p class="text-[15px] text-sand-600 leading-relaxed mb-10 max-w-xl">
+        The separate 4-bedroom bridal suite gives the wedding party their own private space to get ready,
+        away from the main property.
+      </p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">6 private villas + bridal suite, 22 bedrooms</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Each villa has its own kitchen and bathroom.</p>
+        </div>
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">Separate bridal suite</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">4-bedroom private house for the wedding party. Own kitchen, living area, and garden.</p>
+        </div>
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">Full F&B service</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">On-site chef, bartender, and butler. All meals and drinks for your group, every day of your stay.</p>
+        </div>
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">Beachfront ceremony</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Oceanfront platform built over the rocks — the spot in every photo. Ceremony, cocktail hour, or both.</p>
+        </div>
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">On-site coordinator</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Dedicated property manager handles logistics, local vendor coordination, and day-of execution.</p>
+        </div>
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">Adventure & excursions</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">On-site adventure guide for group activities — surfing, snorkeling, jungle hikes, boat trips.</p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="border-sand-200" />
+
+    <!-- ============================================================
+         THE PROPERTY
+         ============================================================ -->
+    <section class="py-16 md:py-20">
+      <p class="text-[11px] tracking-[3px] uppercase text-sand-500 mb-3">The property</p>
+      <h2 class="font-display text-3xl md:text-[34px] text-sand-800 font-normal leading-tight mb-5">
+        54,000 sq ft of beachfront
+      </h2>
+      <p class="text-[15px] text-sand-600 leading-relaxed mb-8 max-w-xl">
+        Six named villas — Pearl, Turtle, Dolphin, Seahorse, Whale, and Crab — connected by winding
+        stone pathways over garden streams. Thatched-roof architecture, ocean on three sides, mountains behind.
+        Located in La Peñita de Jaltemba, a quiet fishing village away from the tourist corridor.
+      </p>
+
+      <!-- Photo grid: 2-column with one tall left image -->
+      <div class="grid grid-cols-2 gap-2 mb-2">
+        <div class="row-span-2">
+          <img src="/images/couple.webp" alt="Couple on the oceanfront platform at La Puesta del Sol" class="w-full h-full object-cover rounded-lg" loading="lazy" />
+        </div>
+        <div>
+          <img src="/images/villa.webp" alt="Villa interior with ocean view" class="w-full h-full object-cover rounded-lg aspect-[4/3]" loading="lazy" />
+        </div>
+        <div>
+          <img src="/images/pathway.webp" alt="Winding stone pathways connecting the villas" class="w-full h-full object-cover rounded-lg aspect-[4/3]" loading="lazy" />
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-2">
+        <img src="/images/food.webp" alt="Chef-prepared meal at the resort" class="w-full aspect-square object-cover rounded-lg" loading="lazy" />
+        <img src="/images/ceremony.webp" alt="Beachfront ceremony setup" class="w-full aspect-square object-cover rounded-lg" loading="lazy" />
+        <img src="/images/pool.webp" alt="Pool and common area" class="w-full aspect-square object-cover rounded-lg" loading="lazy" />
+      </div>
+    </section>
+
+    <hr class="border-sand-200" />
+
+    <!-- ============================================================
+         PRICING
+         ============================================================ -->
+    <section class="py-16 md:py-20">
+      <p class="text-[11px] tracking-[3px] uppercase text-sand-500 mb-3">Pricing</p>
+      <h2 class="font-display text-3xl md:text-[34px] text-sand-800 font-normal leading-tight mb-5">
+        Straightforward buyout pricing
+      </h2>
+      <p class="text-[15px] text-sand-600 leading-relaxed mb-4 max-w-xl">
+        You rent the entire resort for your stay. Pricing depends on group size, dates,
+        and what you need. Most wedding buyouts run 4–7 nights.
+      </p>
+      <p class="text-[15px] text-sand-600 leading-relaxed mb-4 max-w-xl">
+        A typical 5-night wedding buyout with full F&B service for 20–30 guests starts around
+        <strong class="text-sand-800">$35,000</strong>. Larger groups and peak-season dates run higher.
+        We'll give you an exact number after a 15-minute discovery call.
+      </p>
+      <p class="text-[13px] text-sand-400 max-w-xl">
+        Price includes lodging, all meals, drinks, and staff for the duration. Flights, external
+        vendors (photographer, florist, officiant), and special requests are separate.
+      </p>
+    </section>
+
+    <hr class="border-sand-200" />
+
+    <!-- ============================================================
+         HOW TO START
+         ============================================================ -->
+    <section class="py-16 md:py-20">
+      <p class="text-[11px] tracking-[3px] uppercase text-sand-500 mb-3">How to start</p>
+      <h2 class="font-display text-3xl md:text-[34px] text-sand-800 font-normal leading-tight mb-8">
+        Three steps
+      </h2>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="text-center border border-sand-200 rounded-lg py-7 px-5">
+          <div class="font-display text-3xl text-sand-300 mb-2">1</div>
+          <h3 class="text-[14px] font-medium text-sand-800 mb-1.5">Message us</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">WhatsApp or email. Tell us your dates, guest count, and what you're imagining.</p>
+        </div>
+        <div class="text-center border border-sand-200 rounded-lg py-7 px-5">
+          <div class="font-display text-3xl text-sand-300 mb-2">2</div>
+          <h3 class="text-[14px] font-medium text-sand-800 mb-1.5">Discovery call</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">15 minutes. We walk through the property, answer questions, and talk pricing.</p>
+        </div>
+        <div class="text-center border border-sand-200 rounded-lg py-7 px-5">
+          <div class="font-display text-3xl text-sand-300 mb-2">3</div>
+          <h3 class="text-[14px] font-medium text-sand-800 mb-1.5">Custom proposal</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Within 48 hours: photos, pricing, and availability tailored to your dates and group.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         FOOTER CTA
+         ============================================================ -->
+    <section class="text-center py-16 md:py-20 border-t border-sand-200">
+      <p class="font-display text-2xl md:text-3xl text-sand-800 mb-3">
+        Ready to see if we're the right fit?
+      </p>
+      <p class="text-[14px] text-sand-500 mb-8">
+        Most couples know within 5 minutes of talking to us.
+      </p>
+      <a
+        href={WHATSAPP_URL}
+        target="_blank"
+        rel="noopener"
+        class="wa-cta inline-flex items-center gap-2.5 bg-[#25D366] hover:bg-[#1fb855] text-white text-sm font-medium px-7 py-3.5 rounded-lg transition-colors"
+        data-event="footer_whatsapp_click"
+      >
+        <svg class="w-5 h-5 fill-white shrink-0" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.243-1.21l-.29-.18-3.054.8.82-2.99-.193-.3A7.96 7.96 0 014 12a8 8 0 1116 0 8 8 0 01-8 8z"/></svg>
+        Message Us on WhatsApp
+      </a>
+      <p class="text-[13px] text-sand-400 mt-4">
+        Or email: <a href="mailto:sarah@lapuestadelsolresort.com" class="underline hover:text-sand-600">sarah@lapuestadelsolresort.com</a>
+      </p>
+    </section>
+  </main>
+
+  <!-- ============================================================
+       SITE FOOTER
+       ============================================================ -->
+  <footer class="text-center py-8 text-[12px] text-sand-400 border-t border-sand-100">
+    <p><a href="https://lapuestadelsolresort.com" class="homepage-link text-sand-500 hover:text-sand-700 underline underline-offset-2 transition-colors" data-event="footer_homepage_click">La Puesta del Sol</a> · La Peñita de Jaltemba, Riviera Nayarit, Mexico</p>
+    <p class="mt-1">45 minutes from Puerto Vallarta International Airport (PVR)</p>
+    <p class="mt-3 flex justify-center gap-4 text-[11px]">
+      <a href="https://dining.lapuestadelsolresort.com" class="text-sand-400 hover:text-sand-600 transition-colors">Dining</a>
+      <span>·</span>
+      <a href="https://retreats.lapuestadelsolresort.com" class="text-sand-400 hover:text-sand-600 transition-colors">Retreats</a>
+      <span>·</span>
+      <a href="https://lapuestadelsolresort.com/contact" class="text-sand-400 hover:text-sand-600 transition-colors">Contact</a>
+    </p>
+  </footer>
+
+  <!-- ============================================================
+       TRACKING: Meta Pixel Lead on WhatsApp click.
+       Page-view + WhatsApp-click telemetry to the CRM is handled by
+       lp/tracker.js (loaded in <head>); this block only fires the Meta
+       Pixel Lead signal and keeps UTMs in sessionStorage.
+       ============================================================ -->
+  <script is:inline>
+    (function() {
+      // Capture UTMs from URL and persist in sessionStorage
+      var params = new URLSearchParams(window.location.search);
+      ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'].forEach(function(k) {
+        var v = params.get(k);
+        if (v) sessionStorage.setItem(k, v);
+      });
+
+      // Track homepage link clicks
+      document.querySelectorAll('.homepage-link').forEach(function(link) {
+        link.addEventListener('click', function() {
+          var eventName = link.getAttribute('data-event') || 'homepage_click';
+          if (typeof fbq === 'function') {
+            fbq('trackCustom', 'HomepageClick', { page: 'weddings', location: eventName });
+          }
+        });
+      });
+
+      // Fire Meta Pixel Lead on WhatsApp click (Meta-side optimization signal)
+      document.querySelectorAll('.wa-cta').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          if (typeof fbq === 'function') {
+            fbq('track', 'Lead', {
+              content_name: 'wedding_whatsapp_click',
+              content_category: 'wedding',
+              value: 25000,
+              currency: 'USD'
+            });
+          }
+        });
+      });
+    })();
+  </script>
+  <!-- FLOATING WHATSAPP BUTTON -->
+  <a
+    id="wa-float"
+    href={WHATSAPP_URL}
+    target="_blank"
+    rel="noopener"
+    class="wa-cta fixed bottom-5 right-5 z-50 flex items-center justify-center w-14 h-14 bg-[#25D366] hover:bg-[#1fb855] rounded-full shadow-lg transition-all hover:scale-110"
+    aria-label="Chat on WhatsApp"
+  >
+    <svg class="w-7 h-7 fill-white" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.243-1.21l-.29-.18-3.054.8.82-2.99-.193-.3A7.96 7.96 0 014 12a8 8 0 1116 0 8 8 0 01-8 8z"/></svg>
+  </a>
+  <style>
+    @keyframes wa-pulse { 0%,100%{box-shadow:0 4px 14px rgba(37,211,102,.4)} 50%{box-shadow:0 4px 24px rgba(37,211,102,.7)} }
+    #wa-float { animation: wa-pulse 2s ease-in-out infinite; }
+  </style>
+</body>
+</html>

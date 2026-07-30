@@ -1,0 +1,29 @@
+[
+  {
+    "name": "Guest Alpha",
+    "email": "guest.alpha@example.com",
+    "phone": "713-555-0127",
+    "accountId": 11111,
+    "threadId": 91001,
+    "dateShared": "2025-06-14T01:10:09.886Z",
+    "context": "Wedding booking; shared both phone and email for planning coordination"
+  },
+  {
+    "name": "Alex Example",
+    "email": null,
+    "phone": "505-555-0134",
+    "accountId": 66666,
+    "threadId": 95005,
+    "dateShared": "2024-01-05T22:42:04.616Z",
+    "context": "Family reunion party; Alex's phone shared in thread"
+  },
+  {
+    "name": "Jordan Example",
+    "email": null,
+    "phone": "719-555-0156",
+    "accountId": 66666,
+    "threadId": 95005,
+    "dateShared": "2024-01-05T22:42:04.616Z",
+    "context": "Same thread; Jordan's phone also shared (different person)"
+  }
+]

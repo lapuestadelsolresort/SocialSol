@@ -1,0 +1,381 @@
+---
+/**
+ * La Puesta del Sol — Summer Flash Sale Landing Page
+ * summer-sale.lapuestadelsolresort.com
+ *
+ * Astro 6 + Tailwind v4
+ *
+ * 50% Off Summer Campaign — June & July only
+ * WhatsApp: resort business sender
+ * CRM webhook: https://webhook.lapuestadelsolresort.com/webhook/pixel
+ */
+import '../styles/global.css'
+
+const WHATSAPP_URL = 'https://wa.me/15553526612?text=' + encodeURIComponent(
+  "Hi! I saw your summer sale — 50% off for June/July. I'd love to learn more about booking the resort."
+);
+
+const AIRBNB_URL = 'https://www.airbnb.com/rooms/869105818174917656?guests=1&adults=1&s=67&unique_share_id=0e46d98f-8e82-4237-984a-b04ce6239e50';
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>50% Off This Summer — La Puesta del Sol, Private Beachfront Resort</title>
+  <meta name="description" content="Book the entire resort at half price this June & July. 13 bedrooms, 6 villas, private beach. Riviera Nayarit, Mexico." />
+  <meta property="og:title" content="50% Off This Summer — La Puesta del Sol, Private Beachfront Resort" />
+  <meta property="og:description" content="Book the entire resort at half price this June & July. 13 bedrooms, 6 villas, private beach. Riviera Nayarit, Mexico." />
+  <meta property="og:image" content="/images/hero.webp" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://summer-sale.lapuestadelsolresort.com" />
+  <link rel="canonical" href="https://summer-sale.lapuestadelsolresort.com" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Meta Pixel -->
+  <script is:inline>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '837757775519925');
+    fbq('track', 'PageView');
+  </script>
+  <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=837757775519925&ev=PageView&noscript=1" /></noscript>
+
+  <!-- Landing-page variant optimizer -->
+  <script is:inline>
+    window.LPDS_BASE = 'https://webhook.lapuestadelsolresort.com';
+    window.LPDS_PAGE = 'summer-sale';
+  </script>
+  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/tracker.js?v=7"></script>
+  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/hydrate.js?v=7"></script>
+
+  <style is:global>
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font-body);
+      color: #2C2C2A;
+      background: #FAF8F5;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- ============================================================
+       HERO
+       ============================================================ -->
+  <header class="relative w-full h-[85vh] min-h-[600px] max-h-[900px] overflow-hidden">
+    <img
+      src="/images/hero.webp"
+      alt="Aerial view of La Puesta del Sol's oceanfront palapa over the Pacific"
+      class="absolute inset-0 w-full h-full object-cover object-[center_80%]"
+      loading="eager"
+      fetchpriority="high"
+    />
+    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent"></div>
+
+    <div class="absolute bottom-0 left-0 right-0 px-6 pb-10 md:px-12 md:pb-14 max-w-3xl">
+      <p class="text-[11px] tracking-[3px] uppercase text-white/50 mb-2">Limited Time Offer</p>
+      <h1 class="font-display text-4xl md:text-5xl text-white font-normal leading-[1.1] mb-3">
+        <span class="inline-block bg-[#C4841D] text-white px-3 py-1 rounded-md">50% Off</span> This Summer
+      </h1>
+      <p class="text-base text-white/70 mb-8 max-w-lg leading-relaxed">
+        Book the entire private beachfront resort at half price. June &amp; July only.
+      </p>
+
+      <!-- Key facts -->
+      <div class="flex flex-wrap gap-6 mb-8">
+        <div class="border-l border-white/25 pl-4">
+          <div class="text-lg font-medium text-white">13 bedrooms</div>
+          <div class="text-[11px] text-white/50 mt-0.5">Across 6 private villas</div>
+        </div>
+        <div class="border-l border-white/25 pl-4">
+          <div class="text-lg font-medium text-white">6 private villas</div>
+          <div class="text-[11px] text-white/50 mt-0.5">Exclusive full-property buyout</div>
+        </div>
+        <div class="border-l border-white/25 pl-4">
+          <div class="text-lg font-medium text-white">Private beach</div>
+          <div class="text-[11px] text-white/50 mt-0.5">Oceanfront on three sides</div>
+        </div>
+      </div>
+
+      <!-- Primary CTA -->
+      <div class="flex flex-col sm:flex-row gap-3">
+        <a
+          href={WHATSAPP_URL}
+          target="_blank"
+          rel="noopener"
+          class="wa-cta inline-flex items-center justify-center gap-2.5 bg-[#25D366] hover:bg-[#1fb855] text-white text-sm font-medium px-6 py-3.5 rounded-lg transition-colors"
+          data-event="hero_whatsapp_click"
+        >
+          <svg class="w-5 h-5 fill-white shrink-0" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.243-1.21l-.29-.18-3.054.8.82-2.99-.193-.3A7.96 7.96 0 014 12a8 8 0 1116 0 8 8 0 01-8 8z"/></svg>
+          Contact Us to Learn More
+        </a>
+        <a
+          href={AIRBNB_URL}
+          target="_blank"
+          rel="noopener"
+          class="airbnb-cta inline-flex items-center justify-center gap-2 border border-white/30 hover:border-white/60 hover:bg-white/10 text-white/80 hover:text-white text-sm font-medium px-6 py-3 rounded-lg transition-colors"
+          data-event="hero_airbnb_click"
+        >
+          View on Airbnb
+          <svg class="w-4 h-4 fill-none stroke-current shrink-0" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       URGENCY BANNER
+       ============================================================ -->
+  <div class="bg-sand-800 text-white text-center py-4 px-6">
+    <p class="text-[14px] font-medium tracking-wide">
+      🔥 Limited Time Offer — This rate won't last. Message us to lock in your dates.
+    </p>
+  </div>
+
+  <main class="max-w-3xl mx-auto px-6 md:px-12">
+
+    <!-- ============================================================
+         WHAT'S INCLUDED
+         ============================================================ -->
+    <section class="py-16 md:py-20">
+      <p class="text-[11px] tracking-[3px] uppercase text-sand-500 mb-3">What's included</p>
+      <h2 class="font-display text-3xl md:text-[34px] text-sand-800 font-normal leading-tight mb-5">
+        The entire resort is yours
+      </h2>
+      <p class="text-[15px] text-sand-600 leading-relaxed mb-4 max-w-xl">
+        This is a full-property buyout. No other guests, no shared spaces. Your group has the whole
+        resort — private beach, infinity pool, six villas, and on-site staff — for the
+        duration of your stay.
+      </p>
+
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">Full-property buyout</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">The whole resort is exclusively yours. No other guests, no shared spaces.</p>
+        </div>
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">13 bedrooms across 6 villas</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Each villa has its own kitchen, bathrooms, and private outdoor space.</p>
+        </div>
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">Private beach &amp; infinity pool</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Ocean on three sides. Your own beach and pool overlooking the Pacific.</p>
+        </div>
+        <div class="border border-sand-200 rounded-lg p-5">
+          <h3 class="text-[15px] font-medium text-sand-800 mb-1">45 min from PVR airport</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Easy access from Puerto Vallarta International Airport. We can arrange transfers.</p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="border-sand-200" />
+
+    <!-- ============================================================
+         THE PROPERTY
+         ============================================================ -->
+    <section class="py-16 md:py-20">
+      <p class="text-[11px] tracking-[3px] uppercase text-sand-500 mb-3">The property</p>
+      <h2 class="font-display text-3xl md:text-[34px] text-sand-800 font-normal leading-tight mb-5">
+        54,000 sq ft of beachfront
+      </h2>
+      <p class="text-[15px] text-sand-600 leading-relaxed mb-8 max-w-xl">
+        Six named villas — Pearl, Turtle, Dolphin, Seahorse, Whale, and Crab — connected by winding
+        stone pathways over garden streams. Thatched-roof architecture, ocean on three sides, mountains behind.
+        Located in La Peñita de Jaltemba, a quiet fishing village away from the tourist corridor.
+      </p>
+
+      <!-- Photo grid: same as weddings -->
+      <div class="grid grid-cols-2 gap-2 mb-2">
+        <div class="row-span-2">
+          <img src="/images/couple.webp" alt="Baby sea turtles heading to the ocean at sunset on the resort's beach" class="w-full h-full object-cover rounded-lg" loading="lazy" />
+        </div>
+        <div>
+          <img src="/images/villa.webp" alt="Villa interior with ocean view" class="w-full h-full object-cover rounded-lg aspect-[4/3]" loading="lazy" />
+        </div>
+        <div>
+          <img src="/images/pathway.webp" alt="Sunset dining on the oceanfront terrace at La Puesta del Sol" class="w-full h-full object-cover rounded-lg aspect-[4/3]" loading="lazy" />
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-2">
+        <img src="/images/food.webp" alt="Kayaking in the Pacific Ocean off the resort's private beach" class="w-full aspect-square object-cover rounded-lg" loading="lazy" />
+        <img src="/images/ceremony.webp" alt="Oceanfront sunset dining and entertainment area" class="w-full aspect-square object-cover rounded-lg" loading="lazy" />
+        <img src="/images/pool.webp" alt="Infinity pool and common area" class="w-full aspect-square object-cover rounded-lg" loading="lazy" />
+      </div>
+    </section>
+
+    <hr class="border-sand-200" />
+
+    <!-- ============================================================
+         PRICING
+         ============================================================ -->
+    <section class="py-16 md:py-20">
+      <p class="text-[11px] tracking-[3px] uppercase text-sand-500 mb-3">Summer sale pricing</p>
+      <h2 class="font-display text-3xl md:text-[34px] text-sand-800 font-normal leading-tight mb-5">
+        Half price. Same extraordinary experience.
+      </h2>
+      <div class="border border-sand-200 rounded-lg p-6 md:p-8 mb-6 max-w-xl">
+        <p class="text-[13px] text-sand-500 mb-2">Normal rate — 5-night buyout</p>
+        <p class="text-2xl text-sand-400 line-through mb-4">$35,000</p>
+        <p class="text-[13px] text-[#C4841D] font-medium mb-2">Summer sale — June &amp; July</p>
+        <p class="text-4xl md:text-5xl font-display text-[#C4841D] font-medium mb-1">$17,500</p>
+        <p class="text-[13px] text-sand-500 mt-3 leading-snug">50% off the standard buyout rate. Same resort, same property, same unforgettable experience.</p>
+      </div>
+
+      <div class="border border-[#C4841D]/20 bg-[#C4841D]/5 rounded-lg p-5 max-w-xl">
+        <p class="text-[14px] text-sand-700 font-medium mb-2">WhatsApp booking = 50% off</p>
+        <p class="text-[13px] text-sand-600 leading-snug mb-2">
+          This offer is only available when you book directly through WhatsApp. Airbnb bookings are at standard rates.
+        </p>
+        <p class="text-[13px] text-sand-500 leading-snug">
+          Message us on WhatsApp to claim the discount. We'll send you a custom quote within 24 hours.
+        </p>
+      </div>
+    </section>
+
+    <hr class="border-sand-200" />
+
+    <!-- ============================================================
+         HOW TO CLAIM
+         ============================================================ -->
+    <section class="py-16 md:py-20">
+      <p class="text-[11px] tracking-[3px] uppercase text-sand-500 mb-3">How to claim</p>
+      <h2 class="font-display text-3xl md:text-[34px] text-sand-800 font-normal leading-tight mb-8">
+        Three simple steps
+      </h2>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="text-center border border-sand-200 rounded-lg py-7 px-5">
+          <div class="font-display text-3xl text-[#C4841D]/40 mb-2">1</div>
+          <h3 class="text-[14px] font-medium text-sand-800 mb-1.5">Message us on WhatsApp</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Tap the button below — it opens a direct conversation with our team.</p>
+        </div>
+        <div class="text-center border border-sand-200 rounded-lg py-7 px-5">
+          <div class="font-display text-3xl text-[#C4841D]/40 mb-2">2</div>
+          <h3 class="text-[14px] font-medium text-sand-800 mb-1.5">Tell us your dates &amp; group size</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Share your preferred dates and how many guests. We'll check availability.</p>
+        </div>
+        <div class="text-center border border-sand-200 rounded-lg py-7 px-5">
+          <div class="font-display text-3xl text-[#C4841D]/40 mb-2">3</div>
+          <h3 class="text-[14px] font-medium text-sand-800 mb-1.5">Get your 50% off quote</h3>
+          <p class="text-[13px] text-sand-500 leading-snug">Receive your custom quote within 24 hours — already at half price.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         FOOTER CTA
+         ============================================================ -->
+    <section class="text-center py-16 md:py-20 border-t border-sand-200">
+      <p class="font-display text-2xl md:text-3xl text-sand-800 mb-3">
+        Don't miss this — message us now
+      </p>
+      <p class="text-[14px] text-sand-500 mb-8">
+        This rate is only available for June &amp; July. Lock in your dates before it's gone.
+      </p>
+      <a
+        href={WHATSAPP_URL}
+        target="_blank"
+        rel="noopener"
+        class="wa-cta inline-flex items-center gap-2.5 bg-[#25D366] hover:bg-[#1fb855] text-white text-sm font-medium px-7 py-3.5 rounded-lg transition-colors"
+        data-event="footer_whatsapp_click"
+      >
+        <svg class="w-5 h-5 fill-white shrink-0" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.243-1.21l-.29-.18-3.054.8.82-2.99-.193-.3A7.96 7.96 0 014 12a8 8 0 1116 0 8 8 0 01-8 8z"/></svg>
+        Contact Us to Learn More
+      </a>
+      <a
+        href={AIRBNB_URL}
+        target="_blank"
+        rel="noopener"
+        class="airbnb-cta inline-flex items-center justify-center gap-2 border border-sand-300 hover:border-sand-500 text-sand-600 hover:text-sand-800 text-sm font-medium px-7 py-3 rounded-lg transition-colors mt-3"
+        data-event="footer_airbnb_click"
+      >
+        View on Airbnb
+        <svg class="w-4 h-4 fill-none stroke-current shrink-0" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
+      <p class="text-[13px] text-sand-400 mt-4">
+        Standard rates on Airbnb · 50% off only via WhatsApp
+        <br/>Email: <a href="mailto:sarah@lapuestadelsolresort.com" class="underline hover:text-sand-600">sarah@lapuestadelsolresort.com</a>
+      </p>
+    </section>
+  </main>
+
+  <!-- ============================================================
+       SITE FOOTER
+       ============================================================ -->
+  <footer class="text-center py-8 text-[12px] text-sand-400 border-t border-sand-100">
+    <p>La Puesta del Sol · La Peñita de Jaltemba, Riviera Nayarit, Mexico</p>
+    <p class="mt-1">45 minutes from Puerto Vallarta International Airport (PVR)</p>
+  </footer>
+
+  <!-- ============================================================
+       TRACKING: Meta Pixel Lead on WhatsApp click + UTM persistence
+       ============================================================ -->
+  <script is:inline>
+    (function() {
+      // Capture UTMs from URL and persist in sessionStorage
+      var params = new URLSearchParams(window.location.search);
+      ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'].forEach(function(k) {
+        var v = params.get(k);
+        if (v) sessionStorage.setItem(k, v);
+      });
+
+      // Fire Meta Pixel Lead on WhatsApp click
+      document.querySelectorAll('.wa-cta').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          if (typeof fbq === 'function') {
+            fbq('track', 'Lead', {
+              content_name: 'summer_sale_whatsapp_click',
+              content_category: 'summer_sale',
+              value: 17500,
+              currency: 'USD'
+            });
+          }
+        });
+      });
+
+      // Fire Meta Pixel custom event on Airbnb click
+      document.querySelectorAll('.airbnb-cta').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var evName = btn.getAttribute('data-event') || 'airbnb_click';
+          if (typeof fbq === 'function') {
+            fbq('trackCustom', 'AirbnbClick', {
+              content_name: evName,
+              content_category: 'summer_sale'
+            });
+          }
+        });
+      });
+    })();
+  </script>
+  <!-- FLOATING WHATSAPP BUTTON -->
+  <a
+    id="wa-float"
+    href={WHATSAPP_URL}
+    target="_blank"
+    rel="noopener"
+    class="wa-float-btn fixed bottom-5 right-5 z-50 flex items-center justify-center w-14 h-14 bg-[#25D366] hover:bg-[#1fb855] rounded-full shadow-lg transition-all hover:scale-110 overflow-hidden"
+    aria-label="Chat on WhatsApp"
+  >
+    <svg class="w-7 h-7 fill-white" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.243-1.21l-.29-.18-3.054.8.82-2.99-.193-.3A7.96 7.96 0 014 12a8 8 0 1116 0 8 8 0 01-8 8z"/></svg>
+  </a>
+  <style>
+    @keyframes wa-pulse { 0%,100%{box-shadow:0 4px 14px rgba(37,211,102,.4)} 50%{box-shadow:0 4px 24px rgba(37,211,102,.7)} }
+    #wa-float { animation: wa-pulse 2s ease-in-out infinite; }
+  </style>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "socialsol",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Marketing funnel, CRM, landing pages, and automation for La Puesta del Sol Resort",
+  "workspaces": [
+    "crm",
+    "prospector",
+    "regina",
+    "sarah-coach",
+    "landing/apps/*"
+  ],
+  "scripts": {
+    "test": "npm --workspace crm test",
+    "test:prospector": "node --test prospector/lib/*.test.js",
+    "build:landing": "npm run build --workspaces --if-present",
+    "audit:production": "npm audit --omit=dev",
+    "check:secrets": "node scripts/check-secrets.js"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "overrides": {
+    "@tootallnate/once": "2.0.1",
+    "brace-expansion": "5.0.9",
+    "tar": "7.5.22"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "slug": "inquiry_conversion",
+  "name": "regina_inquiry_conversion",
+  "campaign_kind": "reactivation_conversion",
+  "intent": "reactivation_conversion",
+  "owning_agent": "regina",
+  "recipient_relationship": "past_guest_inquired",
+  "language": "en",
+  "default_batch_size": 15,
+  "eligibility_sql_path": "library/campaigns/inquiry_conversion.sql",
+  "description": "Re-engage inquiries with a specific addressable blocker.",
+  "landing_page_url": "https://lapuestadelsolresort.com/",
+  "prompt_context": "Address only the verified blocker in the dossier and offer one concrete path forward. Keep under 130 words."
+}

@@ -1,0 +1,64 @@
+[{
+  "messageThreads": [
+    {
+      "id": 91001,
+      "messageThreadParticipants": [{"accountId": 99999}, {"accountId": 11111}],
+      "messagesAndContents": [
+        {
+          "message": {"id": 1001, "accountId": 11111, "createdAt": "2025-06-13T10:00:00.000Z", "accountType": "user", "contentType": "TextContent"},
+          "messageContent": {"textContent": {"text": "Hello! Looking forward to our wedding stay."}}
+        },
+        {
+          "message": {"id": 1002, "accountId": 99999, "createdAt": "2025-06-13T10:30:00.000Z", "accountType": "host", "contentType": "TextContent"},
+          "messageContent": {"textContent": {"text": "Thanks, looking forward to hosting you and your group!"}}
+        },
+        {
+          "message": {"id": 1003, "accountId": 99999, "createdAt": "2025-06-13T10:45:00.000Z", "accountType": "host", "contentType": "TextAndReferenceContent"},
+          "messageContent": {"textAndReferenceContent": {"text": "Here are the check-in details for June 14.", "referenceType": "home_booking", "referenceId": "5317216003"}}
+        }
+      ]
+    },
+    {
+      "id": 92002,
+      "messageThreadParticipants": [{"accountId": 99999}, {"accountId": 22222}],
+      "messagesAndContents": [
+        {
+          "message": {"id": 2001, "accountId": 22222, "createdAt": "2027-03-15T08:00:00.000Z", "accountType": "user", "contentType": "TextContent"},
+          "messageContent": {"textContent": {"text": "Wondering if you have availability for a corporate retreat in March 2027."}}
+        },
+        {
+          "message": {"id": 2002, "accountId": 99999, "createdAt": "2027-03-15T08:15:00.000Z", "accountType": "host", "contentType": "TextContent"},
+          "messageContent": {"textContent": {"text": "Yes, those dates are open. Happy to share more details."}}
+        }
+      ]
+    },
+    {
+      "id": 93003,
+      "messageThreadParticipants": [{"accountId": 99999}, {"accountId": 44444}],
+      "messagesAndContents": [
+        {
+          "message": {"id": 3001, "accountId": 44444, "createdAt": "2024-08-09T20:00:00.000Z", "accountType": "user", "contentType": "TextContent"},
+          "messageContent": {"textContent": {"text": "Hola, gracias por toda la información. Tengo unas fechas en mente."}}
+        },
+        {
+          "message": {"id": 3002, "accountId": 99999, "createdAt": "2024-08-09T20:30:00.000Z", "accountType": "host", "contentType": "TextContent"},
+          "messageContent": {"textContent": {"text": "Hola, gracias por su mensaje. Las fechas están disponibles."}}
+        }
+      ]
+    },
+    {
+      "id": 94004,
+      "messageThreadParticipants": [{"accountId": 99999}, {"accountId": 77777}],
+      "messagesAndContents": [
+        {
+          "message": {"id": 4001, "accountId": 77777, "createdAt": "2026-02-01T12:00:00.000Z", "accountType": "user", "contentType": "TextContent"},
+          "messageContent": {"textContent": {"text": "Hi - quick question about availability."}}
+        },
+        {
+          "message": {"id": 4002, "accountId": 99999, "createdAt": "2026-02-01T12:30:00.000Z", "accountType": "host", "contentType": "TextContent"},
+          "messageContent": {"textContent": {"text": "Sure, what dates are you considering?"}}
+        }
+      ]
+    }
+  ]
+}]

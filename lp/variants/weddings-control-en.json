@@ -1,0 +1,24 @@
+{
+  "slug": "weddings-control-en",
+  "page_slug": "weddings",
+  "language": "en",
+  "source": null,
+  "audience": null,
+  "status": "live",
+  "traffic_weight": 100,
+  "type": "landing_page",
+  "is_control": true,
+  "bucket": "leads",
+  "funnel_stage": "cta",
+  "compliance_status": "passed",
+  "hero": {
+    "headline": "La Puesta del Sol",
+    "sub": "Private beachfront resort in Riviera Nayarit, Mexico. 45 minutes from Puerto Vallarta airport."
+  },
+  "cta": {
+    "text": "Message Us on WhatsApp",
+    "whatsapp_prefill": "Hi Sarah, I'm interested in hosting a wedding at La Puesta del Sol. Could we set up a quick call?"
+  },
+  "social_proof": { "enabled": false, "lines": [] },
+  "urgency": null
+}

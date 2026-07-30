@@ -1,0 +1,21 @@
+{
+  "agent": "sarah-coach",
+  "slack": {
+    "account": "replace-with-account-name",
+    "channel_name": "replace-with-channel-name",
+    "channel_id": "replace-with-slack-channel-id",
+    "authorized_user_ids": [
+      "replace-with-slack-user-id"
+    ]
+  },
+  "voice_service": {
+    "url": "http://127.0.0.1:3456/api/voice/draft",
+    "timeout_ms": 30000,
+    "agent_id": "sarah",
+    "intent": "inbound_reply",
+    "draft_length": {
+      "min": 22,
+      "max": 122
+    }
+  }
+}

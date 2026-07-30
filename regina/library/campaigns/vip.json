@@ -1,0 +1,14 @@
+{
+  "slug": "vip",
+  "name": "regina_vip",
+  "campaign_kind": "reactivation_vip",
+  "intent": "reactivation_vip",
+  "owning_agent": "regina",
+  "recipient_relationship": "past_guest_stayed",
+  "language": "en",
+  "default_batch_size": 3,
+  "eligibility_sql_path": "library/campaigns/vip.sql",
+  "description": "Premium re-engagement for repeat guests.",
+  "landing_page_url": "https://lapuestadelsolresort.com/",
+  "prompt_context": "Use a warm, familiar tone and only verified shared context. Keep under 120 words."
+}

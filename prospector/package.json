@@ -1,0 +1,14 @@
+{
+  "name": "lapuestadelsolresort-prospector",
+  "version": "1.0.0",
+  "description": "Outbound prospector — compliance gate, header builder, send orchestration (Phase D)",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.1",
+    "@databases/sqlite": "^4.0.2",
+    "dotenv": "^17.4.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

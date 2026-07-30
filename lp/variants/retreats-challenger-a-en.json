@@ -1,0 +1,30 @@
+{
+  "slug": "retreats-challenger-a-en",
+  "page_slug": "retreats",
+  "language": "en",
+  "source": null,
+  "audience": null,
+  "status": "live",
+  "traffic_weight": 50,
+  "type": "landing_page",
+  "is_control": false,
+  "bucket": "leads",
+  "funnel_stage": "cta",
+  "compliance_status": "passed",
+  "hero": {
+    "headline": "Your Team's Private Beachfront Retreat",
+    "sub": "Full-property buyout for 15–35 guests · Riviera Nayarit, Mexico · 45 min from PVR airport"
+  },
+  "cta": {
+    "text": "Check Availability on WhatsApp →",
+    "whatsapp_prefill": "Hey! I saw the retreat property — looks amazing. Do you have availability for our group?"
+  },
+  "social_proof": {
+    "enabled": true,
+    "lines": [
+      "★ 4.9 avg rating from past groups",
+      "3 retreats already booked this quarter"
+    ]
+  },
+  "urgency": "Limited dates available for Q3 2026"
+}

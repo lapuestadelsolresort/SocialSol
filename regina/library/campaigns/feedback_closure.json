@@ -1,0 +1,14 @@
+{
+  "slug": "feedback_closure",
+  "name": "regina_feedback_closure",
+  "campaign_kind": "reactivation_feedback_closure",
+  "intent": "reactivation_feedback_closure",
+  "owning_agent": "regina",
+  "recipient_relationship": "past_guest_stayed",
+  "language": "en",
+  "default_batch_size": 5,
+  "eligibility_sql_path": "library/campaigns/feedback_closure.sql",
+  "description": "Close the loop with guests who left private feedback.",
+  "landing_page_url": "https://lapuestadelsolresort.com/",
+  "prompt_context": "Acknowledge the verified feedback, describe a specific supported change, and thank the guest. Do not add a sales ask. Keep under 100 words."
+}

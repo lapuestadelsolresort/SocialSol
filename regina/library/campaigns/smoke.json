@@ -1,0 +1,13 @@
+{
+  "slug": "smoke",
+  "name": "regina_smoke",
+  "campaign_kind": "ad_hoc",
+  "intent": "ad_hoc",
+  "owning_agent": "regina",
+  "recipient_relationship": "past_guest_inquired",
+  "language": "en",
+  "description": "Synthetic smoke campaign for local pipeline verification.",
+  "landing_page_url": "https://example.com/",
+  "contact_ids": [1, 2, 3],
+  "prompt_context": "Write a short, friendly check-in using only verified context."
+}

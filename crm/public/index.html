@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>La Puesta del Sol — CRM</title>
+  <link rel="stylesheet" href="/style.css" />
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ═══ SIDEBAR ════════════════════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>🌅 La Puesta del Sol</h1>
+    <p>Resort CRM</p>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-item active" data-view="dashboard" onclick="showView('dashboard', this)">
+      <span class="icon">📊</span><span>Dashboard</span>
+    </div>
+    <div class="nav-item" data-view="leads" onclick="showView('leads', this)">
+      <span class="icon">👥</span><span>Leads</span>
+    </div>
+    <div class="nav-item" data-view="funnel" onclick="showView('funnel', this)">
+      <span class="icon">🔽</span><span>Funnel</span>
+    </div>
+    <div class="nav-item" data-view="activity" onclick="showView('activity', this)">
+      <span class="icon">⚡</span><span>Activity</span>
+    </div>
+    <div class="nav-item" data-view="campaigns" onclick="showView('campaigns', this)">
+      <span class="icon">📣</span><span>Campaigns</span>
+    </div>
+    <div class="nav-item" data-view="add-lead" onclick="openAddLeadModal()">
+      <span class="icon">➕</span><span>Add Lead</span>
+    </div>
+  </nav>
+  <div class="sidebar-footer">v1.0 · localhost:3456</div>
+</aside>
+
+<!-- ═══ MAIN ════════════════════════════════════════════════════════════════ -->
+<main class="main">
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <h2 id="topbar-title">Dashboard</h2>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-sm" onclick="refreshAll()">🔄 Refresh</button>
+      <button class="btn btn-primary btn-sm" onclick="openAddLeadModal()">➕ Add Lead</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ══ DASHBOARD VIEW ═══════════════════════════════════════════════════ -->
+    <section class="view active" id="view-dashboard">
+
+      <!-- Stats Cards -->
+      <div class="stats-grid" id="stats-cards">
+        <div class="stat-card amber skeleton">
+          <div class="stat-label">Leads This Month</div>
+          <div class="stat-value" id="stat-month">—</div>
+          <div class="stat-sub" id="stat-month-sub">Loading…</div>
+        </div>
+        <div class="stat-card teal">
+          <div class="stat-label">Total Leads</div>
+          <div class="stat-value" id="stat-total">—</div>
+          <div class="stat-sub">All time</div>
+        </div>
+        <div class="stat-card ocean">
+          <div class="stat-label">Booked</div>
+          <div class="stat-value" id="stat-booked">—</div>
+          <div class="stat-sub" id="stat-booked-sub">Loading…</div>
+        </div>
+        <div class="stat-card gold">
+          <div class="stat-label">Conversion Rate</div>
+          <div class="stat-value" id="stat-cvr">—</div>
+          <div class="stat-sub">Lead → Booked</div>
+        </div>
+        <div class="stat-card sunset">
+          <div class="stat-label">Pipeline Value</div>
+          <div class="stat-value" id="stat-pipeline">—</div>
+          <div class="stat-sub" id="stat-booked-val">Loading…</div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>📍 Leads by Source</h3>
+          <div class="chart-wrap"><canvas id="sourceChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>📈 Leads by Status</h3>
+          <div class="chart-wrap"><canvas id="statusChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Mini Funnel -->
+      <div class="funnel-card">
+        <h3>🔽 Marketing Funnel (Last 30 Days)</h3>
+        <div class="funnel-stages" id="funnel-stages">
+          <div class="loading"><div class="spinner"></div> Loading funnel…</div>
+        </div>
+      </div>
+
+      <!-- Recent Leads -->
+      <div class="table-card">
+        <div class="table-header">
+          <h3>Recent Leads</h3>
+          <button class="btn btn-ghost btn-sm" onclick="showView('leads', document.querySelector('[data-view=leads]'))">View All →</button>
+        </div>
+        <div class="table-wrap" id="recent-leads-table">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ══ LEADS VIEW ════════════════════════════════════════════════════════ -->
+    <section class="view" id="view-leads">
+      <div class="table-card">
+        <div class="table-header">
+          <h3>All Leads</h3>
+          <input type="text" class="search-input" id="lead-search" placeholder="🔍 Search name, email…" oninput="debounceSearch()" />
+          <select class="filter-select" id="filter-status" onchange="loadLeads()">
+            <option value="">All Statuses</option>
+            <option value="new">New</option>
+            <option value="contacted">Contacted</option>
+            <option value="quote_sent">Quote Sent</option>
+            <option value="booked">Booked</option>
+            <option value="lost">Lost</option>
+          </select>
+          <select class="filter-select" id="filter-source" onchange="loadLeads()">
+            <option value="">All Sources</option>
+            <option value="facebook_ad">Facebook Ad</option>
+            <option value="instagram_ad">Instagram Ad</option>
+            <option value="organic">Organic</option>
+            <option value="direct">Direct</option>
+            <option value="referral">Referral</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="openAddLeadModal()">➕ Add Lead</button>
+        </div>
+        <div class="table-wrap" id="leads-table-wrap">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+        <div id="leads-pagination" style="padding:12px 20px; font-size:12px; color:var(--text-muted);"></div>
+      </div>
+    </section>
+
+    <!-- ══ FUNNEL VIEW ═══════════════════════════════════════════════════════ -->
+    <section class="view" id="view-funnel">
+      <div class="funnel-card" style="margin-bottom:24px;">
+        <h3>🔽 Full Marketing Funnel</h3>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px;">Tracks every step from Meta ad impression to confirmed booking.</p>
+        <div class="funnel-stages" id="funnel-stages-full">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>📊 Funnel Drop-off Chart</h3>
+        <div class="chart-wrap" style="height:300px;"><canvas id="funnelChart"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ══ CAMPAIGNS VIEW ══════════════════════════════════════════════════ -->
+    <section class="view" id="view-campaigns">
+
+      <!-- Campaign Comparison Table -->
+      <div class="table-card" style="margin-bottom:28px;">
+        <div class="table-header">
+          <h3>📣 Active Campaigns</h3>
+          <button class="btn btn-ghost btn-sm" onclick="loadCampaigns()">🔄 Refresh</button>
+          <button class="btn btn-primary btn-sm" onclick="openAddCampaignForm()">➕ New Campaign</button>
+        </div>
+        <div class="table-wrap" id="campaigns-table-wrap">
+          <div class="loading"><div class="spinner"></div> Loading campaigns…</div>
+        </div>
+      </div>
+
+      <!-- Per-Campaign Funnel Detail Panel -->
+      <div id="campaign-funnel-panel" style="display:none; margin-bottom:28px;">
+        <div class="chart-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <h3 id="campaign-funnel-title">📊 Campaign Funnel</h3>
+            <button class="btn btn-ghost btn-sm" onclick="closeCampaignFunnel()">✕ Close</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+            <div>
+              <div class="funnel-stages" id="campaign-funnel-stages" style="flex-direction:column;gap:8px;"></div>
+              <div id="campaign-funnel-meta" style="margin-top:16px;padding:12px 16px;background:var(--bg);border-radius:8px;font-size:13px;"></div>
+            </div>
+            <div class="chart-wrap" style="height:220px;">
+              <canvas id="campaignFunnelChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add / Edit Campaign Form -->
+      <div class="table-card" id="campaign-form-panel" style="display:none;">
+        <div class="table-header">
+          <h3 id="campaign-form-title">➕ Add Campaign</h3>
+          <button class="btn btn-ghost btn-sm" onclick="closeCampaignForm()">✕ Cancel</button>
+        </div>
+        <div style="padding:20px 24px;">
+          <form id="campaign-form" class="form-grid">
+            <input type="hidden" id="form-campaign-id" />
+            <div class="form-group">
+              <label>Campaign Name *</label>
+              <input type="text" id="camp-name" placeholder="e.g. Semana Santa 2026" required />
+            </div>
+            <div class="form-group">
+              <label>Region</label>
+              <input type="text" id="camp-region" placeholder="e.g. Guadalajara, MX" />
+            </div>
+            <div class="form-group">
+              <label>Offer / Theme</label>
+              <input type="text" id="camp-offer" placeholder="e.g. Easter week stays" />
+            </div>
+            <div class="form-group">
+              <label>Target Audience</label>
+              <input type="text" id="camp-audience" placeholder="e.g. Ages 25-44, couples" />
+            </div>
+            <div class="form-group">
+              <label>Daily Budget (USD)</label>
+              <input type="number" id="camp-budget-daily" placeholder="30" min="0" step="5" />
+            </div>
+            <div class="form-group">
+              <label>Total Budget (USD)</label>
+              <input type="number" id="camp-budget-total" placeholder="0" min="0" step="50" />
+            </div>
+            <div class="form-group">
+              <label>Actual Spend (USD)</label>
+              <input type="number" id="camp-spend" placeholder="0" min="0" step="0.01" />
+            </div>
+            <div class="form-group">
+              <label>Channel</label>
+              <select id="camp-channel">
+                <option value="both">Both (Facebook + Instagram)</option>
+                <option value="facebook_ad">Facebook Ad</option>
+                <option value="instagram_ad">Instagram Ad</option>
+                <option value="organic_instagram">Organic Instagram</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Status</label>
+              <select id="camp-status">
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+                <option value="ended">Ended</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Meta Campaign ID</label>
+              <input type="text" id="camp-meta-id" placeholder="Meta campaign ID" />
+            </div>
+            <div class="form-group">
+              <label>Start Date</label>
+              <input type="date" id="camp-start-date" />
+            </div>
+            <div class="form-group">
+              <label>End Date</label>
+              <input type="date" id="camp-end-date" />
+            </div>
+            <div class="form-group full">
+              <label>Notes</label>
+              <textarea id="camp-notes" placeholder="Creative details, performance notes…"></textarea>
+            </div>
+          </form>
+          <div style="display:flex;justify-content:flex-end;gap:10px;padding-top:16px;border-top:1px solid var(--border);margin-top:4px;">
+            <button class="btn btn-ghost" onclick="closeCampaignForm()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveCampaign()">💾 Save Campaign</button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ══ ACTIVITY VIEW ═════════════════════════════════════════════════════ -->
+    <section class="view" id="view-activity">
+      <div class="activity-card">
+        <h3>⚡ Recent Activity</h3>
+        <div id="activity-list" class="activity-list">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /content -->
+</main>
+
+<!-- ═══ ADD / EDIT LEAD MODAL ════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="lead-modal" onclick="handleModalOverlay(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Add Lead</h3>
+      <button class="modal-close" onclick="closeModal('lead-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <form id="lead-form" class="form-grid">
+        <input type="hidden" id="form-lead-id" />
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="form-name" placeholder="Full name" />
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="form-email" placeholder="email@example.com" />
+        </div>
+        <div class="form-group">
+          <label>Phone</label>
+          <input type="tel" id="form-phone" placeholder="+1 555 000 0000" />
+        </div>
+        <div class="form-group">
+          <label>Source</label>
+          <select id="form-source">
+            <option value="facebook_ad">Facebook Ad</option>
+            <option value="instagram_ad">Instagram Ad</option>
+            <option value="organic">Organic</option>
+            <option value="direct">Direct</option>
+            <option value="referral">Referral</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="form-status">
+            <option value="new">New</option>
+            <option value="contacted">Contacted</option>
+            <option value="quote_sent">Quote Sent</option>
+            <option value="booked">Booked</option>
+            <option value="lost">Lost</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Campaign Name</label>
+          <input type="text" id="form-campaign" placeholder="e.g. Spring Escape 2026" />
+        </div>
+        <div class="form-group">
+          <label>Estimated Value (USD)</label>
+          <input type="number" id="form-value" placeholder="0" min="0" step="50" />
+        </div>
+        <div class="form-group">
+          <label>Check-in Date</label>
+          <input type="date" id="form-checkin" />
+        </div>
+        <div class="form-group">
+          <label>Check-out Date</label>
+          <input type="date" id="form-checkout" />
+        </div>
+        <div class="form-group full">
+          <label>Inquiry Message</label>
+          <textarea id="form-inquiry" placeholder="What did they write?"></textarea>
+        </div>
+        <div class="form-group full">
+          <label>Notes</label>
+          <textarea id="form-notes" placeholder="Internal notes…"></textarea>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('lead-modal')">Cancel</button>
+      <button class="btn btn-danger btn-sm" id="modal-delete-btn" style="display:none;margin-right:auto;" onclick="deleteLead()">🗑 Delete</button>
+      <button class="btn btn-primary" onclick="saveLead()">Save Lead</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LEAD DETAIL MODAL ══════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="detail-modal" onclick="handleModalOverlay(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="detail-modal-title">Lead Details</h3>
+      <button class="modal-close" onclick="closeModal('detail-modal')">×</button>
+    </div>
+    <div class="modal-body" id="detail-modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('detail-modal')">Close</button>
+      <button class="btn btn-primary" id="detail-edit-btn">✏️ Edit Lead</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TOAST ══════════════════════════════════════════════════════════════════ -->
+<div id="toast-container"></div>
+
+<!-- ═══ SCRIPTS ════════════════════════════════════════════════════════════════ -->
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let leadsData = [];
+let statsData = {};
+let sortCol   = 'created_at';
+let sortDir   = 'desc';
+let searchTimer = null;
+let sourceChart = null;
+let statusChart = null;
+let funnelChart = null;
+
+const STATUS_LABELS = {
+  new: 'New', contacted: 'Contacted', quote_sent: 'Quote Sent', booked: 'Booked', lost: 'Lost'
+};
+const SOURCE_LABELS = {
+  facebook_ad: 'Facebook Ad', instagram_ad: 'Instagram Ad',
+  organic: 'Organic', direct: 'Direct', referral: 'Referral'
+};
+
+// ─── View Navigation ──────────────────────────────────────────────────────────
+function showView(name, el) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  if (el) el.classList.add('active');
+  document.getElementById('topbar-title').textContent =
+    { dashboard: 'Dashboard', leads: 'Leads', funnel: 'Funnel', activity: 'Activity Feed', campaigns: 'Campaigns' }[name] || name;
+
+  if (name === 'leads')     loadLeads();
+  if (name === 'funnel')    loadFunnel();
+  if (name === 'activity')  loadActivity();
+  if (name === 'campaigns') loadCampaigns();
+}
+
+// ─── Data Fetching ────────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+async function refreshAll() {
+  await Promise.all([loadStats(), loadFunnelInline(), loadRecentLeads()]);
+  toast('Refreshed', 'success');
+}
+
+async function loadStats() {
+  try {
+    statsData = await api('/api/stats');
+    renderStatCards(statsData);
+    renderSourceChart(statsData);
+    renderStatusChart(statsData);
+  } catch (e) { console.error(e); }
+}
+
+async function loadFunnelInline() {
+  try {
+    const data = await api('/api/stats/funnel');
+    renderFunnelStages('funnel-stages', data);
+  } catch (e) { console.error(e); }
+}
+
+async function loadFunnel() {
+  try {
+    const data = await api('/api/stats/funnel');
+    renderFunnelStages('funnel-stages-full', data);
+    renderFunnelChart(data);
+  } catch (e) { console.error(e); }
+}
+
+async function loadActivity() {
+  try {
+    const events = await api('/api/events?limit=50');
+    renderActivity(events);
+  } catch (e) { console.error(e); }
+}
+
+async function loadRecentLeads() {
+  try {
+    const { leads } = await api('/api/leads?limit=8&sort=created_at&order=desc');
+    renderLeadTable('recent-leads-table', leads, { compact: true });
+  } catch (e) { console.error(e); }
+}
+
+async function loadLeads() {
+  const status   = document.getElementById('filter-status').value;
+  const source   = document.getElementById('filter-source').value;
+  const search   = document.getElementById('lead-search').value;
+  const params   = new URLSearchParams({ sort: sortCol, order: sortDir, limit: 200 });
+  if (status) params.set('status', status);
+  if (source) params.set('source', source);
+  if (search) params.set('search', search);
+
+  try {
+    const { leads, total } = await api('/api/leads?' + params);
+    leadsData = leads;
+    renderLeadTable('leads-table-wrap', leads, { compact: false });
+    document.getElementById('leads-pagination').textContent = `Showing ${leads.length} of ${total} leads`;
+  } catch (e) { console.error(e); }
+}
+
+// ─── Render: Stat Cards ───────────────────────────────────────────────────────
+function renderStatCards(s) {
+  document.getElementById('stat-month').textContent   = s.leads_this_month;
+  document.getElementById('stat-month-sub').textContent = `${s.booked_month} booked this month`;
+  document.getElementById('stat-total').textContent   = s.total_leads;
+  document.getElementById('stat-booked').textContent  = s.total_booked;
+  document.getElementById('stat-booked-sub').textContent = `out of ${s.total_leads} leads`;
+  document.getElementById('stat-cvr').textContent     = s.conversion_rate + '%';
+  document.getElementById('stat-pipeline').textContent = '$' + Number(s.pipeline_value).toLocaleString();
+  document.getElementById('stat-booked-val').textContent = '$' + Number(s.booked_value).toLocaleString() + ' confirmed';
+}
+
+// ─── Render: Funnel Stages ────────────────────────────────────────────────────
+function renderFunnelStages(containerId, data) {
+  const el = document.getElementById(containerId);
+  if (!data || !data.stages) { el.innerHTML = '<p class="loading">No data</p>'; return; }
+  const max = data.stages[0].value || 1;
+  el.innerHTML = data.stages.map(s => `
+    <div class="funnel-stage">
+      <div class="funnel-num">${Number(s.value).toLocaleString()}</div>
+      <div class="funnel-lbl">${s.label}</div>
+      <div class="funnel-bar" style="width:${Math.max(10, (s.value / max) * 100)}%"></div>
+      <div class="funnel-pct">${s.pct}</div>
+    </div>
+  `).join('');
+}
+
+// ─── Render: Source Pie Chart ─────────────────────────────────────────────────
+function renderSourceChart(stats) {
+  const ctx = document.getElementById('sourceChart').getContext('2d');
+  if (sourceChart) sourceChart.destroy();
+  const sources = stats.by_source || [];
+  const COLORS = ['#1a7a6e','#c97d2e','#0f5460','#e8624a','#f4b942','#28a89a'];
+  sourceChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: sources.map(s => SOURCE_LABELS[s.source] || s.source),
+      datasets: [{ data: sources.map(s => s.n), backgroundColor: COLORS, borderWidth: 2 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { font: { size: 12 }, padding: 10 } } }
+    }
+  });
+}
+
+// ─── Render: Status Bar Chart ─────────────────────────────────────────────────
+function renderStatusChart(stats) {
+  const ctx = document.getElementById('statusChart').getContext('2d');
+  if (statusChart) statusChart.destroy();
+  const order   = ['new','contacted','quote_sent','booked','lost'];
+  const COLORS  = { new:'#1565c0', contacted:'#7d5a0a', quote_sent:'#2e7d32', booked:'#155724', lost:'#721c24' };
+  const bg      = { new:'#e3f2fd', contacted:'#fff3cd', quote_sent:'#e8f5e9', booked:'#d4edda', lost:'#f8d7da' };
+  const byStatus= {};
+  (stats.by_status || []).forEach(s => byStatus[s.status] = s.n);
+  statusChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: order.map(s => STATUS_LABELS[s]),
+      datasets: [{
+        data: order.map(s => byStatus[s] || 0),
+        backgroundColor: order.map(s => bg[s]),
+        borderColor: order.map(s => COLORS[s]),
+        borderWidth: 1.5,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: '#f0ebe2' } }, x: { grid: { display: false } } }
+    }
+  });
+}
+
+// ─── Render: Funnel Bar Chart ─────────────────────────────────────────────────
+function renderFunnelChart(data) {
+  const ctx = document.getElementById('funnelChart').getContext('2d');
+  if (funnelChart) funnelChart.destroy();
+  const stages = data.stages || [];
+  funnelChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: stages.map(s => s.label),
+      datasets: [{
+        label: 'Count',
+        data: stages.map(s => s.value),
+        backgroundColor: ['#c97d2e','#28a89a','#0f5460','#e8624a','#27ae60'],
+        borderRadius: 8,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, grid: { color: '#f0ebe2' } },
+        y: { grid: { display: false } }
+      }
+    }
+  });
+}
+
+// ─── Render: Lead Table ───────────────────────────────────────────────────────
+function renderLeadTable(containerId, leads, { compact = false }) {
+  const el = document.getElementById(containerId);
+  if (!leads || leads.length === 0) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>No leads found</p></div>`;
+    return;
+  }
+
+  const cols = compact
+    ? ['Name', 'Source', 'Status', 'Value', 'Created', '']
+    : ['Name / Contact', 'Source', 'Status', 'Campaign', 'Value', 'Dates', 'Created', ''];
+
+  el.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          ${cols.map((c, i) => c ? `<th class="${sortableClass(c)}" onclick="${compact ? '' : sortBy(c, i)}">${c}</th>` : '<th></th>').join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${leads.map(l => renderLeadRow(l, compact)).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function sortableClass(col) {
+  const map = { 'Name / Contact': 'name', 'Value': 'estimated_value', 'Created': 'created_at', 'Status': 'status' };
+  if (!map[col]) return '';
+  return sortCol === map[col] ? `sorted ${sortDir}` : '';
+}
+
+function sortBy(colLabel, i) {
+  const map = { 'Name / Contact': 'name', 'Value': 'estimated_value', 'Created': 'created_at', 'Status': 'status', 'Source': 'source' };
+  const col = map[colLabel];
+  if (!col) return '';
+  return `toggleSort('${col}')`;
+}
+
+function toggleSort(col) {
+  if (sortCol === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  else { sortCol = col; sortDir = 'asc'; }
+  loadLeads();
+}
+window.toggleSort = toggleSort;
+
+function renderLeadRow(l, compact) {
+  const created = formatDate(l.created_at);
+  const val     = l.estimated_value > 0 ? `<span class="td-value">$${Number(l.estimated_value).toLocaleString()}</span>` : '<span style="color:#ccc">—</span>';
+  const srcBadge= `<span class="badge badge-${l.source}">${SOURCE_LABELS[l.source] || l.source}</span>`;
+  const stsBadge= `<span class="badge badge-${l.status}">${STATUS_LABELS[l.status] || l.status}</span>`;
+  const actions = `<button class="btn btn-ghost btn-sm" onclick="openDetailModal(${l.id})">View</button>`;
+
+  if (compact) {
+    return `<tr onclick="openDetailModal(${l.id})" style="cursor:pointer">
+      <td><div class="td-name">${esc(l.name || '—')}</div><div class="td-email">${esc(l.email || '')}</div></td>
+      <td>${srcBadge}</td>
+      <td>${stsBadge}</td>
+      <td>${val}</td>
+      <td>${created}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }
+
+  const dates = (l.checkin_date && l.checkout_date)
+    ? `<span style="font-size:12px;white-space:nowrap">${formatDate(l.checkin_date)} →<br>${formatDate(l.checkout_date)}</span>`
+    : '<span style="color:#ccc">—</span>';
+
+  return `<tr onclick="openDetailModal(${l.id})" style="cursor:pointer">
+    <td>
+      <div class="td-name">${esc(l.name || '—')}</div>
+      <div class="td-email">${esc(l.email || '')}</div>
+      ${l.phone ? `<div class="td-email">${esc(l.phone)}</div>` : ''}
+    </td>
+    <td>${srcBadge}</td>
+    <td>${stsBadge}</td>
+    <td style="max-width:140px;font-size:12px;color:var(--text-muted)">${esc(l.campaign_name || '—')}</td>
+    <td>${val}</td>
+    <td>${dates}</td>
+    <td style="white-space:nowrap;font-size:12px;color:var(--text-muted)">${created}</td>
+    <td onclick="event.stopPropagation()">${actions}</td>
+  </tr>`;
+}
+
+// ─── Render: Activity Feed ────────────────────────────────────────────────────
+function renderActivity(events) {
+  const el = document.getElementById('activity-list');
+  if (!events || events.length === 0) {
+    el.innerHTML = '<p class="loading" style="padding:24px;color:var(--text-muted)">No recent activity</p>';
+    return;
+  }
+  el.innerHTML = events.map(e => {
+    const desc = activityDesc(e);
+    return `
+      <div class="activity-item">
+        <div class="activity-dot ${e.event_type}"></div>
+        <div class="activity-text">${desc}</div>
+        <div class="activity-time">${formatDate(e.created_at, true)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function activityDesc(e) {
+  const src = SOURCE_LABELS[e.source] || e.source || '';
+  const cam = e.campaign ? ` · <em>${esc(e.campaign)}</em>` : '';
+  switch (e.event_type) {
+    case 'form_submission': return `📝 New inquiry submitted via ${src}${cam}`;
+    case 'manual_entry':    return `👤 Lead added manually${src ? ' from ' + src : ''}${cam}`;
+    case 'status_change': {
+      try { const m = JSON.parse(e.meta); return `🔄 Lead #${m.lead_id} moved <strong>${m.from}</strong> → <strong>${m.to}</strong>`; } catch {}
+      return `🔄 Status updated`;
+    }
+    case 'contact_click': return `🖱️ Contact button clicked · ${src}${cam}`;
+    case 'book_click':    return `🖱️ Book button clicked · ${src}${cam}`;
+    case 'impression':    return `👁️ Ad impression · ${src}${cam}`;
+    case 'form_view':     return `📋 Form viewed · ${src}${cam}`;
+    default: return `⚡ ${e.event_type}${src ? ' · ' + src : ''}${cam}`;
+  }
+}
+
+// ─── Lead Detail Modal ────────────────────────────────────────────────────────
+async function openDetailModal(id) {
+  const leads = leadsData.length ? leadsData : (await api('/api/leads?limit=500')).leads;
+  const lead  = leads.find(l => l.id === id);
+  if (!lead) return;
+
+  document.getElementById('detail-modal-title').textContent = lead.name || 'Lead #' + id;
+  document.getElementById('detail-modal-body').innerHTML = `
+    <div class="detail-grid" style="margin-bottom:16px;">
+      <div class="detail-item"><label>Name</label><span>${esc(lead.name || '—')}</span></div>
+      <div class="detail-item"><label>Email</label><span>${lead.email ? `<a href="mailto:${esc(lead.email)}">${esc(lead.email)}</a>` : '—'}</span></div>
+      <div class="detail-item"><label>Phone</label><span>${esc(lead.phone || '—')}</span></div>
+      <div class="detail-item"><label>Source</label><span><span class="badge badge-${lead.source}">${SOURCE_LABELS[lead.source]||lead.source}</span></span></div>
+      <div class="detail-item"><label>Status</label><span><span class="badge badge-${lead.status}">${STATUS_LABELS[lead.status]||lead.status}</span></span></div>
+      <div class="detail-item"><label>Campaign</label><span>${esc(lead.campaign_name || '—')}</span></div>
+      <div class="detail-item"><label>Est. Value</label><span>${lead.estimated_value > 0 ? '<strong>$' + Number(lead.estimated_value).toLocaleString() + '</strong>' : '—'}</span></div>
+      <div class="detail-item"><label>Check-in</label><span>${esc(lead.checkin_date || '—')}</span></div>
+      <div class="detail-item"><label>Check-out</label><span>${esc(lead.checkout_date || '—')}</span></div>
+      <div class="detail-item"><label>Created</label><span>${formatDate(lead.created_at, true)}</span></div>
+      ${lead.utm_source ? `<div class="detail-item"><label>UTM Source</label><span>${esc(lead.utm_source)}</span></div>` : ''}
+      ${lead.utm_campaign ? `<div class="detail-item"><label>UTM Campaign</label><span>${esc(lead.utm_campaign)}</span></div>` : ''}
+    </div>
+    ${lead.inquiry_message ? `
+      <div style="margin-bottom:14px;">
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:4px;">Inquiry</label>
+        <div style="background:var(--bg);border-radius:8px;padding:12px 14px;font-size:13px;border:1px solid var(--border);">${esc(lead.inquiry_message)}</div>
+      </div>` : ''}
+    ${lead.notes ? `
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:4px;">Notes</label>
+        <div style="background:var(--sky);border-radius:8px;padding:12px 14px;font-size:13px;border:1px solid var(--border);">${esc(lead.notes)}</div>
+      </div>` : ''}
+  `;
+
+  document.getElementById('detail-edit-btn').onclick = () => {
+    closeModal('detail-modal');
+    openEditLeadModal(lead);
+  };
+
+  openModal('detail-modal');
+}
+
+// ─── Add / Edit Lead Modal ────────────────────────────────────────────────────
+function openAddLeadModal() {
+  document.getElementById('modal-title').textContent = 'Add Lead';
+  document.getElementById('form-lead-id').value = '';
+  document.getElementById('lead-form').reset();
+  document.getElementById('modal-delete-btn').style.display = 'none';
+  openModal('lead-modal');
+}
+
+function openEditLeadModal(lead) {
+  document.getElementById('modal-title').textContent = 'Edit Lead';
+  document.getElementById('form-lead-id').value   = lead.id;
+  document.getElementById('form-name').value      = lead.name || '';
+  document.getElementById('form-email').value     = lead.email || '';
+  document.getElementById('form-phone').value     = lead.phone || '';
+  document.getElementById('form-source').value    = lead.source || 'direct';
+  document.getElementById('form-status').value    = lead.status || 'new';
+  document.getElementById('form-campaign').value  = lead.campaign_name || '';
+  document.getElementById('form-value').value     = lead.estimated_value || '';
+  document.getElementById('form-checkin').value   = lead.checkin_date || '';
+  document.getElementById('form-checkout').value  = lead.checkout_date || '';
+  document.getElementById('form-inquiry').value   = lead.inquiry_message || '';
+  document.getElementById('form-notes').value     = lead.notes || '';
+  document.getElementById('modal-delete-btn').style.display = 'inline-flex';
+  openModal('lead-modal');
+}
+
+async function saveLead() {
+  const id = document.getElementById('form-lead-id').value;
+  const payload = {
+    name:            document.getElementById('form-name').value,
+    email:           document.getElementById('form-email').value,
+    phone:           document.getElementById('form-phone').value,
+    source:          document.getElementById('form-source').value,
+    status:          document.getElementById('form-status').value,
+    campaign_name:   document.getElementById('form-campaign').value,
+    estimated_value: document.getElementById('form-value').value,
+    checkin_date:    document.getElementById('form-checkin').value,
+    checkout_date:   document.getElementById('form-checkout').value,
+    inquiry_message: document.getElementById('form-inquiry').value,
+    notes:           document.getElementById('form-notes').value,
+  };
+  try {
+    if (id) {
+      await api(`/api/leads/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      toast('Lead updated', 'success');
+    } else {
+      await api('/api/leads', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      toast('Lead added', 'success');
+    }
+    closeModal('lead-modal');
+    refreshAll();
+    if (document.getElementById('view-leads').classList.contains('active')) loadLeads();
+  } catch (e) {
+    toast('Error saving lead', 'error');
+  }
+}
+
+async function deleteLead() {
+  const id = document.getElementById('form-lead-id').value;
+  if (!id) return;
+  if (!confirm('Delete this lead permanently?')) return;
+  try {
+    await api(`/api/leads/${id}`, { method: 'DELETE' });
+    toast('Lead deleted', 'success');
+    closeModal('lead-modal');
+    refreshAll();
+    if (document.getElementById('view-leads').classList.contains('active')) loadLeads();
+  } catch (e) { toast('Error deleting lead', 'error'); }
+}
+
+// ─── Modal helpers ────────────────────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function handleModalOverlay(e) { if (e.target === e.currentTarget) closeModal(e.currentTarget.id); }
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function esc(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatDate(str, full = false) {
+  if (!str) return '—';
+  const d = new Date(str.includes('T') ? str : str.replace(' ', 'T'));
+  if (isNaN(d)) return str;
+  if (full) return d.toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+
+function toast(msg, type = 'info') {
+  const div = document.createElement('div');
+  div.className = `toast ${type}`;
+  div.textContent = msg;
+  document.getElementById('toast-container').appendChild(div);
+  setTimeout(() => div.remove(), 3500);
+}
+
+function debounceSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadLeads, 350);
+}
+
+// ─── Campaigns ────────────────────────────────────────────────────────────────
+let campaignsData = [];
+let campaignFunnelChart = null;
+let campSortCol = 'created_at';
+let campSortDir = 'desc';
+
+const CHANNEL_LABELS = {
+  facebook_ad: 'Facebook Ad', instagram_ad: 'Instagram Ad',
+  organic_instagram: 'Organic IG', both: 'FB + IG'
+};
+
+async function loadCampaigns() {
+  try {
+    campaignsData = await api('/api/campaigns');
+    renderCampaignsTable(campaignsData);
+  } catch (e) {
+    console.error(e);
+    document.getElementById('campaigns-table-wrap').innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Error loading campaigns</p></div>`;
+  }
+}
+
+function renderCampaignsTable(campaigns) {
+  const el = document.getElementById('campaigns-table-wrap');
+  if (!campaigns || campaigns.length === 0) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">📣</div><p>No campaigns yet. Add your first one!</p></div>`;
+    return;
+  }
+
+  // Sort
+  const sorted = [...campaigns].sort((a, b) => {
+    let av = a[campSortCol], bv = b[campSortCol];
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av == null) av = '';
+    if (bv == null) bv = '';
+    if (campSortDir === 'asc') return av < bv ? -1 : av > bv ? 1 : 0;
+    return av > bv ? -1 : av < bv ? 1 : 0;
+  });
+
+  const cols = ['Campaign', 'Region', 'Offer', 'Status', 'Budget/day', 'Spend', 'Clicks', 'Form Views', 'Inquiries', 'Booked', 'Conv%', 'Pipeline', ''];
+  const sortMap = { 'Campaign': 'name', 'Region': 'region', 'Status': 'status', 'Budget/day': 'budget_daily', 'Spend': 'spend_actual', 'Clicks': 'clicks', 'Inquiries': 'inquiries', 'Booked': 'booked', 'Pipeline': 'pipeline_value' };
+
+  el.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          ${cols.map(c => {
+            const key = sortMap[c];
+            const cls = key && campSortCol === key ? `sorted ${campSortDir}` : '';
+            return `<th class="${cls}" ${key ? `onclick="campSort('${key}')"` : ''}>${c}</th>`;
+          }).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${sorted.map(c => renderCampaignRow(c)).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderCampaignRow(c) {
+  const statusBadge = `<span class="badge camp-status-${c.status}">${c.status}</span>`;
+  const channelBadge = `<span class="badge badge-${c.channel === 'both' ? 'facebook_ad' : c.channel}" style="font-size:10px;">${CHANNEL_LABELS[c.channel] || c.channel}</span>`;
+  const pipeline = c.pipeline_value > 0 ? `<span class="td-value">$${Number(c.pipeline_value).toLocaleString()}</span>` : '<span style="color:#ccc">—</span>';
+  const spend = c.spend_actual > 0 ? `$${Number(c.spend_actual).toLocaleString()}` : '—';
+  const budget = c.budget_daily > 0 ? `$${c.budget_daily}/d` : '—';
+  const conv = c.inquiries > 0 ? `<span style="color:var(--teal);font-weight:700;">${c.conversion_rate}%</span>` : '<span style="color:#ccc">—</span>';
+
+  return `<tr onclick="loadCampaignFunnel(${c.id})" style="cursor:pointer;" class="camp-row" data-id="${c.id}">
+    <td>
+      <div class="td-name" style="max-width:200px;white-space:normal;">${esc(c.name)}</div>
+      ${c.meta_campaign_id ? `<div class="td-email">ID: ${esc(c.meta_campaign_id)}</div>` : ''}
+    </td>
+    <td style="font-size:12px;color:var(--text-muted);">${esc(c.region || '—')}</td>
+    <td style="font-size:12px;color:var(--text-muted);max-width:120px;">${esc(c.offer || '—')}</td>
+    <td>${statusBadge}</td>
+    <td style="font-size:13px;">${budget}</td>
+    <td style="font-size:13px;">${spend}</td>
+    <td style="font-size:13px;font-weight:600;">${c.clicks || 0}</td>
+    <td style="font-size:13px;">${c.form_views || 0}</td>
+    <td style="font-size:13px;font-weight:600;">${c.inquiries || 0}</td>
+    <td style="font-size:13px;font-weight:600;color:var(--teal);">${c.booked || 0}</td>
+    <td>${conv}</td>
+    <td>${pipeline}</td>
+    <td onclick="event.stopPropagation()">
+      <button class="btn btn-ghost btn-sm" onclick="openEditCampaignForm(${c.id})">✏️</button>
+    </td>
+  </tr>`;
+}
+
+function campSort(col) {
+  if (campSortCol === col) campSortDir = campSortDir === 'asc' ? 'desc' : 'asc';
+  else { campSortCol = col; campSortDir = 'desc'; }
+  renderCampaignsTable(campaignsData);
+}
+window.campSort = campSort;
+
+async function loadCampaignFunnel(id) {
+  const panel = document.getElementById('campaign-funnel-panel');
+  panel.style.display = 'block';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Highlight selected row
+  document.querySelectorAll('.camp-row').forEach(r => r.classList.toggle('camp-row-selected', r.dataset.id == id));
+
+  try {
+    const data = await api(`/api/campaigns/${id}/funnel`);
+    document.getElementById('campaign-funnel-title').textContent = `📊 ${data.campaign.name}`;
+
+    // Funnel stages
+    const stagesEl = document.getElementById('campaign-funnel-stages');
+    const stages = data.stages || [];
+    stagesEl.innerHTML = stages.map(s => `
+      <div class="camp-funnel-stage">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;">${s.label}</span>
+          <span style="font-size:12px;color:var(--teal);font-weight:700;">${s.pct}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;height:10px;border-radius:5px;background:var(--border);overflow:hidden;">
+            <div style="height:100%;border-radius:5px;background:var(--amber);width:${Math.max(4, (s.value / (stages[0].value || 1)) * 100)}%;transition:width .4s;"></div>
+          </div>
+          <span style="font-size:18px;font-weight:800;min-width:40px;text-align:right;">${Number(s.value).toLocaleString()}</span>
+        </div>
+      </div>
+    `).join('');
+
+    // Meta info
+    document.getElementById('campaign-funnel-meta').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><span style="color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;font-weight:600;">Pipeline Value</span><br><span style="font-size:18px;font-weight:800;color:var(--teal);">$${Number(data.pipeline_value).toLocaleString()}</span></div>
+        <div><span style="color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;font-weight:600;">Conversion Rate</span><br><span style="font-size:18px;font-weight:800;color:var(--amber);">${data.conversion_rate}%</span></div>
+        <div><span style="color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;font-weight:600;">Actual Spend</span><br><span style="font-size:16px;font-weight:700;">$${Number(data.campaign.spend_actual || 0).toLocaleString()}</span></div>
+        <div><span style="color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;font-weight:600;">Daily Budget</span><br><span style="font-size:16px;font-weight:700;">$${data.campaign.budget_daily}/day</span></div>
+      </div>
+      ${data.campaign.notes ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);">${esc(data.campaign.notes)}</div>` : ''}
+    `;
+
+    // Chart
+    const ctx = document.getElementById('campaignFunnelChart').getContext('2d');
+    if (campaignFunnelChart) campaignFunnelChart.destroy();
+    campaignFunnelChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: stages.map(s => s.label),
+        datasets: [{
+          label: 'Count',
+          data: stages.map(s => s.value),
+          backgroundColor: ['#c97d2e', '#28a89a', '#0f5460', '#27ae60'],
+          borderRadius: 8,
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, grid: { color: '#f0ebe2' } },
+          y: { grid: { display: false } }
+        }
+      }
+    });
+
+  } catch (e) {
+    console.error(e);
+    document.getElementById('campaign-funnel-stages').innerHTML = '<p style="color:var(--sunset)">Error loading funnel data</p>';
+  }
+}
+
+function closeCampaignFunnel() {
+  document.getElementById('campaign-funnel-panel').style.display = 'none';
+  document.querySelectorAll('.camp-row').forEach(r => r.classList.remove('camp-row-selected'));
+}
+
+function openAddCampaignForm() {
+  document.getElementById('campaign-form-title').textContent = '➕ Add Campaign';
+  document.getElementById('form-campaign-id').value = '';
+  document.getElementById('campaign-form').reset();
+  document.getElementById('camp-status').value = 'active';
+  document.getElementById('camp-channel').value = 'both';
+  showCampaignForm();
+}
+
+function openEditCampaignForm(id) {
+  const c = campaignsData.find(c => c.id === id);
+  if (!c) return;
+  document.getElementById('campaign-form-title').textContent = '✏️ Edit Campaign';
+  document.getElementById('form-campaign-id').value = c.id;
+  document.getElementById('camp-name').value         = c.name || '';
+  document.getElementById('camp-region').value       = c.region || '';
+  document.getElementById('camp-offer').value        = c.offer || '';
+  document.getElementById('camp-audience').value     = c.target_audience || '';
+  document.getElementById('camp-budget-daily').value = c.budget_daily || '';
+  document.getElementById('camp-budget-total').value = c.budget_total || '';
+  document.getElementById('camp-spend').value        = c.spend_actual || '';
+  document.getElementById('camp-channel').value      = c.channel || 'both';
+  document.getElementById('camp-status').value       = c.status || 'active';
+  document.getElementById('camp-meta-id').value      = c.meta_campaign_id || '';
+  document.getElementById('camp-start-date').value   = c.start_date || '';
+  document.getElementById('camp-end-date').value     = c.end_date || '';
+  document.getElementById('camp-notes').value        = c.notes || '';
+  showCampaignForm();
+}
+
+function showCampaignForm() {
+  const panel = document.getElementById('campaign-form-panel');
+  panel.style.display = 'block';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeCampaignForm() {
+  document.getElementById('campaign-form-panel').style.display = 'none';
+}
+
+async function saveCampaign() {
+  const id = document.getElementById('form-campaign-id').value;
+  const payload = {
+    name:            document.getElementById('camp-name').value,
+    region:          document.getElementById('camp-region').value,
+    offer:           document.getElementById('camp-offer').value,
+    target_audience: document.getElementById('camp-audience').value,
+    budget_daily:    document.getElementById('camp-budget-daily').value,
+    budget_total:    document.getElementById('camp-budget-total').value,
+    spend_actual:    document.getElementById('camp-spend').value,
+    channel:         document.getElementById('camp-channel').value,
+    status:          document.getElementById('camp-status').value,
+    meta_campaign_id:document.getElementById('camp-meta-id').value,
+    start_date:      document.getElementById('camp-start-date').value || null,
+    end_date:        document.getElementById('camp-end-date').value || null,
+    notes:           document.getElementById('camp-notes').value,
+  };
+  if (!payload.name) { toast('Campaign name is required', 'error'); return; }
+  try {
+    if (id) {
+      await api(`/api/campaigns/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      toast('Campaign updated', 'success');
+    } else {
+      await api('/api/campaigns', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      toast('Campaign created', 'success');
+    }
+    closeCampaignForm();
+    loadCampaigns();
+  } catch (e) {
+    toast('Error saving campaign', 'error');
+  }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+(async () => {
+  await Promise.all([loadStats(), loadFunnelInline(), loadRecentLeads()]);
+})();
+</script>
+</body>
+</html>

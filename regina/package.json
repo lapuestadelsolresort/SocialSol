@@ -1,0 +1,13 @@
+{
+  "name": "lapuestadelsolresort-regina",
+  "version": "1.0.0",
+  "description": "Reengager Regina — past-guest reactivation drafter (Phase R5)",
+  "private": true,
+  "dependencies": {
+    "@databases/sqlite": "^4.0.2",
+    "fast-levenshtein": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

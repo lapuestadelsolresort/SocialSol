@@ -1,0 +1,13 @@
+{
+  "name": "lapuestadelsolresort-sarah-coach",
+  "version": "1.0.0",
+  "description": "Sarah-coach — inbound-reply assistant for Sarah (Phase R7)",
+  "private": true,
+  "dependencies": {
+    "@databases/sqlite": "^4.0.2",
+    "fast-levenshtein": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

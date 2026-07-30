@@ -1,0 +1,58 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+secrets/
+**/secrets/
+**/*.pem
+**/*.key
+**/*service-account*.json
+campaigns/active-campaigns.json
+
+# Runtime data
+**/data/
+**/logs/
+**/memory/
+**/backups/
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite3
+**/*.jsonl
+**/*.log
+**/*.pid
+**/*.tmp
+prospector/state.json
+prospector/config.json
+regina/config.json
+sarah-coach/config.json
+
+# Dependencies and generated output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.astro/
+**/.astro/
+.wrangler/
+**/.wrangler/
+coverage/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Large/private media
+media/originals/
+media/proxies/
+media/renditions/
+media/thumbs/
+media/transcripts/
+media/waveforms/
+media/photos-cache/
+landing/apps/*/public/images/
+landing/apps/*/public/video/
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

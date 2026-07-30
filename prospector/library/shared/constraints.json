@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "length": {
+    "min_words": 40,
+    "max_words": 150,
+    "min_sentences": 3,
+    "max_sentences": 6
+  },
+  "subject": {
+    "min_chars": 15,
+    "max_chars": 60,
+    "no_emoji": true,
+    "no_all_caps": true
+  },
+  "required_elements": [
+    "physical_address",
+    "opt_out_link",
+    "why_contacting_disclosure",
+    "list_unsubscribe_header"
+  ],
+  "structure": {
+    "must_include_landing_page_link": true,
+    "max_links": 2,
+    "no_attachments": true
+  },
+  "banned_substrings_file": "library/shared/banned-phrases.md",
+  "diversity": {
+    "recent_sends_window": 25,
+    "max_opener_token_overlap": 0.4
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "channel_id": "replace-with-slack-channel-id",
+  "channel_name": "replace-with-channel-name",
+  "allowed_approvers": {
+    "replace-with-slack-user-id": "reviewer"
+  },
+  "sender_from_name": "Resort Team",
+  "sender_from_email": "sender@example.com",
+  "sender_reply_to": "reply@example.com",
+  "physical_address": "Replace with the legal sender address",
+  "weekly_send_caps": {
+    "week_1": 5,
+    "week_2": 10,
+    "week_3": 15,
+    "week_4_plus": 20
+  },
+  "composer": {
+    "model": "claude-sonnet-4-6",
+    "max_recompose_attempts": 1,
+    "compose_batch_max_n": 5,
+    "stale_draft_days": 7
+  },
+  "orchestrator": {
+    "tick_limit": 5,
+    "send_window": {
+      "start_hour_pt": 8,
+      "end_hour_pt": 16,
+      "min_gap_minutes": 20,
+      "max_gap_minutes": 45,
+      "weekdays_only": true
+    },
+    "thresholds": {
+      "bounces_24h": 2,
+      "complaints_7d": 1
+    }
+  }
+}

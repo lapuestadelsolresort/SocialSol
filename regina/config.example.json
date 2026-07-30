@@ -1,0 +1,35 @@
+{
+  "agent": "regina",
+  "slack": {
+    "account": "replace-with-account-name",
+    "channel_name": "replace-with-channel-name",
+    "channel_id": "replace-with-slack-channel-id",
+    "authorized_user_ids": [
+      "replace-with-slack-user-id"
+    ]
+  },
+  "voice_service": {
+    "url": "http://127.0.0.1:3456/api/voice/draft",
+    "timeout_ms": 30000,
+    "concurrency": 2
+  },
+  "batch": {
+    "default_campaign_slug": "smoke",
+    "draft_length": {
+      "min": 40,
+      "max": 150
+    },
+    "max_message_chars": 3500
+  },
+  "reconciliation": {
+    "lookback_days": 30,
+    "auto_mark_threshold": 0.95,
+    "possible_match_threshold": 0.75,
+    "reminder_after_days": 3,
+    "max_reminders_before_suppress": 3
+  },
+  "anniversary": {
+    "hour_local": 9,
+    "minute_local": 0
+  }
+}
