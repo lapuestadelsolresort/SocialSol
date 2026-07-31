@@ -74,3 +74,21 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for ownership and data boundaries.
 - Live budget changes require explicit mode and total-budget guardrails.
 
 See [SECURITY.md](SECURITY.md) for reporting and credential-handling guidance.
+
+## GitHub autosave
+
+The Mac mini scheduler runs `npm run autosave:run` every 30 minutes. The script
+snapshots all Git-eligible working-tree changes to `origin/autosave/macmini`
+through an isolated Git index, so it does not switch branches, stage files, or
+alter the working tree. Ignored runtime data remains excluded. A secret scan
+and a 10 MiB per-file limit must pass before any snapshot is pushed.
+
+Run a safe connectivity and snapshot preview with:
+
+```bash
+npm run autosave:dry-run
+```
+
+The autosave branch is a recovery stream, not a replacement for reviewed
+commits on `main`. Promote finished work through normal tested commits and pull
+requests.
