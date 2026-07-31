@@ -1,0 +1,24 @@
+{
+  "slug": "planners-control-en",
+  "page_slug": "planners",
+  "language": "en",
+  "source": null,
+  "audience": null,
+  "status": "live",
+  "traffic_weight": 100,
+  "type": "landing_page",
+  "is_control": true,
+  "bucket": "leads",
+  "funnel_stage": "cta",
+  "compliance_status": "passed",
+  "hero": {
+    "headline": "A venue partnership built around your couples",
+    "sub": "A private beachfront resort in Riviera Nayarit, backed by a responsive property team, planner support, and a clear referral commission."
+  },
+  "cta": {
+    "text": "Talk with Sarah",
+    "whatsapp_prefill": "Hi Sarah, I'm a wedding or event planner interested in La Puesta del Sol's venue partner program. Could we connect?"
+  },
+  "social_proof": { "enabled": false, "lines": [] },
+  "urgency": null
+}

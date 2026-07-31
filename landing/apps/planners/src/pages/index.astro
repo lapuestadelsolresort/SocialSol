@@ -1,0 +1,303 @@
+---
+/**
+ * La Puesta del Sol — Venue Partner Program
+ * planners.lapuestadelsolresort.com
+ *
+ * Astro + Tailwind static landing page using the shared LPDS CRM tracker.
+ */
+import '../styles/global.css'
+
+const WHATSAPP_URL = 'https://wa.me/15553526612?text=' + encodeURIComponent(
+  "Hi Sarah, I'm a wedding or event planner interested in La Puesta del Sol's venue partner program. Could we connect?"
+);
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Venue Partner Program — La Puesta del Sol, Riviera Nayarit</title>
+  <meta name="description" content="A private beachfront venue partnership for destination wedding and event planners: 22 bedrooms, events up to 85 guests, hosted site visits, co-marketing support, and 10% referral commission." />
+  <meta name="robots" content="noindex,nofollow" />
+  <meta property="og:title" content="La Puesta del Sol Venue Partner Program" />
+  <meta property="og:description" content="A private Riviera Nayarit resort built for the planners who bring destination celebrations to life." />
+  <meta property="og:image" content="/images/hero.webp" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://planners.lapuestadelsolresort.com" />
+  <link rel="canonical" href="https://planners.lapuestadelsolresort.com" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <script is:inline>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '837757775519925');
+    fbq('track', 'PageView');
+  </script>
+  <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=837757775519925&ev=PageView&noscript=1" alt="" /></noscript>
+
+  <script is:inline>
+    window.LPDS_BASE = 'https://webhook.lapuestadelsolresort.com';
+    window.LPDS_PAGE = 'planners';
+  </script>
+  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/tracker.js?v=7"></script>
+  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/hydrate.js?v=7"></script>
+
+  <style is:global>
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: #faf8f5;
+      color: #2c2c2a;
+      font-family: var(--font-body);
+      -webkit-font-smoothing: antialiased;
+    }
+    ::selection { background: #c8d8cc; color: #1d2c24; }
+  </style>
+</head>
+
+<body>
+  <nav class="absolute inset-x-0 top-0 z-50 flex items-center justify-between px-5 py-5 md:px-10">
+    <a href="https://lapuestadelsolresort.com" class="homepage-link text-sm font-medium text-white/75 transition-colors hover:text-white" data-event="nav_homepage_click">La Puesta del Sol</a>
+    <div class="flex items-center gap-5 text-[11px] uppercase tracking-[0.18em] text-white/55">
+      <a href="#property" class="transition-colors hover:text-white">Property</a>
+      <a href="#program" class="transition-colors hover:text-white">Partner program</a>
+    </div>
+  </nav>
+
+  <header class="relative min-h-[720px] overflow-hidden bg-palm-900 md:min-h-[780px]">
+    <img src="/images/hero.webp" alt="Aerial view of La Puesta del Sol's private oceanfront property" class="absolute inset-0 h-full w-full object-cover object-[center_78%]" loading="eager" fetchpriority="high" />
+    <div class="absolute inset-0 bg-gradient-to-r from-black/80 via-black/55 to-black/10"></div>
+    <div class="absolute inset-0 bg-gradient-to-t from-palm-900/70 via-transparent to-black/25"></div>
+
+    <div class="relative mx-auto flex min-h-[720px] max-w-6xl items-end px-6 pb-16 pt-32 md:min-h-[780px] md:items-center md:px-12 md:pb-10">
+      <div class="max-w-2xl">
+        <p class="mb-5 text-[11px] font-medium uppercase tracking-[0.28em] text-gold-300">For destination wedding & event planners</p>
+        <h1 class="hero-headline mb-6 font-display text-[46px] font-medium leading-[0.98] text-white sm:text-6xl md:text-7xl">
+          A venue partnership built around your couples
+        </h1>
+        <p class="hero-sub mb-8 max-w-xl text-base leading-relaxed text-white/75 md:text-lg">
+          A private beachfront resort in Riviera Nayarit, backed by a responsive property team, planner support, and a clear referral commission.
+        </p>
+        <div class="mb-10 flex flex-col gap-3 sm:flex-row">
+          <a href="#program" class="inline-flex items-center justify-center rounded-lg bg-gold-400 px-7 py-3.5 text-sm font-semibold text-palm-900 transition-colors hover:bg-gold-300" data-cta="hero_explore_program" data-event="hero_explore_program">
+            Explore the partner program
+          </a>
+          <a href={WHATSAPP_URL} target="_blank" rel="noopener" class="wa-cta inline-flex items-center justify-center rounded-lg border border-white/35 bg-white/10 px-7 py-3.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/20" data-cta="hero_partner_whatsapp" data-event="hero_partner_whatsapp">
+            Talk with Sarah
+          </a>
+        </div>
+        <div class="grid max-w-2xl grid-cols-2 gap-x-5 gap-y-5 border-t border-white/20 pt-6 sm:grid-cols-4">
+          <div><div class="text-xl font-medium text-white">22</div><div class="mt-1 text-[11px] text-white/55">Bedrooms</div></div>
+          <div><div class="text-xl font-medium text-white">85</div><div class="mt-1 text-[11px] text-white/55">Event guests</div></div>
+          <div><div class="text-xl font-medium text-white">45 min</div><div class="mt-1 text-[11px] text-white/55">From PVR</div></div>
+          <div><div class="text-xl font-medium text-white">10%</div><div class="mt-1 text-[11px] text-white/55">Partner commission</div></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="program" class="mx-auto max-w-6xl px-6 py-20 md:px-12 md:py-28">
+      <div class="grid gap-12 md:grid-cols-[0.8fr_1.2fr] md:gap-20">
+        <div>
+          <p class="mb-4 text-[11px] font-semibold uppercase tracking-[0.25em] text-gold-500">The partner program</p>
+          <h2 class="font-display text-4xl font-medium leading-tight text-palm-900 md:text-5xl">A relationship before a referral</h2>
+          <p class="mt-6 max-w-md text-[15px] leading-relaxed text-sand-600">
+            Your reputation travels with every venue you recommend. We make it easy to understand the property, get direct answers, and decide whether La Puesta del Sol truly fits your couple before you make an introduction.
+          </p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <article class="rounded-2xl border border-sand-200 bg-white p-6">
+            <p class="mb-3 font-display text-3xl text-gold-500">10%</p>
+            <h3 class="mb-2 text-[15px] font-semibold text-palm-900">Partner referral commission</h3>
+            <p class="text-[13px] leading-relaxed text-sand-500">On partner-referred buyouts, paid directly and separately by the resort after the guest's final payment clears.</p>
+          </article>
+          <article class="rounded-2xl border border-sand-200 bg-white p-6">
+            <p class="mb-3 font-display text-3xl text-gold-500">Visit</p>
+            <h3 class="mb-2 text-[15px] font-semibold text-palm-900">Hosted site visits</h3>
+            <p class="text-[13px] leading-relaxed text-sand-500">Walk the villas, event areas, guest flow, and operational spaces with the property team by arrangement.</p>
+          </article>
+          <article class="rounded-2xl border border-sand-200 bg-white p-6">
+            <p class="mb-3 font-display text-3xl text-gold-500">Share</p>
+            <h3 class="mb-2 text-[15px] font-semibold text-palm-900">Co-marketing support</h3>
+            <p class="text-[13px] leading-relaxed text-sand-500">Approved property media plus coordinated tagging and co-posting for events you bring to the resort.</p>
+          </article>
+          <article class="rounded-2xl border border-sand-200 bg-white p-6">
+            <p class="mb-3 font-display text-3xl text-gold-500">Direct</p>
+            <h3 class="mb-2 text-[15px] font-semibold text-palm-900">One property contact</h3>
+            <p class="text-[13px] leading-relaxed text-sand-500">A responsive point of contact for property facts, availability, proposals, and local coordination.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="property" class="bg-palm-900 text-white">
+      <div class="mx-auto grid max-w-6xl gap-12 px-6 py-20 md:grid-cols-2 md:items-center md:px-12 md:py-28">
+        <div>
+          <p class="mb-4 text-[11px] font-semibold uppercase tracking-[0.25em] text-gold-300">The property</p>
+          <h2 class="font-display text-4xl font-medium leading-tight md:text-5xl">One private resort. One celebration at a time.</h2>
+          <p class="mt-6 text-[15px] leading-relaxed text-white/65">
+            La Puesta del Sol spans approximately 54,000 square feet with ocean on three sides. Six villas and a separate four-bedroom bridal suite are connected by garden paths, keeping lodging, meals, and event moments together.
+          </p>
+          <dl class="mt-9 grid grid-cols-2 gap-x-8 gap-y-6 border-t border-white/15 pt-8">
+            <div><dt class="text-[11px] uppercase tracking-wider text-white/45">Event capacity</dt><dd class="mt-1 text-lg">Up to 85 guests</dd></div>
+            <div><dt class="text-[11px] uppercase tracking-wider text-white/45">Accommodation</dt><dd class="mt-1 text-lg">22 bedrooms</dd></div>
+            <div><dt class="text-[11px] uppercase tracking-wider text-white/45">Airport</dt><dd class="mt-1 text-lg">45 minutes from PVR</dd></div>
+            <div><dt class="text-[11px] uppercase tracking-wider text-white/45">Format</dt><dd class="mt-1 text-lg">Exclusive buyout</dd></div>
+          </dl>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <img src="/images/couple.webp" alt="Wedding couple on the oceanfront ceremony platform" class="row-span-2 h-full min-h-[420px] w-full rounded-xl object-cover" loading="lazy" />
+          <img src="/images/villa.webp" alt="Guest villa at La Puesta del Sol" class="aspect-[4/3] w-full rounded-xl object-cover" loading="lazy" />
+          <img src="/images/pathway.webp" alt="Garden pathway connecting the resort villas" class="aspect-[4/3] w-full rounded-xl object-cover" loading="lazy" />
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-6 py-20 md:px-12 md:py-28">
+      <div class="mx-auto max-w-3xl text-center">
+        <p class="mb-4 text-[11px] font-semibold uppercase tracking-[0.25em] text-gold-500">The client story</p>
+        <h2 class="font-display text-4xl font-medium leading-tight text-palm-900 md:text-5xl">A destination wedding that feels like a private world</h2>
+        <p class="mx-auto mt-6 max-w-2xl text-[15px] leading-relaxed text-sand-600">
+          Couples get the intimacy of a private villa experience with the scale and support of a resort: exclusive lodging, oceanfront event spaces, meals, drinks, and an on-property team for a multi-day celebration.
+        </p>
+      </div>
+      <div class="mt-12 grid gap-4 md:grid-cols-3">
+        <div class="rounded-2xl bg-palm-50 p-7"><p class="font-display text-2xl text-palm-900">No shared spaces</p><p class="mt-3 text-[13px] leading-relaxed text-sand-500">The contracted property is reserved for one group, without unrelated resort guests in their celebration.</p></div>
+        <div class="rounded-2xl bg-palm-50 p-7"><p class="font-display text-2xl text-palm-900">The weekend stays together</p><p class="mt-3 text-[13px] leading-relaxed text-sand-500">Villas, meals, pool time, ceremony, and reception all happen within the same private property.</p></div>
+        <div class="rounded-2xl bg-palm-50 p-7"><p class="font-display text-2xl text-palm-900">Local support is on site</p><p class="mt-3 text-[13px] leading-relaxed text-sand-500">Chef, bartender, butler, property coordination, and local vendor support are built into the proposal.</p></div>
+      </div>
+    </section>
+
+    <section class="bg-sand-100">
+      <div class="mx-auto max-w-6xl px-6 py-20 md:px-12 md:py-28">
+        <div class="grid gap-12 md:grid-cols-[1fr_0.8fr] md:items-start md:gap-20">
+          <div>
+            <p class="mb-4 text-[11px] font-semibold uppercase tracking-[0.25em] text-gold-500">How it works</p>
+            <h2 class="font-display text-4xl font-medium leading-tight text-palm-900 md:text-5xl">A straightforward path from fit to referral</h2>
+          </div>
+          <ol class="space-y-8">
+            <li class="flex gap-5"><span class="font-display text-3xl text-gold-500">01</span><div><h3 class="font-semibold text-palm-900">Get to know the property</h3><p class="mt-2 text-[13px] leading-relaxed text-sand-500">Start with a call, current property materials, and a hosted site visit when useful.</p></div></li>
+            <li class="flex gap-5"><span class="font-display text-3xl text-gold-500">02</span><div><h3 class="font-semibold text-palm-900">Introduce the right couple</h3><p class="mt-2 text-[13px] leading-relaxed text-sand-500">We confirm the referral, learn the event requirements, and prepare an availability and pricing proposal.</p></div></li>
+            <li class="flex gap-5"><span class="font-display text-3xl text-gold-500">03</span><div><h3 class="font-semibold text-palm-900">Stay aligned through planning</h3><p class="mt-2 text-[13px] leading-relaxed text-sand-500">Your role with the couple remains intact while the resort team supports property and local logistics.</p></div></li>
+            <li class="flex gap-5"><span class="font-display text-3xl text-gold-500">04</span><div><h3 class="font-semibold text-palm-900">Receive your commission</h3><p class="mt-2 text-[13px] leading-relaxed text-sand-500">The resort pays the 10% partner commission separately after the guest's final payment clears.</p></div></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-6 py-20 md:px-12 md:py-28">
+      <div class="grid gap-12 md:grid-cols-2 md:gap-20">
+        <div>
+          <p class="mb-4 text-[11px] font-semibold uppercase tracking-[0.25em] text-gold-500">Indicative pricing</p>
+          <h2 class="font-display text-4xl font-medium leading-tight text-palm-900 md:text-5xl">A useful starting point for early client conversations</h2>
+          <p class="mt-6 text-[15px] leading-relaxed text-sand-600">
+            A typical five-night wedding buyout for 20–30 guests with full food and beverage starts around <strong class="font-semibold text-palm-900">$35,000 USD</strong>. Final pricing depends on dates, group size, menus, production, and special requests.
+          </p>
+          <p class="mt-4 text-[12px] leading-relaxed text-sand-400">Flights, outside vendors, decor, florals, photography, officiants, rentals, and special production are separate unless included in the written proposal.</p>
+        </div>
+        <div>
+          <p class="mb-5 text-[11px] font-semibold uppercase tracking-[0.25em] text-gold-500">Typical buyout inclusions</p>
+          <ul class="divide-y divide-sand-200 border-y border-sand-200 text-[14px] text-sand-700">
+            <li class="py-4">Six villas plus the four-bedroom bridal suite</li>
+            <li class="py-4">Oceanfront ceremony and reception areas</li>
+            <li class="py-4">On-property chef, bartender, butler, and coordination</li>
+            <li class="py-4">Meals and drinks under the contracted F&B plan</li>
+            <li class="py-4">Local logistics and vendor coordination</li>
+            <li class="py-4">Exclusive use of contracted resort areas</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-6 pb-20 md:px-12 md:pb-28">
+      <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <img src="/images/ceremony.webp" alt="Oceanfront wedding ceremony setup" class="col-span-2 aspect-[16/10] w-full rounded-xl object-cover" loading="lazy" />
+        <img src="/images/food.webp" alt="Chef-prepared meal" class="aspect-square w-full rounded-xl object-cover" loading="lazy" />
+        <img src="/images/pool.webp" alt="Resort pool and gathering area" class="aspect-square w-full rounded-xl object-cover" loading="lazy" />
+      </div>
+    </section>
+
+    <section class="border-y border-sand-200 bg-white">
+      <div class="mx-auto max-w-3xl px-6 py-20 md:px-12 md:py-24">
+        <p class="mb-4 text-center text-[11px] font-semibold uppercase tracking-[0.25em] text-gold-500">Planner questions</p>
+        <h2 class="mb-10 text-center font-display text-4xl font-medium text-palm-900">A few useful details</h2>
+        <div class="divide-y divide-sand-200 border-y border-sand-200">
+          <details class="group py-5">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-4 font-medium text-palm-900"><span>What qualifies as a partner referral?</span><span class="faq-plus text-2xl font-light text-gold-500 transition-transform">+</span></summary>
+            <p class="max-w-2xl pt-3 text-[13px] leading-relaxed text-sand-500">We document the introduction before the proposal process begins. Referral attribution, pre-existing leads, cancellations, and other operational terms are confirmed in the written partner agreement.</p>
+          </details>
+          <details class="group py-5">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-4 font-medium text-palm-900"><span>Can I arrange a site visit?</span><span class="faq-plus text-2xl font-light text-gold-500 transition-transform">+</span></summary>
+            <p class="max-w-2xl pt-3 text-[13px] leading-relaxed text-sand-500">Yes. Hosted visits are arranged with the property team so you can inspect guest flow, villas, event areas, and operational spaces. The exact hosted components are confirmed for each visit.</p>
+          </details>
+          <details class="group py-5">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-4 font-medium text-palm-900"><span>Can outside vendors work at the resort?</span><span class="faq-plus text-2xl font-light text-gold-500 transition-transform">+</span></summary>
+            <p class="max-w-2xl pt-3 text-[13px] leading-relaxed text-sand-500">Yes, subject to the event plan and property requirements. The resort team coordinates access, logistics, and local support with the planner.</p>
+          </details>
+          <details class="group py-5">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-4 font-medium text-palm-900"><span>How is the commission paid?</span><span class="faq-plus text-2xl font-light text-gold-500 transition-transform">+</span></summary>
+            <p class="max-w-2xl pt-3 text-[13px] leading-relaxed text-sand-500">La Puesta del Sol pays the planner's 10% commission directly and separately after the guest's final payment clears. Documentation and payment mechanics are included in the written referral terms.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-palm-900">
+      <div class="mx-auto max-w-4xl px-6 py-20 text-center md:px-12 md:py-28">
+        <p class="mb-4 text-[11px] font-semibold uppercase tracking-[0.25em] text-gold-300">Start with a conversation</p>
+        <h2 class="font-display text-4xl font-medium leading-tight text-white md:text-5xl">See whether La Puesta del Sol belongs in your venue portfolio</h2>
+        <p class="mx-auto mt-5 max-w-xl text-[15px] leading-relaxed text-white/60">Ask for current availability, discuss an upcoming couple, or arrange a hosted property visit.</p>
+        <div class="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <a href={WHATSAPP_URL} target="_blank" rel="noopener" class="wa-cta inline-flex min-w-52 items-center justify-center rounded-lg bg-[#25D366] px-7 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-[#1fb855]" data-cta="footer_partner_whatsapp" data-event="footer_partner_whatsapp">Message Sarah on WhatsApp</a>
+          <a href="mailto:sarah@lapuestadelsolresort.com?subject=Venue%20partner%20program" class="inline-flex min-w-52 items-center justify-center rounded-lg border border-white/25 px-7 py-3.5 text-sm font-medium text-white transition-colors hover:bg-white/10" data-cta="footer_partner_email" data-event="footer_partner_email">Email Sarah</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-sand-200 bg-sand-50 px-6 py-8 text-center text-[12px] text-sand-500">
+    <p><a href="https://lapuestadelsolresort.com" class="homepage-link underline underline-offset-2 hover:text-sand-700" data-event="footer_homepage_click">La Puesta del Sol</a> · La Peñita de Jaltemba, Riviera Nayarit, Mexico</p>
+    <p class="mt-1">Private beachfront buyouts · 45 minutes from Puerto Vallarta International Airport</p>
+  </footer>
+
+  <script is:inline>
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'].forEach(function(k) {
+        var v = params.get(k);
+        if (v) sessionStorage.setItem(k, v);
+      });
+
+      document.querySelectorAll('.homepage-link').forEach(function(link) {
+        link.addEventListener('click', function() {
+          if (typeof fbq === 'function') fbq('trackCustom', 'HomepageClick', { page: 'planners', location: link.getAttribute('data-event') || 'homepage_click' });
+        });
+      });
+
+      document.querySelectorAll('.wa-cta').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          if (typeof fbq === 'function') {
+            fbq('track', 'Lead', {
+              content_name: 'planner_partner_whatsapp_click',
+              content_category: 'venue_partner',
+              value: 3500,
+              currency: 'USD'
+            });
+          }
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

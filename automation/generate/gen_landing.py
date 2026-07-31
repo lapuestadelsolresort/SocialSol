@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _gen_common as g
 
-PAGES = {"weddings", "fitness", "retreats", "summer-sale"}
+PAGES = {"weddings", "fitness", "retreats", "summer-sale", "planners"}
 
 SUBS = {
     "weddings": [
@@ -28,12 +28,17 @@ SUBS = {
         "Full-property buyout for teams of 15-35, 45 minutes from Puerto Vallarta airport.",
         "A private beachfront base for offsites that need focus, meals, and real downtime.",
     ],
+    "planners": [
+        "A private Riviera Nayarit resort backed by planner support and a clear referral commission.",
+        "A relationship-led venue partnership for destination wedding and event planners.",
+    ],
 }
 
 PREFILLS = {
     "weddings": "Hi Sarah, I am interested in hosting a wedding at La Puesta del Sol. Could we set up a quick call?",
     "fitness": "Hi Sarah, I am a fitness and wellness event coordinator interested in a retreat at La Puesta del Sol. Can we chat?",
     "retreats": "Hi Sarah, I am interested in hosting a corporate retreat at La Puesta del Sol. Could we set up a quick call?",
+    "planners": "Hi Sarah, I am a wedding or event planner interested in La Puesta del Sol's venue partner program. Could we connect?",
 }
 
 
