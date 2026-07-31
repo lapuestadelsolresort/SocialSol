@@ -23,7 +23,9 @@
     "init:runtime": "bash scripts/init-runtime.sh",
     "build:landing": "npm run build --workspaces --if-present",
     "audit:production": "npm audit --omit=dev",
-    "check:secrets": "node scripts/check-secrets.js"
+    "check:secrets": "node scripts/check-secrets.js",
+    "autosave:dry-run": "bash scripts/autosave-to-github.sh --dry-run",
+    "autosave:run": "bash scripts/autosave-to-github.sh"
   },
   "engines": {
     "node": ">=22.12.0"

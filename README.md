@@ -6,6 +6,7 @@ Marketing infrastructure for La Puesta del Sol Resort:
 - Twilio WhatsApp and Meta DM webhook bridge
 - SQLite CRM and landing-page experiment service
 - Daily reporting, campaign integrity checks, encrypted backups, and job monitoring
+- Guarded GitHub snapshots of in-progress Mac mini work
 - Cloudflare Pages landing applications
 - Prospector Paulina lead research, compliant composition, and outbound sending
 - Reengager Regina past-guest/inquiry campaigns and Sarah Coach reply assistance
@@ -25,6 +26,7 @@ This repository contains source code and safe configuration examples only. Live 
 - `sarah-coach/` — inbound-reply drafting and outcome capture
 - `warmup/` — sender warmup templates and private-recipient driver
 - `campaigns/` — sanitized configuration template; live campaign state is ignored
+- `scripts/autosave-to-github.sh` — isolated snapshots to `autosave/macmini`
 
 ## Local setup
 
