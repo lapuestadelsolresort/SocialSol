@@ -5,13 +5,13 @@ generated_or_human: agent-drafted-sarah-reviewed
 date_added: 2026-05-04
 ---
 
-**Subject:** Question about your 2027 destination calendar
+**Subject:** A Riviera Nayarit venue partner for your portfolio
 
 Hi Daniela,
 
-Are you taking 2027 destination inquiries yet, or is the calendar still mostly 2026? I'm asking because we're a private oceanfront buyout in La Peñita, Nayarit — six villas, sleeps up to 35 with a separate bridal suite, gourmet meals from our chef included. The planners I want to be working with by 2027 are the ones who treat venue choice like a long-game decision. I found you through a list of independent NY-metro planners running destination work, and we have two weddings booked for October 2026 and January 2027.
+Do you keep a short list of private Mexico venues you can evaluate before a couple needs one? I found you through a list of independent NY-metro planners running destination work. We run a private oceanfront resort in Riviera Nayarit, and the partner program includes hosted site visits, one direct property contact, approved co-marketing support, and a documented 10% referral commission.
 
-Page is here if you want to take a look: https://weddings.lapuestadelsolresort.com — and don't hesitate to ping me back if anything resonates.
+The partner page is here if you want to take a look: https://planners.lapuestadelsolresort.com/?utm_source=paulina&utm_medium=email&utm_campaign=planner_partner_program_v1 — and don't hesitate to ping me with practical questions.
 
 Warmest regards,
 Sarah
@@ -23,4 +23,4 @@ Reply 'unsubscribe' and I'll remove you immediately.
 
 ## Why this is a good example
 
-Hook angle is soft-question: the opener is a real planning question, not a rhetorical one. Why-contacting disclosure is explicit (`I found you through a list of independent NY-metro planners`). Body absorbs the elevator-sentence nouns. The "long-game decision" line earns its place by tying the question to substance instead of being a faux-curious lead-in. One proof point (bookings). Closer pivots to the link in the `don't hesitate` register from voice-spec §2.9. Two em-dashes. Zero warmth markers in the body — fine per voice-spec §4 ("Zero is also fine"); the warmth lives in `Warmest regards,`. Sign-off matches the slightly-more-formal length. **Composer note:** the opening question must be real and answerable — not a sales-y "are you ready to book?" trojan.
+Hook angle is soft-question: the opener is a real venue-portfolio question, not a disguised booking ask. Why-contacting disclosure is explicit (`I found you through a list of independent NY-metro planners`). The body names the partner structure and the closer asks only for a click. **Composer note:** the opening question must be real and answerable — never use a sales-y "are you ready to book?" question.

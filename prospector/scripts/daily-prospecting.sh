@@ -3,8 +3,9 @@
 #
 # Runs every weekday at 8:30am PT.
 # 1. Engagement analysis + hypothesis (posts to Slack)
-# 2. Research: finds new leads (rotating persona)
-# 3. Compose 5 drafts → auto-approve → orchestrator sends them
+# 2. Research: finds wedding/event planners only
+# 3. Attach eligible planner contacts to the partner-program campaign
+# 4. Compose 5 drafts → auto-approve → orchestrator sends them
 #
 # No human approval required. Jason sees daily report in #prospector-paulina.
 # ────────────────────────────────────────────────────────────────────────────
@@ -17,6 +18,8 @@ PROSPECTOR="$SOCIALSOL_ROOT/prospector"
 CRM_DB="${DB_PATH:-$SOCIALSOL_ROOT/crm/data/crm.db}"
 SCRIPTS_DIR="$PROSPECTOR/scripts"
 LOG="$PROSPECTOR/logs/daily-prospecting.log"
+STATE_PATH="$PROSPECTOR/state.json"
+CAMPAIGN_SLUG="${PAULINA_CAMPAIGN_SLUG:-planner_partner_program_v1}"
 OPENCLAW="${OPENCLAW_BIN:-/opt/homebrew/bin/openclaw}"
 SLACK_CHANNEL="${PROSPECTOR_SLACK_CHANNEL:?Set PROSPECTOR_SLACK_CHANNEL}"
 SLACK_ACCOUNT="${OPENCLAW_SLACK_ACCOUNT:?Set OPENCLAW_SLACK_ACCOUNT}"
@@ -32,6 +35,15 @@ if [[ "$DOW" -ge 6 ]]; then
   exit 0
 fi
 
+# A pause blocks the whole autonomous loop. This prevents research and
+# auto-approved drafts from piling up while the orchestrator is intentionally
+# stopped for strategy, compliance, or deliverability review.
+if [[ -f "$STATE_PATH" ]] && jq -e '.paused == true' "$STATE_PATH" >/dev/null 2>&1; then
+  PAUSE_REASON=$(jq -r '.pause_reason // "unspecified"' "$STATE_PATH")
+  log "Paulina is paused — skipping research and composition ($PAUSE_REASON)"
+  exit 0
+fi
+
 log "===== Daily prospecting run starting (DOW=$DOW) ====="
 
 # ── 1. Engagement analysis + hypothesis ─────────────────────────────────────
@@ -41,8 +53,10 @@ node engagement-analysis.js 2>>"$LOG" || log "WARN: Engagement analysis had erro
 
 sleep 5
 
-# ── 2. Research: rotating persona (Mon=wedding Wed=houston Thu=corporate Fri=luxury)
-PERSONAS=("wedding_planner" "houston_wedding_planner" "corporate_retreat" "luxury_travel_advisor" "family_retreat")
+# ── 2. Research: planners only ───────────────────────────────────────────────
+# Alternate the general destination-planner and Houston planner query banks.
+# Both feed the same wedding-planner partner-program persona in the composer.
+PERSONAS=("wedding_planner" "houston_wedding_planner")
 PERSONA_IDX=$(( (DOW - 1) % ${#PERSONAS[@]} ))
 TODAY_PERSONA="${PERSONAS[$PERSONA_IDX]}"
 
@@ -52,10 +66,41 @@ node scripts/run-research.js --persona "$TODAY_PERSONA" 2>>"$LOG" || log "WARN: 
 
 sleep 5
 
-# ── 3. Compose batch ─────────────────────────────────────────────────────────
-log "Composing drafts for planner_outreach_v1"
+# ── 3. Attach eligible planner contacts ──────────────────────────────────────
+CAMPAIGN_ID=$(sqlite3 "$CRM_DB" "SELECT id FROM outreach_campaigns WHERE slug='$CAMPAIGN_SLUG' AND status='active' LIMIT 1;")
+if [[ -z "$CAMPAIGN_ID" ]]; then
+  log "ERROR: active campaign '$CAMPAIGN_SLUG' not found"
+  exit 1
+fi
+
+ATTACHED=$(sqlite3 "$CRM_DB" "
+  INSERT OR IGNORE INTO campaign_contacts (campaign_id, contact_id, attached_by)
+  SELECT $CAMPAIGN_ID, c.id, 'daily-prospecting'
+  FROM contacts c
+  WHERE c.email IS NOT NULL AND trim(c.email) <> ''
+    AND COALESCE(c.do_not_contact, 0) = 0
+    AND COALESCE(c.status, 'new') NOT IN ('replied', 'converted', 'dead')
+    AND (
+      c.source_query LIKE '%_wedding_planner'
+      OR c.source_query LIKE '%_houston_wedding_planner'
+      OR EXISTS (
+        SELECT 1
+        FROM campaign_contacts old_cc
+        JOIN outreach_campaigns old_oc ON old_oc.id = old_cc.campaign_id
+        WHERE old_cc.contact_id = c.id AND old_oc.slug = 'planner_outreach_v1'
+      )
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM suppressions s WHERE lower(s.email) = lower(c.email)
+    );
+  SELECT changes();
+")
+log "Attached $ATTACHED eligible planner contacts to $CAMPAIGN_SLUG"
+
+# ── 4. Compose batch ─────────────────────────────────────────────────────────
+log "Composing partner-program drafts for $CAMPAIGN_SLUG"
 cd "$PROSPECTOR"
-COMPOSE_OUTPUT=$(node composer.js compose-batch planner_outreach_v1 5 2>>"$LOG")
+COMPOSE_OUTPUT=$(node composer.js compose-batch "$CAMPAIGN_SLUG" 5 2>>"$LOG")
 log "Compose result: $COMPOSE_OUTPUT"
 
 # Extract draft IDs from compose output (JSON array of {draft_id: N})
@@ -80,7 +125,7 @@ print(len(d.get('failed', [])))
 
 log "Composed: $COMPOSED_COUNT | Failed: $FAILED_COUNT | Draft IDs: $DRAFT_IDS"
 
-# ── 4. Auto-approve all new drafts → orchestrator will send ─────────────────
+# ── 5. Auto-approve all new drafts → orchestrator will send ─────────────────
 if [[ -n "$DRAFT_IDS" && "$COMPOSED_COUNT" -gt 0 ]]; then
   log "Auto-approving $COMPOSED_COUNT drafts: $DRAFT_IDS"
 
@@ -105,7 +150,9 @@ else
   # Check if we've exhausted the campaign
   ELIGIBLE=$(sqlite3 "$CRM_DB" "
     SELECT COUNT(*) FROM campaign_contacts cc
-    WHERE NOT EXISTS (
+    WHERE cc.campaign_id=$CAMPAIGN_ID
+      AND
+    NOT EXISTS (
       SELECT 1 FROM outreach_sends os
       WHERE os.contact_id=cc.contact_id AND os.campaign_id=cc.campaign_id AND os.status != 'cancelled'
     );

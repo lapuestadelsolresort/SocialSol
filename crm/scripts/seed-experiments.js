@@ -56,6 +56,7 @@ const ACTIVE_CAMPAIGNS = path.join(ROOT, 'campaigns', 'active-campaigns.json');
     ['exp-weddings-control', 'Weddings control LP', 'weddings-control-en'],
     ['exp-fitness-control', 'Fitness control LP', 'fitness-control-en'],
     ['exp-retreats-control', 'Retreats control LP', 'retreats-control-en'],
+    ['exp-planners-control', 'Planner partner-program control LP', 'planners-control-en'],
   ];
   for (const [slug, title, variant] of controls) {
     await db.query(sql`
