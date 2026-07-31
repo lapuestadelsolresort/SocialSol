@@ -1,0 +1,45 @@
+{
+  "brief_id": "planner-partner-retargeting",
+  "campaign_name": "LPDS — Planners — Partner Retargeting",
+  "status": "AWAITING_CREATIVE_REVIEW",
+  "channel": "meta",
+  "objective": "OUTCOME_TRAFFIC",
+  "optimization_goal": "LANDING_PAGE_VIEWS",
+  "budget_level": "campaign",
+  "campaign_daily_budget_usd": 5,
+  "bucket": "leads",
+  "page_slug": "planners",
+  "landing_page_url": "https://planners.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=planner-retarget&utm_content=partner-program-v1",
+  "utm_campaign": "planner-retarget",
+  "experiment_slug": "exp-meta-planner-partner-retargeting",
+  "audience": {
+    "name": "LPDS — Planner LP Visitors — 180d",
+    "source": "pixel",
+    "pixel_id_env": "META_PIXEL_ID",
+    "retention_days": 180,
+    "url_contains": "planners.lapuestadelsolresort.com",
+    "countries": ["US", "CA"],
+    "expansion": false
+  },
+  "creative_brief": {
+    "audience": "Wedding and event planners who already visited the venue partner page",
+    "message": "A venue partnership built around your couples",
+    "proof": [
+      "10% documented referral commission",
+      "Hosted site visits",
+      "Direct resort contact",
+      "Co-marketing support",
+      "22 bedrooms and events up to 85 guests"
+    ],
+    "cta": "Review the partner program",
+    "required_ratio": "4:5",
+    "required_review_channel": "#social-sol"
+  },
+  "activation_gate": [
+    "Final creative generated with an approved Social Sol creative pipeline",
+    "Creative and landing-page QC passed",
+    "Human approval recorded in #social-sol",
+    "Meta campaign, audience, ad set, creative, and ad IDs written to active-campaigns.json"
+  ],
+  "notes": "Planner-only retargeting seeded by attributed Paulina visits. Do not use broad wedding-consumer targeting or send traffic to the weddings landing page."
+}

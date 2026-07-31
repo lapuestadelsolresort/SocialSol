@@ -88,7 +88,7 @@ function compliantBody(token) {
   return [
     `Hi Vanessa, I came across your portfolio and thought of La Puesta del Sol.`,
     `We're a 9-suite resort in Riviera Nayarit doing private buyouts for weddings.`,
-    `Take a look — https://weddings.lapuestadelsolresort.com — see if it's a fit for any upcoming clients.`,
+    `Take a look — https://planners.lapuestadelsolresort.com/?utm_source=paulina&utm_medium=email&utm_campaign=planner_partner_program_v1 — see if the venue partner program fits your portfolio.`,
     ``,
     PHYSICAL_ADDRESS,
     `Reply 'unsubscribe' to unsubscribe@outreach.lapuestadelsolresort.com or click here to unsubscribe: https://webhook.lapuestadelsolresort.com/unsubscribe?token=${token}`,
@@ -116,7 +116,7 @@ async function seedFixture(db) {
   // One campaign, one contact, no suppressions, no prior sends.
   await db.query(sql`
     INSERT INTO outreach_campaigns (id, name, persona, landing_page_url, status)
-    VALUES (1, 'planner_outreach_v1', 'wedding_planner', 'https://weddings.lapuestadelsolresort.com', 'active')
+    VALUES (1, 'planner_outreach_v1', 'wedding_planner', 'https://planners.lapuestadelsolresort.com/?utm_source=paulina&utm_medium=email&utm_campaign=planner_partner_program_v1', 'active')
   `);
   await db.query(sql`
     INSERT INTO contacts (id, name, email, dedup_key, context_source, status, do_not_contact)
@@ -310,7 +310,7 @@ async function testItem6() {
   input.body = [
     `Hi Vanessa,`,
     `Wanted to share a venue option for destination weddings — La Puesta del Sol in Riviera Nayarit.`,
-    `https://weddings.lapuestadelsolresort.com`,
+    `https://planners.lapuestadelsolresort.com/?utm_source=paulina&utm_medium=email&utm_campaign=planner_partner_program_v1`,
     ``,
     PHYSICAL_ADDRESS,
     `Reply 'unsubscribe' to unsubscribe@outreach.lapuestadelsolresort.com or click here to unsubscribe: https://webhook.lapuestadelsolresort.com/unsubscribe?token=${token}`,
