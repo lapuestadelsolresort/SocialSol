@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-body: "DM Sans", system-ui, sans-serif;
+
+  --color-sand-50: #faf8f5;
+  --color-sand-100: #f1efe8;
+  --color-sand-200: #e4e0d6;
+  --color-sand-300: #d3d1c7;
+  --color-sand-400: #aaa79e;
+  --color-sand-500: #77766f;
+  --color-sand-600: #5f5e5a;
+  --color-sand-700: #444441;
+  --color-sand-800: #2c2c2a;
+  --color-sand-900: #1a1a18;
+
+  --color-palm-50: #f4f7f4;
+  --color-palm-100: #e4ece6;
+  --color-palm-200: #c8d8cc;
+  --color-palm-500: #587260;
+  --color-palm-700: #344c3d;
+  --color-palm-800: #273b30;
+  --color-palm-900: #1d2c24;
+
+  --color-gold-300: #d8b77d;
+  --color-gold-400: #c79b55;
+  --color-gold-500: #b5843d;
+}
+
+details summary::-webkit-details-marker { display: none; }
+details[open] summary .faq-plus { transform: rotate(45deg); }

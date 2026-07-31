@@ -18,7 +18,7 @@ const express = require('express');
 const { sql } = require('@databases/sqlite');
 const { getOrAssignVariant } = require('../lib/variants');
 
-const PAGE_SLUGS = ['weddings', 'fitness', 'retreats', 'summer-sale'];
+const PAGE_SLUGS = ['weddings', 'fitness', 'retreats', 'summer-sale', 'planners'];
 
 function buildRouter(getDb) {
   const router = express.Router();
