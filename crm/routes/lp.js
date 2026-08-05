@@ -18,6 +18,20 @@ const express = require('express');
 const { sql } = require('@databases/sqlite');
 const { getOrAssignVariant } = require('../lib/variants');
 
+// Bot / crawler user-agent patterns — mirrors routes/track.js
+const BOT_UA_PATTERNS = [
+  'meta-externalads', 'facebookexternalhit', 'Facebot',
+  'Googlebot', 'bingbot', 'Applebot', 'AdsBot', 'Amazonbot',
+  'YandexBot', 'Bytespider', 'SemrushBot', 'AhrefsBot', 'DotBot',
+  'PetalBot', 'GPTBot', 'ClaudeBot', 'Twitterbot', 'LinkedInBot',
+  'Slackbot', 'WhatsApp', 'Discordbot', 'HeadlessChrome',
+  'crawler', 'spider',
+];
+function isBot(ua) {
+  const lower = (ua || '').toLowerCase();
+  return BOT_UA_PATTERNS.some(p => lower.includes(p.toLowerCase()));
+}
+
 const PAGE_SLUGS = ['weddings', 'fitness', 'retreats', 'summer-sale', 'planners'];
 
 function buildRouter(getDb) {
@@ -56,8 +70,8 @@ function buildRouter(getDb) {
       // Upsert the session row with page/variant + UTMs/IP/UA from this GET request.
       // COALESCE so whichever of /api/lp/config and /api/track arrives second only fills gaps.
       await db.query(sql`
-        INSERT INTO page_sessions (id, page_slug, variant_id, language, ip_address, user_agent, utm_source, utm_medium, utm_campaign, utm_content)
-        VALUES (${sid}, ${page_slug}, ${v.id}, ${lang}, ${ip}, ${ua}, ${source}, ${utmMedium}, ${utmCampaign}, ${audience})
+        INSERT INTO page_sessions (id, page_slug, variant_id, language, ip_address, user_agent, utm_source, utm_medium, utm_campaign, utm_content, is_bot)
+        VALUES (${sid}, ${page_slug}, ${v.id}, ${lang}, ${ip}, ${ua}, ${source}, ${utmMedium}, ${utmCampaign}, ${audience}, ${isBot(ua) ? 1 : 0})
         ON CONFLICT(id) DO UPDATE SET
           page_slug   = COALESCE(page_sessions.page_slug, excluded.page_slug),
           variant_id  = COALESCE(page_sessions.variant_id, excluded.variant_id),
@@ -103,7 +117,7 @@ function buildRouter(getDb) {
                ROUND(AVG(ps.dwell_ms)) AS avg_dwell_ms,
                ROUND(AVG(ps.max_scroll_pct)) AS avg_scroll_pct
         FROM lp_variants v
-        LEFT JOIN page_sessions ps ON ps.variant_id = v.id
+        LEFT JOIN page_sessions ps ON ps.variant_id = v.id AND ps.is_bot = 0
         WHERE v.status = 'live' AND v.page_slug = ${page}
         GROUP BY v.id
         ORDER BY sessions DESC
@@ -117,7 +131,7 @@ function buildRouter(getDb) {
                ROUND(AVG(ps.dwell_ms)) AS avg_dwell_ms,
                ROUND(AVG(ps.max_scroll_pct)) AS avg_scroll_pct
         FROM lp_variants v
-        LEFT JOIN page_sessions ps ON ps.variant_id = v.id
+        LEFT JOIN page_sessions ps ON ps.variant_id = v.id AND ps.is_bot = 0
         WHERE v.status = 'live'
         GROUP BY v.id
         ORDER BY v.page_slug, sessions DESC

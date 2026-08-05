@@ -18,6 +18,10 @@ OPENCLAW = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
 CHANNEL = os.environ.get("RESORT_SOCIAL_CHANNEL", "")
 SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "")
 QUALIFIED = "(max_scroll_pct > 0 OR reached_cta = 1 OR dwell_ms >= 10000)"
+# Use the is_bot column (set at ingest by track.js / lp.js) instead of
+# long UA-string matching.  Faster, consistent across all scripts, and
+# the ingest bot-list is the single source of truth.
+BOT_FILTER = "is_bot=0"
 JOB_NAME = "resort-daily-report"
 
 
@@ -71,10 +75,11 @@ def build_report(db_path, day):
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     cur = con.cursor()
     window = (start_utc, end_utc)
-    sessions = q1(cur, "SELECT COUNT(*) FROM page_sessions WHERE created_at>=? AND created_at<?", window)
-    qualified = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE created_at>=? AND created_at<? AND {QUALIFIED}", window)
-    reached_cta = q1(cur, "SELECT COALESCE(SUM(reached_cta),0) FROM page_sessions WHERE created_at>=? AND created_at<?", window)
-    wa_clicks = q1(cur, "SELECT COALESCE(SUM(cta_clicked),0) FROM page_sessions WHERE created_at>=? AND created_at<?", window)
+    human = f"created_at>=? AND created_at<? AND {BOT_FILTER}"
+    sessions = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {human}", window)
+    qualified = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {human} AND {QUALIFIED}", window)
+    reached_cta = q1(cur, f"SELECT COALESCE(SUM(reached_cta),0) FROM page_sessions WHERE {human}", window)
+    wa_clicks = q1(cur, f"SELECT COALESCE(SUM(cta_clicked),0) FROM page_sessions WHERE {human}", window)
     leads = q1(cur, "SELECT COUNT(*) FROM leads WHERE created_at>=? AND created_at<?", window)
     booked = q1(cur, "SELECT COUNT(*) FROM leads WHERE status='booked' AND created_at>=? AND created_at<?", window)
     attributed_leads = q1(
@@ -88,7 +93,7 @@ def build_report(db_path, day):
         "SELECT COALESCE(page_slug,'unknown'), COUNT(*), "
         f"COALESCE(SUM(CASE WHEN {QUALIFIED} THEN 1 ELSE 0 END),0), "
         "COALESCE(SUM(reached_cta),0), COALESCE(SUM(cta_clicked),0) "
-        "FROM page_sessions WHERE created_at>=? AND created_at<? "
+        f"FROM page_sessions WHERE {human} "
         "GROUP BY COALESCE(page_slug,'unknown') ORDER BY 1",
         window,
     )

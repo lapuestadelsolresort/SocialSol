@@ -20,6 +20,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(ROOT, "crm", "data", "crm.db"))
 APPLY_VARIANT = os.path.join(HERE, "apply_variant.py")
 
 QUALIFIED = "(max_scroll_pct > 0 OR reached_cta = 1 OR dwell_ms >= 10000)"
+NOT_BOT = "is_bot=0"
 
 
 def ensure_tables(con):
@@ -160,11 +161,11 @@ def auto_rollback(con, pass_id="manual", dry_run=False):
         stats = {}
         for arm in arms:
             qualified = con.execute(
-                f"SELECT COUNT(*) FROM page_sessions WHERE variant_id=? AND {QUALIFIED}",
+                f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND variant_id=? AND {QUALIFIED}",
                 (arm["id"],),
             ).fetchone()[0] or 0
             clicks = con.execute(
-                f"SELECT COUNT(*) FROM page_sessions WHERE variant_id=? AND ({QUALIFIED}) AND cta_clicked=1",
+                f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND variant_id=? AND ({QUALIFIED}) AND cta_clicked=1",
                 (arm["id"],),
             ).fetchone()[0] or 0
             stats[arm["id"]] = {"qualified": qualified, "rate": (clicks / qualified) if qualified else 0.0}

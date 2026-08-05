@@ -9,9 +9,9 @@ date_added: 2026-05-04
 
 Hi Priya,
 
-Your name surfaced through a planner network we both seem to be in — a colleague there mentioned you as the person she'd send a destination-buyout couple to in the Bay Area. We're a private oceanfront buyout in Riviera Nayarit that sleeps up to 35 with a separate bridal suite and gourmet meals from our chef end-to-end. Two weddings on the books for October 2026 and January 2027, and I'd love to be on the venue shortlist you keep for the right couples.
+Your name surfaced through a planner network we both seem to be in — a colleague there mentioned you as someone who evaluates destination venues carefully. We run a private oceanfront resort in Riviera Nayarit, and we're building a small venue partner program with hosted visits, one direct resort contact, co-marketing support, and a documented 10% referral commission.
 
-If it's helpful, the page has photos, capacity in one place, and a WhatsApp line straight to me: https://weddings.lapuestadelsolresort.com.
+If it's helpful, the page has the property fit, partner terms, and a WhatsApp line straight to me: https://planners.lapuestadelsolresort.com/?utm_source=paulina&utm_medium=email&utm_campaign=planner_partner_program_v1.
 
 Warmly,
 Sarah
@@ -23,4 +23,4 @@ Reply 'unsubscribe' and I'll remove you immediately.
 
 ## Why this is a good example
 
-Hook angle is mutual-context: opener cites a shared network and an implicit referrer ("a colleague there mentioned you"). Why-contacting disclosure is the same sentence. Body absorbs the elevator-sentence nouns. The "venue shortlist you keep for the right couples" line is planner-vocabulary — speaks to how planners actually maintain a recommendation roster. One warmth marker (`I'd love`). One proof point. Closer is structural ("photos, capacity, WhatsApp line"), no em-dash this time — variety. Sign-off `Warmly,` for the warm-but-short register. **Composer note:** the actual referrer name and network must come from real enrichment data — never fabricate a mutual connection. The placeholder phrasing here ("a planner network we both seem to be in / a colleague there") shows the shape; in practice the composer fills in the real names.
+Hook angle is mutual-context: the opener cites a shared network and an implicit referrer. Why-contacting disclosure is the same sentence. The body names the concrete partner relationship without asking for a referral, and the closer is structural (property fit, terms, WhatsApp line). **Composer note:** the actual referrer name and network must come from real enrichment data — never fabricate a mutual connection.

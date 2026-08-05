@@ -19,6 +19,7 @@ CAMPAIGNS_PATH = os.path.join(ROOT, "campaigns", "active-campaigns.json")
 VARIANTS_DIR = os.path.join(ROOT, "lp", "variants")
 
 QUALIFIED = "(max_scroll_pct > 0 OR reached_cta = 1 OR dwell_ms >= 10000)"
+NOT_BOT = "is_bot=0"
 
 
 def la_now():
@@ -148,9 +149,9 @@ def check_campaigns(cur, cutoff, gaps):
             })
         if tags:
             ph = ",".join("?" for _ in tags)
-            sessions = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE utm_campaign IN ({ph}) AND created_at>=?", (*tags, cutoff))
-            qualified = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE utm_campaign IN ({ph}) AND created_at>=? AND {QUALIFIED}", (*tags, cutoff))
-            cta_clicks = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE utm_campaign IN ({ph}) AND created_at>=? AND cta_clicked=1", (*tags, cutoff))
+            sessions = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND created_at>=?", (*tags, cutoff))
+            qualified = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND created_at>=? AND {QUALIFIED}", (*tags, cutoff))
+            cta_clicks = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND created_at>=? AND cta_clicked=1", (*tags, cutoff))
             leads = q1(cur, f"SELECT COUNT(*) FROM leads WHERE utm_campaign IN ({ph}) AND created_at>=?", (*tags, cutoff))
         else:
             sessions = qualified = cta_clicks = leads = 0
@@ -219,13 +220,13 @@ def check_variants(cur, cutoff, gaps):
         sessions = q1(
             cur,
             "SELECT COUNT(*) FROM page_sessions ps JOIN lp_variants v ON v.id=ps.variant_id "
-            "WHERE v.slug=? AND ps.created_at>=?",
+            f"WHERE ps.{NOT_BOT} AND v.slug=? AND ps.created_at>=?",
             (slug, cutoff),
         )
         clicks = q1(
             cur,
             "SELECT COUNT(*) FROM page_sessions ps JOIN lp_variants v ON v.id=ps.variant_id "
-            "WHERE v.slug=? AND ps.created_at>=? AND ps.cta_clicked=1",
+            f"WHERE ps.{NOT_BOT} AND v.slug=? AND ps.created_at>=? AND ps.cta_clicked=1",
             (slug, cutoff),
         )
         issues = []
@@ -282,7 +283,7 @@ def check_instrumentation(cur, cutoff):
     events = q1(cur, "SELECT COUNT(*) FROM page_events WHERE ts>=?", (cutoff,))
     pageviews = q1(cur, "SELECT COUNT(*) FROM page_events WHERE kind='pageview' AND ts>=?", (cutoff,))
     wa_clicks = q1(cur, "SELECT COUNT(*) FROM page_events WHERE kind='wa_click' AND ts>=?", (cutoff,))
-    sessions = q1(cur, "SELECT COUNT(*) FROM page_sessions WHERE created_at>=?", (cutoff,))
+    sessions = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND created_at>=?", (cutoff,))
     return {
         "tracker": {
             "sessions_in_window": sessions,

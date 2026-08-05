@@ -247,12 +247,14 @@ const RISKY_PREFIXES = new Set([
   'careers', 'jobs', 'billing', 'accounts', 'hr', 'press', 'media',
 ]);
 
-async function verifyEmail(email) {
+async function verifyEmail(email, { allowRoleEmails = false } = {}) {
   if (!email || !email.includes('@')) return { ok: false, reason: 'invalid_format' };
   const [prefix, domain] = email.toLowerCase().split('@');
 
   // 1. Risky generic prefix check (free, instant)
-  if (RISKY_PREFIXES.has(prefix)) {
+  //    Skipped when allowRoleEmails is true (e.g. small-vendor planner outreach
+  //    where info@/bookings@ IS the real inbox).
+  if (!allowRoleEmails && RISKY_PREFIXES.has(prefix)) {
     return { ok: false, reason: 'risky_prefix', detail: `"${prefix}@" is a generic catch-all inbox` };
   }
 
@@ -273,13 +275,24 @@ async function verifyEmail(email) {
       );
       const zb = await zbRes.json();
       log(`  zerobounce: ${email} → status=${zb.status} sub_status=${zb.sub_status || ''}`);
-      const BLOCK_STATUSES = new Set(['invalid', 'spamtrap', 'abuse', 'do_not_mail']);
-      if (BLOCK_STATUSES.has(zb.status)) {
+      const HARD_BLOCK = new Set(['invalid', 'spamtrap', 'abuse']);
+      if (HARD_BLOCK.has(zb.status)) {
         return {
           ok: false,
           reason: `zerobounce_${zb.status}`,
           detail: `ZeroBounce: ${zb.status}${zb.sub_status ? ` (${zb.sub_status})` : ''}`,
         };
+      }
+      // do_not_mail (role_based, etc.) — block unless campaign allows role emails
+      if (zb.status === 'do_not_mail' && !allowRoleEmails) {
+        return {
+          ok: false,
+          reason: `zerobounce_${zb.status}`,
+          detail: `ZeroBounce: ${zb.status}${zb.sub_status ? ` (${zb.sub_status})` : ''}`,
+        };
+      }
+      if (zb.status === 'do_not_mail' && allowRoleEmails) {
+        log(`  zerobounce: ${email} is do_not_mail but allow_role_emails=true — sending anyway`);
       }
       if (zb.status === 'catch-all') {
         // Catch-all domains accept everything — log but allow; risky_prefix already blocked obvious ones
@@ -366,7 +379,7 @@ async function processSend(db, config, send, contact, campaign) {
   }
 
   // e. Email verification — MX check + risky-prefix heuristic.
-  const verification = await verifyEmail(contactEmail);
+  const verification = await verifyEmail(contactEmail, { allowRoleEmails: !!campaign.allowRoleEmails });
   if (!verification.ok) {
     const reason = `email_verification_failed:${verification.reason}`;
     const detail = verification.detail || verification.reason;
@@ -523,7 +536,8 @@ async function main() {
     const dueRows = await db.query(sql`
       SELECT os.*,
              c.email AS _contact_email, c.id AS _contact_id, c.name AS _contact_name,
-             oc.id AS _campaign_id, oc.slug AS _campaign_slug, oc.name AS _campaign_name
+             oc.id AS _campaign_id, oc.slug AS _campaign_slug, oc.name AS _campaign_name,
+             COALESCE(oc.allow_role_emails, 0) AS _allow_role_emails
       FROM outreach_sends os
       JOIN contacts c ON c.id = os.contact_id
       LEFT JOIN outreach_campaigns oc ON oc.id = os.campaign_id
@@ -542,7 +556,7 @@ async function main() {
 
     for (const row of dueRows) {
       const contact = { id: row._contact_id, email: row._contact_email, name: row._contact_name };
-      const campaign = { id: row._campaign_id, slug: row._campaign_slug, name: row._campaign_name };
+      const campaign = { id: row._campaign_id, slug: row._campaign_slug, name: row._campaign_name, allowRoleEmails: !!row._allow_role_emails };
       processed++;
       try {
         const r = await processSend(db, config, row, contact, campaign);

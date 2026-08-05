@@ -1,21 +1,21 @@
 ---
 persona_id: wedding-planner
 status: v0
-campaigns: [wedding_planners_v1]
-last_reviewed_by_sarah: 2026-05-04
+campaigns: [planner_partner_program_v1]
+last_reviewed_by_sarah: 2026-07-31
 library_status: sarah-reviewed
 landing_page_status: live
-landing_page_url: https://weddings.lapuestadelsolresort.com/
-landing_page_subdomain: weddings.lapuestadelsolresort.com
-cloudflare_pages_project: lapuestadelsol-weddings
-landing_page_repo_path: landing/apps/weddings/
+landing_page_url: https://planners.lapuestadelsolresort.com/?utm_source=paulina&utm_medium=email&utm_campaign=planner_partner_program_v1
+landing_page_subdomain: planners.lapuestadelsolresort.com
+cloudflare_pages_project: lapuestadelsol-planners
+landing_page_repo_path: landing/apps/planners/
 ---
 
 # Wedding Planner
 
 This file is the composer's primary input for the wedding-planner persona. It absorbs both the persona brief (who they are, what they care about, what proof we have) and the Step 2.2 strategy scaffolding (hook angles, structure, what this persona is NOT).
 
-`library_status: sarah-reviewed` (May 4, 2026) — Sarah has reviewed the 5 example emails in `library/examples/wedding-planner/`. The composer (Step 3.2) is cleared to generate fresh emails for this persona.
+`library_status: sarah-reviewed` — Sarah reviewed the original examples on May 4, 2026, and Jason approved the partner-program strategy on July 31, 2026. The composer (Step 3.2) is cleared to generate fresh partner-program emails for this persona.
 
 ---
 
@@ -27,7 +27,7 @@ These planners design destination weddings for couples in their 30s, with guest 
 
 ## 2. What we want from this email
 
-**Open + click.** That is the entire goal. We are not closing on the first email. A reply is a bonus; the page view on the landing page is the primary conversion event. The CTA is a link, not a meeting and not a quote — see §6.
+**Open + click into the venue partner program.** That is the entire goal. We are not asking for a couple introduction, date inquiry, or booking on the first email. A reply is a bonus; the attributed page view on the planner landing page is the primary conversion event. The CTA is a link, not a meeting and not a quote — see §6.
 
 (This sentence is invariant across every persona. The content of each persona changes; the goal does not.)
 
@@ -38,7 +38,7 @@ Ranked. The top item is the one this email most plausibly speaks to. Items 2–4
 1. **Will this venue actually deliver?** Reliability is the #1 concern — a bad recommendation costs them the client.
 2. **Is the property easy to work with?** Responsive, flexible, doesn't surprise them with day-of friction. Single point of contact preferred.
 3. **Does it fit the wedding the planner is trying to design?** Capacity, ceremony space, reception space, bridal-party housing, photography moments.
-4. **Economics — planner commission or collaboration arrangement?** Not always the lead concern but always present in the background.
+4. **Is there a real partnership structure?** The 10% referral commission, hosted site visits, co-marketing support, and one direct resort contact make the relationship concrete without displacing the planner's role with the couple.
 
 ## 4. Pain points we credibly solve
 
@@ -52,6 +52,8 @@ Each pain ties to a concrete property capability or Sarah behavior. The composer
   - **How we solve it:** Genuinely private oceanfront resort; full buyout means full buyout. Staffing reduces to essential personnel only on request.
 - **Pain: visual / "will it photograph" question.** Planners need the venue to deliver hero shots — ceremony backdrop, reception, golden-hour moments.
   - **How we solve it:** Oceanfront dining terrace seats up to ~70 with sunset light; open-air covered space hosts 100+; multiple custom-architected villa interiors for bridal-party photography.
+- **Pain: venue outreach that immediately asks for a booking.** Planners need to understand a property and its operating team before they put their reputation behind a referral.
+  - **How we solve it:** The venue partner program starts with current materials, direct access to Sarah, and a hosted site visit when useful. A documented 10% commission applies to partner-referred buyouts after the guest's final payment clears.
 
 ## 5. Proof we have
 
@@ -67,19 +69,19 @@ Each pain ties to a concrete property capability or Sarah behavior. The composer
 
 ## 6. The ask (CTA)
 
-- **Primary CTA:** Click the landing page link.
-- **Landing page URL:** https://weddings.lapuestadelsolresort.com/
-- **Next step after click:** Landing page CTA = WhatsApp Sarah for date check / planning conversation.
-- **What we are NOT asking for in this email:** Not asking for a quote response, not asking them to forward to a couple, not asking for a buyout commitment, not asking for a call. Just the click.
+- **Primary CTA:** Click the attributed planner partner-program link.
+- **Landing page URL:** https://planners.lapuestadelsolresort.com/?utm_source=paulina&utm_medium=email&utm_campaign=planner_partner_program_v1
+- **Next step after click:** Review the partnership terms, property fit, and indicative pricing; then WhatsApp Sarah to ask a question, discuss an upcoming couple, or arrange a hosted visit.
+- **What we are NOT asking for in this email:** Not asking for a couple introduction, quote, booking, calendar commitment, or scheduled call. Just an informed look at the partner program.
 - **Confirmed (Sarah, 2026-05-04):** WhatsApp is the only next step. No call-scheduling alternative for this persona.
 
 Closer-line voice anchors live in `library/shared/cta-variants.md` — read those for tonal shape, then write a fresh sentence per email.
 
 ## 7. Why we're a fit (the elevator-sentence)
 
-> "We're a fully private oceanfront buyout that sleeps up to 35 people, a separate bridal suite, stunning backdrop of Isle de Coral in Jaltemba bay and includes gourmet meals and service."
+> "We're a private oceanfront venue partner in Riviera Nayarit: one resort contact, hosted site visits, co-marketing support, and a clear 10% referral commission for partner-referred buyouts."
 
-**Source:** Sarah, 2026-05-04. Verbatim. The composer compresses this into one body line per email; the wording above is the canonical reference. If a body cannot be written without trimming or rewording the sentence, the composer compresses but **preserves the load-bearing nouns**: *private oceanfront buyout*, *up to 35 people*, *separate bridal suite*, *Isle de Coral in Jaltemba bay*, *gourmet meals and service*.
+**Source:** Partner-program landing page approved July 31, 2026. The composer compresses this into one body line per email and preserves the load-bearing terms: *private oceanfront resort*, *venue partner*, *hosted site visits*, *direct resort contact*, and *10% referral commission*. Property fit can be supported with one concrete fact such as *22 bedrooms*, *events up to 85 guests*, or *45 minutes from PVR*.
 
 ## 8. Voice notes
 
@@ -105,8 +107,8 @@ The composer chooses one hook angle based on enrichment data on the contact reco
 
 1. **Opener:** 1–2 sentences. Pick one hook angle from §9.
 2. **Why-contacting disclosure:** 1 sentence. Names how we found them (per `library/shared/compliance-elements.md` §3).
-3. **Value:** 1–2 sentences. What the resort is, in plain terms — beachfront Riviera Nayarit, full buyouts up to 35, all-in pricing. Compress §7 elevator sentence; preserve load-bearing nouns. No adjectives beyond what §8 allows. One concrete detail.
-4. **CTA:** 1 sentence. Link to landing page with one-line framing — see `library/shared/cta-variants.md` for tonal shape.
+3. **Value:** 1–2 sentences. Explain the partner relationship in plain terms — private Riviera Nayarit resort, direct property access, hosted visits, and a documented 10% referral commission. Use one property-fit detail. Do not lead with a booking ask.
+4. **CTA:** 1 sentence. Link to the attributed partner-program landing page with one-line framing — see `library/shared/cta-variants.md` for tonal shape.
 5. **Sign-off:** rotate per §8.
 6. **Compliance footer:** physical address + opt-out line, per `library/shared/compliance-elements.md` §1–§2.
 
@@ -129,9 +131,13 @@ Ground-truth examples live in `library/examples/wedding-planner/`. The composer 
 
 **Resolved (Sarah, 2026-05-04):**
 - §5 proof points: filled in. Forward bookings = 2 (October 2026, January 2027). Spring 2027 dropped — soft hold, not proof. No testimonials yet. No press. No repeat planners.
-- §6 landing page URL: https://weddings.lapuestadelsolresort.com/. WhatsApp confirmed as the only next step.
 - §7 elevator sentence: provided verbatim by Sarah.
 - §8 brochure-vocabulary cap: keep at 0 for this persona.
+
+**Resolved (Jason, 2026-07-31):**
+- Paulina is planner-only and focuses on the venue partner program rather than asking for a booking.
+- §6 landing page URL is the attributed `planners.lapuestadelsolresort.com` URL above. WhatsApp remains the human handoff.
+- The funnel is: Paulina cold email → planner partner page → planner-specific Meta retargeting → Sarah conversation → documented referral → couple enters the normal wedding sales funnel.
 
 **Still open:**
 - When the first testimonial lands, update §5 and re-generate examples to include a quote-grounded variant.

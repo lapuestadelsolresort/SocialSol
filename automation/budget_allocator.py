@@ -20,6 +20,7 @@ ACTIVE_CAMPAIGNS = os.path.join(ROOT, "campaigns", "active-campaigns.json")
 BUCKETS = ["reach", "engagement", "leads"]
 DEFAULT_SPLIT = {"reach": 0.35, "engagement": 0.35, "leads": 0.30}
 QUALIFIED = "(max_scroll_pct > 0 OR reached_cta = 1 OR dwell_ms >= 10000)"
+NOT_BOT = "is_bot=0"
 
 
 def ensure_tables(con):
@@ -107,14 +108,14 @@ def campaign_mean(con, bucket, record):
     if not tags:
         return 0.5
     ph = ",".join("?" for _ in tags)
-    sessions = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE utm_campaign IN ({ph})", tags)
-    qualified = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE utm_campaign IN ({ph}) AND {QUALIFIED}", tags)
-    cta_clicks = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE utm_campaign IN ({ph}) AND cta_clicked=1", tags)
+    sessions = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph})", tags)
+    qualified = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND {QUALIFIED}", tags)
+    cta_clicks = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND cta_clicked=1", tags)
     leads = q1(con, f"SELECT COUNT(*) FROM leads WHERE utm_campaign IN ({ph})", tags)
     if bucket == "reach":
         success, exposure = qualified, sessions
     elif bucket == "engagement":
-        cta_views = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE utm_campaign IN ({ph}) AND reached_cta=1", tags)
+        cta_views = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND reached_cta=1", tags)
         success, exposure = cta_views, sessions
     else:
         success, exposure = max(leads, cta_clicks), qualified or sessions

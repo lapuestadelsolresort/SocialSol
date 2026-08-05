@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lapuestadelsolresort.ownerrez-sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>/Users/jasonmini/.openclaw/SocialSol/crm/scripts/ownerrez-sync.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/jasonmini/.openclaw/SocialSol</string>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/ownerrez-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/ownerrez-sync.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>SOCIALSOL_SECRETS_DIR</key>
+        <string>/Users/jasonmini/.openclaw/SocialSol/secrets</string>
+        <key>OPENCLAW_BIN</key>
+        <string>/opt/homebrew/bin/openclaw</string>
+        <key>OPENCLAW_SLACK_ACCOUNT</key>
+        <string>ig-drafts</string>
+        <key>RESORT_BIZEVENT_CHANNEL</key>
+        <string>C0B384L2TNC</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

@@ -191,10 +191,47 @@ function buildRouter(getDb) {
         try {
           const refMatch = text.match(/\bLPDS-([A-Z0-9]{12,24})\b/i);
           const whatsappRef = refMatch ? refMatch[1].toUpperCase() : null;
-          const [session] = whatsappRef ? await db.query(sql`
+          let [session] = whatsappRef ? await db.query(sql`
             SELECT id, page_slug, utm_source, utm_medium, utm_campaign, utm_content
             FROM page_sessions WHERE whatsapp_ref = ${whatsappRef} LIMIT 1
           `) : [];
+          let attrMethod = session ? 'ref' : 'unattributed';
+
+          // ── Time-window fallback when ref-match misses ────────────────
+          if (!session) {
+            // Attempt 1: recent CTA-engaged session (last 60 min)
+            const [ctaSession] = await db.query(sql`
+              SELECT id, page_slug, utm_source, utm_medium, utm_campaign, utm_content
+              FROM page_sessions
+              WHERE is_bot = 0
+                AND (cta_clicked = 1 OR reached_cta = 1)
+                AND created_at > datetime('now', '-60 minutes')
+              ORDER BY last_seen DESC
+              LIMIT 1
+            `);
+            if (ctaSession) {
+              session = ctaSession;
+              attrMethod = 'time-window-cta';
+            } else {
+              // Attempt 2: wa_click event in last 24 hours
+              const [waClickSession] = await db.query(sql`
+                SELECT ps.id, ps.page_slug, ps.utm_source, ps.utm_medium, ps.utm_campaign, ps.utm_content
+                FROM page_sessions ps
+                JOIN page_events pe ON pe.session_id = ps.id
+                WHERE ps.is_bot = 0
+                  AND pe.kind = 'wa_click'
+                  AND pe.ts > datetime('now', '-24 hours')
+                ORDER BY pe.ts DESC
+                LIMIT 1
+              `);
+              if (waClickSession) {
+                session = waClickSession;
+                attrMethod = 'time-window-wa-click';
+              }
+            }
+          }
+          console.log(`[whatsapp] Attribution for ${senderPhone}: method=${attrMethod} session=${session?.id || 'none'}`);
+
           const source = session
             ? (String(session.utm_source || '').toLowerCase() === 'meta' ? 'meta_ad' : 'whatsapp')
             : 'whatsapp';
@@ -240,7 +277,7 @@ function buildRouter(getDb) {
                 ${utmCampaign || session.page_slug || null},
                 ${session.utm_source || null}, ${session.utm_medium || null},
                 ${session.utm_campaign || null},
-                ${JSON.stringify({ whatsapp_ref: whatsappRef, message_id: messageSid })}
+                ${JSON.stringify({ whatsapp_ref: whatsappRef, attribution_method: attrMethod, message_id: messageSid })}
               )
             `);
           }

@@ -382,6 +382,8 @@ async function initDB() {
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_ps_created ON page_sessions(created_at)`);
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_ps_page    ON page_sessions(page_slug)`);
   await addColumnIfMissing('page_sessions', 'whatsapp_ref TEXT');
+  await addColumnIfMissing('page_sessions', 'is_bot INTEGER DEFAULT 0');
+  await db.query(sql`CREATE INDEX IF NOT EXISTS idx_ps_is_bot ON page_sessions(is_bot)`);
   await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_ps_whatsapp_ref ON page_sessions(whatsapp_ref) WHERE whatsapp_ref IS NOT NULL`);
 
   await db.query(sql`
@@ -2494,6 +2496,10 @@ app.post('/api/staging/bulk', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── OwnerRez Webhook ──────────────────────────────────────────────────────────
+const { buildRouter: buildOwnerRezRouter } = require('./routes/ownerrez');
+app.use('/api/ownerrez', buildOwnerRezRouter(() => db));
 
 // ─── WhatsApp Bridge via Twilio ────────────────────────────────────────────────
 const { buildRouter: buildWhatsAppRouter } = require('./routes/whatsapp');
