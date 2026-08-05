@@ -203,17 +203,15 @@ See `SECURITY.md` for reporting and credential-handling guidance.
 
 ## For future agents reading this
 
-1. `Project_Status.md` (workspace) is the tactical source of truth — read it
-   before assuming build state.
+1. `MEMORY.md` in the OpenClaw workspace is the tactical source of truth —
+   read it at session start for active leads, campaign state, integration
+   details, and key lessons.
 2. Inspect schemas and paths at runtime (`sqlite3 .schema`, `ls`) — don't
    assume structure from docs or memory.
 3. Every "complete" claim needs a verification command next to it.
 4. Human approval gates are hard blockers, not suggestions.
 5. The former `marketing-stack` repository is a migration source only — nothing
    here depends on it.
-6. `MEMORY.md` in the OpenClaw workspace carries durable operational context
-   (active leads, campaign state, integration credentials references, key
-   lessons). Read it at session start.
 7. The Voice Service corpus is the single most sensitive training asset — do
    not bulk-export or expose message bodies outside the CRM.
 8. OwnerRez is the PMS of record. When in doubt about bookings, availability,
