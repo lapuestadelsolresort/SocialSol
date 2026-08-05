@@ -9,6 +9,7 @@ mounted locally and are never committed.
 | Workflow | Source | Conversion or action | System of record |
 |---|---|---|---|
 | Social/Meta | Meta ads, organic posts | Landing page → WhatsApp or Meta DM | `crm/` |
+| CRM Audience Sync | CRM contacts/leads | Meta Custom Audiences for paid retargeting | `automation/crm_audience_sync.py` |
 | Prospector Paulina | Public web research | Compliant outbound email | `prospector/` + `crm/` |
 | Reengager Regina | Past guests and prior inquiries | Resend email or manual channel handoff | `regina/` + `crm/` |
 | Sarah Coach | Inbound guest reply | Suggested human response and outcome capture | `sarah-coach/` + `crm/` |
