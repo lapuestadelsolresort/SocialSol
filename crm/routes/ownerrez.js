@@ -57,6 +57,9 @@ const SYNC_EVENT_TYPES = new Set([
   'booking', 'inquiry', 'guest',
 ]);
 
+// Message events trigger voice corpus ingestion
+const MESSAGE_EVENT_TYPES = new Set(['message']);
+
 function shouldTriggerSync(eventType) {
   if (!eventType) return false;
   const lower = eventType.toLowerCase();
@@ -64,6 +67,11 @@ function shouldTriggerSync(eventType) {
     || lower.includes('booking')
     || lower.includes('inquiry')
     || lower.includes('guest');
+}
+
+function shouldTriggerMessageIngest(eventType) {
+  if (!eventType) return false;
+  return eventType.toLowerCase().includes('message');
 }
 
 /**
@@ -179,6 +187,17 @@ function buildRouter(getDb) {
       setImmediate(() => {
         triggerBackgroundSync(event);
         notifyEvent(event);
+      });
+    }
+
+    // Phase 3: Message events trigger voice corpus ingestion
+    if (shouldTriggerMessageIngest(eventType)) {
+      setImmediate(() => {
+        const ingestScript = path.join(__dirname, '..', 'scripts', 'ownerrez-message-ingest.js');
+        execFile('node', [ingestScript], { timeout: 60000, cwd: REPO_ROOT }, (err, stdout) => {
+          if (err) console.error('[ownerrez] Message ingest error:', err.message);
+          else console.log('[ownerrez] Message ingest:', stdout.trim());
+        });
       });
     }
   });
