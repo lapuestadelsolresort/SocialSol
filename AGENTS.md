@@ -1,17 +1,23 @@
 # Agent operating contract
 
-This repository contains resort marketing automation only. GoldRoute, private
-agent memory, customer exports, and credentials are outside its boundary.
+This repository is the AI operations platform for La Puesta del Sol Resort,
+covering marketing & guest conversion, property operations, and finance &
+admin support. `README.md` is the canonical infrastructure map. GoldRoute,
+private agent memory, customer exports, and credentials are outside its
+boundary.
 
 Before changing or running a workflow:
 
-1. Read `ARCHITECTURE.md` and the service README.
+1. Read `README.md` for the full system map — agents, integrations,
+   automations, and repository layout.
 2. Use configuration from `.env`, ignored `*/config.json` files, and
    `SOCIALSOL_SECRETS_DIR`; never hard-code an identity or credential.
-3. Treat email sends, Meta budget changes, external posts, and deployment
-   cutovers as production mutations. Honor dry-run and enable switches.
+3. Treat email sends, Meta budget changes, external posts, OwnerRez writes,
+   and deployment cutovers as production mutations. Honor dry-run and enable
+   switches.
 4. Do not copy runtime data into Git. This includes databases, contact lists,
-   research runs/cache, reports, logs, agent memory, and warmup recipients.
+   research runs/cache, reports, logs, agent memory, media originals, and
+   warmup recipients.
 5. Run `npm run check:stack` before proposing a commit.
 
 Service command references live in:
