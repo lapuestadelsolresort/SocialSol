@@ -1,39 +1,166 @@
 # SocialSol
 
-Marketing infrastructure for La Puesta del Sol Resort:
+AI operations platform for La Puesta del Sol Resort (Riviera Nayarit, Mexico).
 
-- Meta Ads → Astro landing pages → WhatsApp funnel attribution
-- Twilio WhatsApp and Meta DM webhook bridge
-- SQLite CRM and landing-page experiment service
-- Daily reporting, campaign integrity checks, encrypted backups, and job monitoring
-- Cloudflare Pages landing applications
-- Prospector Paulina lead research, compliant composition, and outbound sending
-- Reengager Regina past-guest/inquiry campaigns and Sarah Coach reply assistance
-- Sender-domain warmup tooling
+What began as a marketing stack now runs three domains of the business:
+**marketing & guest conversion**, **property operations**, and **finance &
+admin support**. It runs on a single Mac mini via OpenClaw, with humans
+approving anything outbound. Slack is the human interface; every agent has a
+channel.
 
-This repository contains source code and safe configuration examples only. Live databases, credentials, customer records, Slack identifiers, media originals, logs, campaign state, and deployment caches are intentionally excluded.
+## The one-paragraph version
+
+The resort makes ~2× more per buyout on direct bookings than on Airbnb.
+This system exists to generate direct demand (weddings, corporate retreats,
+returning guests), convert it through landing pages and WhatsApp, keep the
+property's operational and financial back-office from falling through the
+cracks, and document all of it well enough that the system transfers with the
+business at sale.
+
+---
+
+## Agents
+
+| Agent | Domain | What it does | Slack channel |
+|---|---|---|---|
+| **Social Sol** | Marketing | Daily organic Instagram + paid Meta campaigns → landing pages → WhatsApp funnel | `#social-sol` |
+| **Prospector Paulina** | Marketing | B2B outbound to wedding planners and retreat coordinators; venue partner program | `#prospector-paulina` |
+| **Reengager Regina** | Marketing | Past-guest and stale-inquiry reactivation campaigns | `#reengager-regina` |
+| **Sarah Coach** | Guest comms | Drafts replies to inbound guest messages in Sarah's voice; she edits and sends | `#sarah-coach` |
+| **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |
+| **Corporate Intelligence** | Finance/legal | Analysis of Mexican corporate docs, tax filings, and property trusts (see "Not in this repo") | `#corporate` |
+
+### Supporting automations
+
+| Automation | Schedule | Channel |
+|---|---|---|
+| OwnerRez booking/guest sync | Every 15 min + real-time webhooks | `#business-intel` |
+| OwnerRez weekly booking calendar | Monday 8am PT | `#reservations` |
+| OwnerRez message → voice corpus ingestion | Daily 6:30am + real-time on webhook | — |
+| CRM → Meta Custom Audience retargeting sync | Daily | `#social-sol` |
+| Inbound email scanner (Gmail) | Every 15 min | `#social-sol` |
+| Telmex bill reminder | Monthly | `#utility-payments` |
+| Daily campaign report | Daily | `#business-intel` |
+| Budget guardrails check | Continuous | `#business-intel` |
+| Sender-domain warmup | Scheduled batches | `#prospector-paulina` |
+| Encrypted backups + Healthchecks monitoring | Daily | `#ops-alerts` |
+
+### Shared infrastructure
+
+- **Voice Service** (`POST /api/voice/draft`) — drafts outbound copy in
+  Sarah's authentic voice. Trained on a **1,251-message corpus** (1,204
+  original Airbnb messages + 47 OwnerRez thread messages) embedded in Chroma
+  via OpenAI `text-embedding-3-small`. Powers Paulina, Regina, and Sarah Coach.
+- **CRM** (`http://localhost:3456`) — Express + SQLite backend shared by every
+  agent. Contacts, leads, outreach sends, suppressions, multi-touch
+  attribution, voice draft logs, and media assets.
+- **Media Library** (`/api/media/search`) — 223 indexed assets from the
+  Oct 2025 property shoot (drone, A-cam, B-cam, wedding photos). Vision-
+  captioned, embedding-searchable, persona-weighted ranking. Vertical render
+  pipeline for Instagram Reels (`media/scripts/render-vertical.js`). 4K
+  originals stored locally on the Mac mini.
+
+---
+
+## Human gates (load-bearing, not decorative)
+
+- **No outbound email sends without human approval.** Sarah reviews copy;
+  approval happens in Slack. *(Exception: Prospector Paulina runs fully
+  autonomous per standing directive — see `MEMORY.md`.)*
+- **Guests talk to people.** WhatsApp is handled by a live person. AI drafts;
+  humans send.
+- **Ad budgets are capped in code.** Live budget changes require explicit mode
+  and total-budget guardrails. Campaign activation requires Jason's approval.
+- **Completion claims require verification artifacts.** Agent summaries are
+  unverified until confirmed against real terminal output, DB queries, or API
+  responses.
+
+---
 
 ## Repository layout
 
-- `crm/` — Express CRM, webhook handlers, attribution, SQLite migrations, and tests
-- `landing/apps/` — Astro landing pages for weddings, retreats, fitness, and seasonal campaigns
-- `automation/` — daily reports, campaign checks, budget guardrails, backups, and watchdogs
-- `lp/variants/` — versioned landing-page copy definitions
-- `media/` — source-only creative/media pipeline
-- `prospector/` — Paulina research, composition, compliance, and send orchestration
-- `regina/` — the Reengager campaign engine and optional automated Resend path
-- `sarah-coach/` — inbound-reply drafting and outcome capture
-- `warmup/` — sender warmup templates and private-recipient driver
-- `campaigns/` — sanitized configuration template; live campaign state is ignored
+```
+crm/                   Express CRM server, SQLite migrations, tests
+├── routes/            Webhook handlers (Twilio, Meta, Resend, Cal.com, OwnerRez)
+├── scripts/           Sync jobs (OwnerRez sync, message ingest, weekly calendar,
+│                      voice corpus indexer, inbound email scanner)
+├── lib/               Shared libraries (API auth, Gmail client, voice retrieval,
+│                      Chroma connect, suppressions, webhook verification)
+└── data/              SQLite databases (never committed)
+
+landing/apps/          Astro landing pages (weddings, retreats, fitness, planner
+                       partners) deployed to Cloudflare Pages
+
+automation/            Daily reports, campaign integrity, budget guardrails,
+                       CRM audience sync, backups, watchdogs
+
+prospector/            Paulina: research, composition, compliance, send
+├── library/           Persona definitions, example templates, CTA variants
+├── scripts/           Daily prospecting, engagement analysis
+└── config.json        Sender identity, send caps, approver list (not committed)
+
+regina/                Reengager: campaign engine, dossier-based drafting
+sarah-coach/           Inbound reply drafting and outcome capture
+paloma/                Task tracker: channel scanner, weekly follow-up/summary
+
+media/                 Media library pipeline
+├── originals/         4K source files from property shoots (local, not committed)
+├── renditions/        Rendered verticals for Instagram (local, not committed)
+└── scripts/           render-vertical.js, rescan, indexer
+
+scripts/               Standalone jobs (Telmex bill check, etc.)
+warmup/                Sender warmup templates and driver
+lp/variants/           Versioned landing-page copy
+campaigns/             Sanitized configuration templates
+launchagents/          Portable LaunchAgent plist templates
+memory/                Sync state files (not committed)
+```
+
+---
+
+## Not in this repo
+
+- **Corporate & Legal Intelligence** runs from the OpenClaw workspace, not this
+  codebase. It has Google Drive access to the shared corporate folder (trust
+  documents, entity tax returns, VAT withholdings, notarial deeds) and handles
+  translation/analysis of Spanish legal and tax PDFs, entity and filing-status
+  tracking, fideicomiso fee tracking, document retrieval on demand, and SAT
+  compliance alerts. There is deliberately no corporate code or data here.
+
+- **Expense monitoring** (`#receipts` / `#utility-payments`) — the team posts
+  receipt photos, SPEI payment confirmations, and utility bills to these
+  channels. Sol monitors them for business intelligence but automated OCR
+  expense tracking is not yet built.
+
+- Live databases, credentials, customer records, prospect lists, Slack
+  identifiers, campaign state, logs, generated media, and agent
+  identity/memory files. See `ARCHITECTURE.md` for the full boundary list.
+
+---
+
+## Key integrations
+
+| Service | Purpose |
+|---|---|
+| **OwnerRez** | PMS of record. Full read/write API + 24 webhook subscriptions (booking, guest, property, message, quote, inquiry, surcharge, discount × create/update/delete). 15-min CRM sync + real-time webhook handler. Message thread ingestion into voice corpus. Weekly booking calendar to ops team. |
+| **Meta Marketing API** | Paid campaigns, custom audience sync, Pixel/CAPI attribution, Instagram Graph API for organic posting and DM bridge |
+| **Google Drive** | Resort photo library (6 folders), corporate document storage, HEIC→JPEG conversion pipeline |
+| **Twilio** | WhatsApp webhook bridge for guest conversations |
+| **Resend** | Outbound email delivery (outreach subdomain), webhook signature verification |
+| **Postiz** | Instagram post/Reel scheduling via API |
+| **Cloudflare** | Pages hosting for landing pages + named tunnel (`lapuestadelsol-crm`) exposing CRM webhooks at `webhook.lapuestadelsolresort.com` |
+| **Chroma** | Vector store for voice corpus (sarah_voice_corpus) and media library (media_corpus) |
+| **Cal.com** | Booking-call scheduling webhooks |
+| **Healthchecks.io** | Job monitoring → `#ops-alerts` |
+| **OpenAI** | Embeddings (`text-embedding-3-small`) for voice corpus and media search |
+| **ElevenLabs** | Voice catalog for video ad projects |
+
+---
 
 ## Local setup
 
-Requirements:
-
-- Node.js 22.12 or later
-- Python 3.11 or later
-- SQLite 3
-- Optional: OpenClaw CLI, Cloudflared, FFmpeg, and Chroma
+Requirements: Node.js 22.12+, Python 3.11+, SQLite 3.
+Optional: OpenClaw CLI, Cloudflared, FFmpeg, Chroma.
 
 ```bash
 cp .env.example .env
@@ -53,22 +180,42 @@ mkdir -p crm/data logs secrets campaigns
 cp campaigns/active-campaigns.example.json campaigns/active-campaigns.json
 ```
 
-Production credentials belong in mode-600 JSON files under `SOCIALSOL_SECRETS_DIR`. See `docs/configuration.md`.
+Production credentials live in mode-600 JSON files under
+`SOCIALSOL_SECRETS_DIR`. See `docs/configuration.md`.
 
-The committed voice spec and fixtures are sanitized public baselines. Do not
-commit generated voice-corpus output or exported customer data.
-
-The former `marketing-stack` repository is a migration source only. This
-repository does not depend on its checkout or legacy `workspace-resort` paths.
-See [ARCHITECTURE.md](ARCHITECTURE.md) for ownership and data boundaries.
+---
 
 ## Security defaults
 
-- Internal `/api/*` routes are default-deny and loopback-only unless Basic-auth credentials are configured.
-- Only landing configuration and telemetry ingestion are public.
-- Twilio, Meta, Resend, and Cal.com webhooks verify provider signatures.
-- Browser telemetry is origin-restricted and rate-limited.
-- Tokens are sent in authorization headers, not query strings.
-- Live budget changes require explicit mode and total-budget guardrails.
+- Internal `/api/*` routes are default-deny and loopback-only unless Basic-auth
+  credentials are configured
+- Only landing configuration and telemetry ingestion are public
+- OwnerRez webhook endpoint (`/api/ownerrez/webhook`) is allowlisted for
+  external access with its own Basic Auth layer
+- Twilio, Meta, Resend, Cal.com, and OwnerRez webhooks verify provider
+  signatures or auth
+- Tokens travel in authorization headers, not query strings
+- Pre-commit secret scanning; all secrets templated as `.example` files
 
-See [SECURITY.md](SECURITY.md) for reporting and credential-handling guidance.
+See `SECURITY.md` for reporting and credential-handling guidance.
+
+---
+
+## For future agents reading this
+
+1. `Project_Status.md` (workspace) is the tactical source of truth — read it
+   before assuming build state.
+2. Inspect schemas and paths at runtime (`sqlite3 .schema`, `ls`) — don't
+   assume structure from docs or memory.
+3. Every "complete" claim needs a verification command next to it.
+4. Human approval gates are hard blockers, not suggestions.
+5. The former `marketing-stack` repository is a migration source only — nothing
+   here depends on it.
+6. `MEMORY.md` in the OpenClaw workspace carries durable operational context
+   (active leads, campaign state, integration credentials references, key
+   lessons). Read it at session start.
+7. The Voice Service corpus is the single most sensitive training asset — do
+   not bulk-export or expose message bodies outside the CRM.
+8. OwnerRez is the PMS of record. When in doubt about bookings, availability,
+   or guest data, query the API directly — do not rely on cached CRM data
+   alone.
