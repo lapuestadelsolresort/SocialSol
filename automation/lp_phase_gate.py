@@ -38,6 +38,7 @@ JOB_NAME = "resort-lp-phase-gate"
 
 MIN_TOTAL = 100        # total sessions before a review is worth it
 MIN_PER_VARIANT = 100  # the leading live variant must clear this on its own
+NOT_BOT = "is_bot=0"
 
 
 def la_now():
@@ -72,13 +73,13 @@ def gather(db_path):
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         cur = con.cursor()
-        total = q1(cur, "SELECT COUNT(*) FROM page_sessions")
-        per_variant = qall(cur, """
+        total = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT}")
+        per_variant = qall(cur, f"""
             SELECT v.page_slug, v.slug,
                    COUNT(ps.id) AS n,
                    COALESCE(SUM(ps.converted), 0) AS conv
             FROM lp_variants v
-            LEFT JOIN page_sessions ps ON ps.variant_id = v.id
+            LEFT JOIN page_sessions ps ON ps.variant_id = v.id AND ps.{NOT_BOT}
             WHERE v.status = 'live'
             GROUP BY v.id
             ORDER BY n DESC

@@ -29,6 +29,8 @@ const PUBLIC_API_PATHS = new Set([
   '/api/track/',
   '/api/lp/config',
   '/api/lp/config/',
+  '/api/ownerrez/webhook',
+  '/api/ownerrez/webhook/',
 ]);
 
 let CREDS = null;

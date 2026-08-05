@@ -50,12 +50,17 @@ JOB_NAME = "resort-crm-audience-sync"
 AUDIENCES = {
     "guests": {
         "name": "LPDS — CRM Past Guests & Inquiries",
-        "description": "Emails from CRM leads table — people who inquired or booked",
+        "description": "Emails from leads + OwnerRez guest contacts (Airbnb, VRBO, direct)",
         "query": """
-            SELECT DISTINCT LOWER(TRIM(email))
-            FROM leads
-            WHERE email IS NOT NULL AND email != ''
-              AND TRIM(email) != ''
+            SELECT DISTINCT LOWER(TRIM(email)) FROM (
+              SELECT email FROM leads
+              WHERE email IS NOT NULL AND email != '' AND TRIM(email) != ''
+              UNION
+              SELECT email FROM contacts
+              WHERE email IS NOT NULL AND email != '' AND TRIM(email) != ''
+                AND ownerrez_guest_id IS NOT NULL
+                AND do_not_contact = 0
+            )
         """,
     },
     "planners": {

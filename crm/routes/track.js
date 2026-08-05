@@ -20,6 +20,22 @@ const { sql } = require('@databases/sqlite');
 
 const SID_RE = /^[0-9a-z-]{8,64}$/i;
 const WA_REF_RE = /^[A-Z0-9]{12,24}$/;
+
+// Bot / crawler user-agent patterns — sessions from these are flagged is_bot=1
+// at ingest so reports never include them.
+const BOT_UA_PATTERNS = [
+  'meta-externalads', 'facebookexternalhit', 'Facebot',
+  'Googlebot', 'bingbot', 'Applebot', 'AdsBot', 'Amazonbot',
+  'YandexBot', 'Bytespider', 'SemrushBot', 'AhrefsBot', 'DotBot',
+  'PetalBot', 'GPTBot', 'ClaudeBot', 'Twitterbot', 'LinkedInBot',
+  'Slackbot', 'WhatsApp', 'Discordbot', 'HeadlessChrome',
+  'crawler', 'spider',
+];
+function isBot(ua) {
+  const lower = (ua || '').toLowerCase();
+  return BOT_UA_PATTERNS.some(p => lower.includes(p.toLowerCase()));
+}
+
 const ALLOWED_KINDS = new Set([
   'pageview', 'scroll', 'click', 'deadclick', 'rageclick', 'cta_view',
   'heartbeat', 'visible', 'hidden', 'abandon', 'wa_click', 'cta_click',
@@ -68,11 +84,12 @@ function buildRouter(getDb) {
           INSERT INTO page_sessions (
             id, page_slug, language, ip_address, user_agent, referrer,
             utm_source, utm_medium, utm_campaign, utm_content,
-            device, viewport_w, viewport_h, whatsapp_ref
+            device, viewport_w, viewport_h, whatsapp_ref, is_bot
           ) VALUES (
             ${sid}, ${m.page || null}, ${m.lang || null}, ${ip}, ${ua}, ${m.ref || null},
             ${m.utm_source || null}, ${m.utm_medium || null}, ${m.utm_campaign || null}, ${m.utm_content || null},
-            ${m.dev || null}, ${m.vw || null}, ${m.vh || null}, ${whatsappRef}
+            ${m.dev || null}, ${m.vw || null}, ${m.vh || null}, ${whatsappRef},
+          ${isBot(ua) ? 1 : 0}
           )
           ON CONFLICT(id) DO UPDATE SET
             page_slug   = COALESCE(page_sessions.page_slug, excluded.page_slug),

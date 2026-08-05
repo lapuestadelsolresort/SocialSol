@@ -105,7 +105,7 @@ async function snapshotFor({ db, sql }, exp) {
       COALESCE(SUM(cta_clicked), 0) AS cta_clicked,
       COALESCE(SUM(converted), 0) AS converted,
       COALESCE(SUM(CASE WHEN lead_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS leads_via_session
-    FROM page_sessions WHERE ${where}
+    FROM page_sessions WHERE is_bot=0 AND ${where}
   `);
   Object.assign(base, {
     sessions: agg.sessions || 0,

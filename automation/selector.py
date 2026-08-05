@@ -21,6 +21,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(ROOT, "crm", "data", "crm.db"))
 APPLY_VARIANT = os.path.join(HERE, "apply_variant.py")
 
 QUALIFIED = "(max_scroll_pct > 0 OR reached_cta = 1 OR dwell_ms >= 10000)"
+NOT_BOT = "is_bot=0"
 
 METRICS = {
     "wa_click_per_qualified": {
@@ -93,15 +94,15 @@ def arm_metric(con, variant_id):
 def arm_stats(con, variant_id, metric):
     m = METRICS[metric]
     trials = con.execute(
-        f"SELECT COUNT(*) FROM page_sessions WHERE variant_id=? AND {m['trial']}",
+        f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND variant_id=? AND {m['trial']}",
         (variant_id,),
     ).fetchone()[0] or 0
     successes = con.execute(
-        f"SELECT COUNT(*) FROM page_sessions WHERE variant_id=? AND ({m['trial']}) AND ({m['success']})",
+        f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND variant_id=? AND ({m['trial']}) AND ({m['success']})",
         (variant_id,),
     ).fetchone()[0] or 0
     n_qualified = con.execute(
-        f"SELECT COUNT(*) FROM page_sessions WHERE variant_id=? AND {QUALIFIED}",
+        f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND variant_id=? AND {QUALIFIED}",
         (variant_id,),
     ).fetchone()[0] or 0
     successes = min(successes, trials)

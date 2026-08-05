@@ -26,6 +26,7 @@ import meta_budget_sync  # noqa: E402
 import selector  # noqa: E402
 
 QUALIFIED = guardrails.QUALIFIED
+NOT_BOT = "is_bot=0"
 
 
 def connect():
@@ -60,10 +61,10 @@ def diagnose(con):
         except sqlite3.OperationalError:
             return 0
 
-    sessions = c("SELECT COUNT(*) FROM page_sessions")
-    qualified = c(f"SELECT COUNT(*) FROM page_sessions WHERE {QUALIFIED}")
-    cta = c("SELECT COALESCE(SUM(reached_cta),0) FROM page_sessions")
-    clicks = c("SELECT COALESCE(SUM(cta_clicked),0) FROM page_sessions")
+    sessions = c(f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT}")
+    qualified = c(f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND {QUALIFIED}")
+    cta = c(f"SELECT COALESCE(SUM(reached_cta),0) FROM page_sessions WHERE {NOT_BOT}")
+    clicks = c(f"SELECT COALESCE(SUM(cta_clicked),0) FROM page_sessions WHERE {NOT_BOT}")
     stages = [
         ("sessions_to_qualified", "engagement", (qualified / sessions) if sessions else 0, sessions),
         ("qualified_to_cta", "engagement", (cta / qualified) if qualified else 0, qualified),

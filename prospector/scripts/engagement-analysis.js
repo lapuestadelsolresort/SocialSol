@@ -31,6 +31,7 @@ const {
 const SCRIPTS_DIR = __dirname;
 const STATE_PATH = path.join(SCRIPTS_DIR, 'iteration-state.json');
 const SLACK_CHANNEL = process.env.PROSPECTOR_SLACK_CHANNEL;
+const CAMPAIGN_SLUG = process.env.PAULINA_CAMPAIGN_SLUG || 'planner_partner_program_v1';
 const DRY_RUN = process.argv.includes('--dry-run');
 
 const MODEL = 'claude-haiku-4-5';
@@ -92,6 +93,7 @@ async function pullEngagementData(db) {
     JOIN contacts c ON c.id = os.contact_id
     LEFT JOIN outreach_campaigns oc ON oc.id = os.campaign_id
     WHERE os.sent_at >= datetime('now', '-14 days')
+      AND oc.slug = ${CAMPAIGN_SLUG}
       AND os.status NOT IN ('drafted', 'pending_approval', 'cancelled')
     ORDER BY os.sent_at DESC
   `);
@@ -149,7 +151,10 @@ async function pullEngagementData(db) {
 async function pullQueueStats(db) {
   const [row] = await db.query(sql`
     SELECT COUNT(*) as eligible FROM campaign_contacts cc
-    WHERE NOT EXISTS (
+    JOIN outreach_campaigns oc ON oc.id = cc.campaign_id
+    WHERE oc.slug = ${CAMPAIGN_SLUG}
+      AND
+    NOT EXISTS (
       SELECT 1 FROM outreach_sends os
       WHERE os.contact_id = cc.contact_id
         AND os.campaign_id = cc.campaign_id
@@ -172,7 +177,7 @@ async function generateHypothesis(stats, prevState) {
     .map(h => `Day ${h.day}: ${h.hypothesis} → Test: ${h.test} → Result: ${h.result || 'pending'}`)
     .join('\n');
 
-  const prompt = `You are the outreach analyst for La Puesta del Sol Resort (a private boutique villa resort in Riviera Nayarit, Mexico). You run cold email prospecting to wedding planners and corporate retreat coordinators.
+  const prompt = `You are the outreach analyst for La Puesta del Sol Resort (a private oceanfront resort in Riviera Nayarit, Mexico). You run cold email prospecting only to wedding and event planners. The offer is a venue partner program with direct resort access, hosted site visits, co-marketing support, and a documented 10% referral commission. The email's only ask is an attributed click to the planner partner page; it must not ask for a booking or couple introduction.
 
 ## Last 14 Days Engagement Data
 - Total sent: ${stats.total}
