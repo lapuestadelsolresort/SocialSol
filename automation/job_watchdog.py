@@ -18,6 +18,7 @@ EXPECTED = {
     "resort-lp-phase-gate": timedelta(hours=30),
     "resort-crm-backup": timedelta(hours=30),
     "resort-log-rotation": timedelta(days=8),
+    "resort-crm-audience-sync": timedelta(hours=30),
 }
 
 
