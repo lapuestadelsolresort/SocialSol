@@ -12,6 +12,7 @@
   - `#social-sol` (`C0AF8A8R4H2`) — Instagram content + paid Meta ads + WhatsApp DM bridge
   - `#sarah-coach` — inbound reply drafting in Sarah's voice
   - `#accounting` (`C05UMKNHEDC`) — QuickBooks Online integration, expense tracking, financial data
+  - `#george-expenses` (`C0BNH8AJJMT`) — George Starkey out-of-pocket expenses → auto-post to QBO liability account
   - All channels share the same CRM (`crm/data/crm.db`)
 - **Lead status rule:** When Jason asks about leads, query the CRM directly first. Never make him ask twice.
 
@@ -291,3 +292,39 @@ Jason has *repeatedly and emphatically* directed Sol to stop asking for draft ap
 
 ## Prospector Daily Updates (added 2026-06-09)
 Jason wants a *daily* update in #prospector-paulina. Keep it concise: sends, replies, pipeline status, any issues or wins. Post once per day (morning PDT preferred).
+
+## Kapital Accounting System (added 2026-08-06)
+- **What:** Automated Kapital CSV → QBO pipeline. Parses bank statements, classifies transactions, converts MXN→USD via Banxico daily rate, pushes to QuickBooks Online.
+- **Code:** `accounting/` directory — `kapital_parser.py`, `classifier.py`, `fx_rates.py`, `qbo_push.py`, `dedup.py`, `tests.py`, `config.json`
+- **Receipt channels (11):** C0AEPQ5BCP9, C06C5G0PPUY, C0BNCFZQ70B, C0BPD2F7Q3A, C0BN3A8PFPH, C0BNGNQ6GLE, C0BNF913ERK, C06BGNK0XQS, C086546JLLU, C0BNJUBMM18, C0BNNMBJJ20. Config is plug-and-play — add new channels in `config.json`.
+- **QBO new accounts created:** Marketing:Paid Advertising (51), Marketing:Marketing Software (52), Software:AI Services (53), Donations & Fundraising (54)
+- **QBO new vendors created:** Susy (54), Mural (55)
+- **Dedup:** Uses Kapital Clave references to prevent duplicates from overlapping CSVs.
+- **Salary month attribution:** If SPEI concept doesn't specify the month, ask the worker in their receipt channel. Don't assume.
+- **SPEI fees:** Separate QBO records (not bundled as split lines).
+- **Ambiguous expenses:** Ping Mayela (U06AWTZH1V1) in the relevant receipt channel. Never ask Jason.
+- **Weekly tests:** Every Monday 8am PT, run `accounting/tests.py` and post results to #accounting (C05UMKNHEDC). 7 checks: duplicates, orphaned group activities, orphaned food, salary attribution, receipt coverage, Mayela ✅ reconciliation, uncategorized/split.
+- **Workflow when Jason drops a CSV in #accounting:** Parse → classify → convert FX → dedup check → push auto-classified to QBO → ping Mayela for unknowns → post summary to Jason.
+
+## George Starkey Expense Channel (added 2026-08-06)
+- **Channel:** `#george-expenses` (`C0BNH8AJJMT`) — George (<@U05E2DAD4J1>, gbstarkey52) posts out-of-pocket expenses he pays for the property
+- **QBO liability account:** "Due to / Due from George Starkey (Net)" (id: 1150040021) — tracks what the resort owes George
+- **Workflow:** George posts expense (text and/or receipt photo) → Sol parses amount, description, date, vendor → classifies expense category (same logic as Kapital) → converts MXN→USD if needed (Banxico daily rate) → creates QBO journal entry: debit expense account, credit George liability account → confirms in channel with recorded details
+- **Auto-approve:** No human gate. Straight to QBO on every post.
+- **Receipt photos:** Optional. OCR when present for amount/vendor/date extraction. Text-only posts parsed from message content.
+- **George is:** Jason's father, co-owner (trust beneficiary), lives on property, frequently pays for maintenance/supplies/repairs out of pocket.
+
+## LP Tracking Fixes — 2026-08-06 (CRITICAL)
+
+**Problem found:** tracker.js was silently failing for ~89% of sessions. Three root causes:
+1. **Script name** — `tracker.js` caught by ad-blocker filter lists. Renamed to `px.js`.
+2. **DNT suppression** — Facebook in-app browser sets DNT=1. Old tracker.js suppressed ALL events (scroll, wa_click, cta_view) for DNT users. Fixed: wa_click and cta_view now fire regardless of DNT (first-party conversion tracking, not behavioral). Only scroll/click/heartbeat suppressed for DNT.
+3. **Missing `data-cta` attributes** — IntersectionObserver looked for `[data-cta]` but WhatsApp buttons on weddings/retreats/summer-sale/fitness had only `data-event`. Fixed: added `data-cta` + observer now also watches `.wa-cta` class.
+
+**Deployed:** All 4 LP pages rebuilt + deployed to Cloudflare Pages. CRM serves both px.js (new) and tracker.js (stub redirect for cached pages).
+
+**Attribution fix:** whatsapp.js now has session-id-prefix fallback — reconstructs UUID from LPDS ref hex when `whatsapp_ref` column is empty.
+
+**Daily review fix:** `automation/wa_campaign_leads.py` pulls WhatsApp CRM leads by campaign. Review checklist at `memory/review-checklist.md` — MUST query both pixel leads AND WhatsApp CRM leads before reporting campaign metrics or recommending pauses.
+
+**HARD RULE:** Never recommend pausing a campaign based on pixel leads alone. Always check WhatsApp + email CRM leads for the same campaign. If `reached_cta` is 0% for a campaign, suspect tracking failure, not zero conversions.
