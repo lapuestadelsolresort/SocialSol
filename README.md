@@ -8,6 +8,11 @@ admin support**. It runs on a single Mac mini via OpenClaw, with humans
 approving anything outbound. Slack is the human interface; every agent has a
 channel.
 
+Sol is also the resort's **AI business consultant** — continuously optimizing
+for cost efficiencies and revenue growth across all three domains. Every
+integration, automation, and workflow should be evaluated through the lens of
+operational savings, margin improvement, and scalable processes.
+
 ## The one-paragraph version
 
 The resort makes ~2× more per buyout on direct bookings than on Airbnb.
@@ -29,7 +34,7 @@ business at sale.
 | **Sarah Coach** | Guest comms | Drafts replies to inbound guest messages in Sarah's voice; she edits and sends | `#sarah-coach` |
 | **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |
 | **Corporate Intelligence** | Finance/legal | Analysis of Mexican corporate docs, tax filings, and property trusts (see "Not in this repo") | `#corporate` |
-| **QuickBooks Integration** | Finance | Expense tracking, P&L, invoicing — reads and writes QuickBooks Online via API | `#accounting` |
+| **QuickBooks Integration** | Finance | Automated expense tracking via Slack receipt channels → Kapital CSV → QBO pipeline. Full read/write API. | `#accounting` |
 
 ### Supporting automations
 
@@ -45,6 +50,7 @@ business at sale.
 | Budget guardrails check | Continuous | `#business-intel` |
 | Sender-domain warmup | Scheduled batches | `#prospector-paulina` |
 | Encrypted backups + Healthchecks monitoring | Daily | `#ops-alerts` |
+| Accounting weekly tests (7 checks) | Monday 8am PT | `#accounting` |
 
 ### Shared infrastructure
 
@@ -92,6 +98,9 @@ crm/                   Express CRM server, SQLite migrations, tests
 landing/apps/          Astro landing pages (weddings, retreats, fitness, planner
                        partners) deployed to Cloudflare Pages
 
+accounting/            Kapital → QBO expense pipeline: CSV parser, 3-tier
+                       classifier, FX conversion, dedup, QBO push, weekly tests
+
 automation/            Daily reports, campaign integrity, budget guardrails,
                        CRM audience sync, backups, watchdogs
 
@@ -128,11 +137,20 @@ memory/                Sync state files (not committed)
   tracking, fideicomiso fee tracking, document retrieval on demand, and SAT
   compliance alerts. There is deliberately no corporate code or data here.
 
-- **Expense monitoring** (`#receipts` / `#utility-payments`) — the team posts
-  receipt photos, SPEI payment confirmations, and utility bills to these
-  channels. Sol monitors them for business intelligence. The QuickBooks
-  integration (`#accounting`) now provides API access to expenses, P&L, and
-  invoices; automated expense workflows are under construction.
+- **Kapital Accounting System** (`accounting/` directory) — Automated
+  pipeline: Kapital Bank CSV → transaction classification → MXN→USD conversion
+  (Banxico daily rate) → QuickBooks Online push. Three-tier classifier
+  (auto/guess/unknown) maps SPEI transfers, payroll, utilities, and vendor
+  payments to QBO categories. Deduplication via Kapital Clave references.
+  11 dedicated Slack receipt channels (`#receipts`, `#mayela-receipts`,
+  `#property-receipts`, `#cleaning-receipts`, `#sergio-receipts`,
+  `#group-expenses`, `#temo-receipts`, `#daniel-invoices`,
+  `#sergio-mayela-invoices`, `#misc-receipts`, `#new-receipts`) where the
+  team posts expense receipts, SPEI confirmations, and salary invoices.
+  Sol cross-references these with bank statement transactions for
+  classification context. Unknown transactions are escalated to Mayela.
+  Weekly automated tests (7 checks) run Monday 8am PT and post to
+  `#accounting`. See `accounting/README.md` for the full spec.
 
 - Live databases, credentials, customer records, prospect lists, Slack
   identifiers, campaign state, logs, generated media, and agent
@@ -156,7 +174,7 @@ memory/                Sync state files (not committed)
 | **Healthchecks.io** | Job monitoring → `#ops-alerts` |
 | **OpenAI** | Embeddings (`text-embedding-3-small`) for voice corpus and media search |
 | **ElevenLabs** | Voice catalog for video ad projects |
-| **QuickBooks Online** | Accounting system of record. Full read/write API via OAuth 2.0. Expense tracking, P&L reports, invoices, vendors, chart of accounts. Company: "Puesta Del Sol v2" (Realm `9341456092857510`). Refresh-token auth, auto-renewable. |
+| **QuickBooks Online** | Accounting system of record. Full read/write API via OAuth 2.0. Automated expense classification and push from Kapital bank statements. P&L reports, invoices, 30+ vendors, 35+ expense/income categories. Company: "Puesta Del Sol v2" (Realm `9341456092857510`). Refresh-token auth, auto-renewable. |
 
 ---
 
