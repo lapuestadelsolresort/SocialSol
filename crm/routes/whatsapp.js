@@ -197,6 +197,25 @@ function buildRouter(getDb) {
           `) : [];
           let attrMethod = session ? 'ref' : 'unattributed';
 
+          // ── Session-ID prefix fallback (ref is first 16 hex of UUID) ──
+          if (!session && whatsappRef && whatsappRef.length >= 16) {
+            const hex = whatsappRef.toLowerCase();
+            // Reconstruct UUID prefix: xxxxxxxx-xxxx-xxxx (8-4-4)
+            const uuidPrefix = hex.length >= 16
+              ? `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}%`
+              : null;
+            if (uuidPrefix) {
+              const [idSession] = await db.query(sql`
+                SELECT id, page_slug, utm_source, utm_medium, utm_campaign, utm_content
+                FROM page_sessions WHERE id LIKE ${uuidPrefix} ORDER BY created_at DESC LIMIT 1
+              `);
+              if (idSession) {
+                session = idSession;
+                attrMethod = 'session-id-prefix';
+              }
+            }
+          }
+
           // ── Time-window fallback when ref-match misses ────────────────
           if (!session) {
             // Attempt 1: recent CTA-engaged session (last 60 min)

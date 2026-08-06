@@ -2506,6 +2506,10 @@ const { buildRouter: buildWhatsAppRouter } = require('./routes/whatsapp');
 app.use('/webhook/twilio-whatsapp', buildWhatsAppRouter(() => db));
 app.use('/api/whatsapp', buildWhatsAppRouter(() => db));
 
+// ─── QuickBooks OAuth ──────────────────────────────────────────────────────────
+const { buildRouter: buildQuickBooksRouter } = require('./routes/quickbooks');
+app.use('/api/quickbooks', buildQuickBooksRouter());
+
 // ─── Meta Webhook (Instagram DMs + Facebook Page Messages) ─────────────────────
 const META_SECRETS_PATH = path.join(SECRETS_DIR, 'meta.json');
 

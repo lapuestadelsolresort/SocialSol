@@ -31,6 +31,10 @@ const PUBLIC_API_PATHS = new Set([
   '/api/lp/config/',
   '/api/ownerrez/webhook',
   '/api/ownerrez/webhook/',
+  '/api/quickbooks/connect',
+  '/api/quickbooks/connect/',
+  '/api/quickbooks/callback',
+  '/api/quickbooks/callback/',
 ]);
 
 let CREDS = null;
