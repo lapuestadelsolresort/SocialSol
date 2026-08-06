@@ -11,6 +11,7 @@
   - `#business-intel` (`C0B384L2TNC`) — ops summaries, Spanish translation, Meta ad approvals, business monitoring
   - `#social-sol` (`C0AF8A8R4H2`) — Instagram content + paid Meta ads + WhatsApp DM bridge
   - `#sarah-coach` — inbound reply drafting in Sarah's voice
+  - `#accounting` (`C05UMKNHEDC`) — QuickBooks Online integration, expense tracking, financial data
   - All channels share the same CRM (`crm/data/crm.db`)
 - **Lead status rule:** When Jason asks about leads, query the CRM directly first. Never make him ask twice.
 
@@ -261,6 +262,18 @@ All LaunchAgents loaded: `com.lapuestadelsolresort.{daily-report,meta-insights,l
 - **DB columns added:** `contacts.ownerrez_guest_id`, `contacts.ownerrez_booking_id`, `contacts.listing_channel`, `contacts.address`, `leads.ownerrez_guest_id`, `leads.ownerrez_inquiry_id`, `leads.listing_channel`.
 - **Channel rule:** <#C067JQ1JWDS> gets *bookings only* (not inquiries) + weekly calendar. #business-intel gets both.
 - **Limitation:** Airbnb anonymizes guest email until booking. Most Airbnb inquiry contacts only have first name. Full data (email, phone, address) arrives when they actually book.
+
+## QuickBooks Online Integration (added 2026-08-05)
+- **App:** "La Puesta CRM Integration" (AppID: `abb641d9-a2a2-4112-820d-33db1fba958a`)
+- **Company:** Puesta Del Sol v2 (Realm ID: `9341456092857510`)
+- **Ad account:** Production keys, full `com.intuit.quickbooks.accounting` scope
+- **Auth:** OAuth 2.0, refresh token (~101 days), auto-renewable. Tokens in `secrets/quickbooks.json`
+- **Base URL:** `https://quickbooks.api.intuit.com/v3/company/9341456092857510/`
+- **Channel:** `#accounting` (`C05UMKNHEDC`) — dedicated channel for QB workflows
+- **Intuit login:** `jason@shiningbrass.com` (developer.intuit.com)
+- **Redirect URIs:** OAuth playground + `https://webhook.lapuestadelsolresort.com/api/quickbooks/callback`
+- **Key APIs:** Expenses (Purchase), P&L (reports/ProfitAndLoss), Invoices, Vendors, Accounts, Bills
+- **Priority:** Expense data pull is first workflow to build
 
 ## Key Lessons
 - Slack streaming must be OFF for ig-drafts account (missing_recipient_team_id error)

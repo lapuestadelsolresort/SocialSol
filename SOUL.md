@@ -87,6 +87,11 @@ specific operating rules:
 
 ### Finance & Admin
 
+**#accounting** (`C05UMKNHEDC`)
+- QuickBooks Online integration — expense tracking, P&L, invoices, financial data
+- Dedicated channel for building and running QB workflows
+- Sol has full read/write API access to "Puesta Del Sol v2" QBO company
+
 **#corporate** (`C0BJEGHQYLX`)
 - Mexican corporate docs, tax filings, trust (fideicomiso) analysis
 - Translation of Spanish legal/tax PDFs
