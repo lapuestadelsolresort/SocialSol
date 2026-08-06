@@ -29,6 +29,7 @@ business at sale.
 | **Sarah Coach** | Guest comms | Drafts replies to inbound guest messages in Sarah's voice; she edits and sends | `#sarah-coach` |
 | **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |
 | **Corporate Intelligence** | Finance/legal | Analysis of Mexican corporate docs, tax filings, and property trusts (see "Not in this repo") | `#corporate` |
+| **QuickBooks Integration** | Finance | Expense tracking, P&L, invoicing — reads and writes QuickBooks Online via API | `#accounting` |
 
 ### Supporting automations
 
@@ -129,8 +130,9 @@ memory/                Sync state files (not committed)
 
 - **Expense monitoring** (`#receipts` / `#utility-payments`) — the team posts
   receipt photos, SPEI payment confirmations, and utility bills to these
-  channels. Sol monitors them for business intelligence but automated OCR
-  expense tracking is not yet built.
+  channels. Sol monitors them for business intelligence. The QuickBooks
+  integration (`#accounting`) now provides API access to expenses, P&L, and
+  invoices; automated expense workflows are under construction.
 
 - Live databases, credentials, customer records, prospect lists, Slack
   identifiers, campaign state, logs, generated media, and agent
@@ -154,6 +156,7 @@ memory/                Sync state files (not committed)
 | **Healthchecks.io** | Job monitoring → `#ops-alerts` |
 | **OpenAI** | Embeddings (`text-embedding-3-small`) for voice corpus and media search |
 | **ElevenLabs** | Voice catalog for video ad projects |
+| **QuickBooks Online** | Accounting system of record. Full read/write API via OAuth 2.0. Expense tracking, P&L reports, invoices, vendors, chart of accounts. Company: "Puesta Del Sol v2" (Realm `9341456092857510`). Refresh-token auth, auto-renewable. |
 
 ---
 
