@@ -123,7 +123,7 @@ def build_message(total, per_variant):
         lines.append(f"  • `{slug}` ({page_slug}) — {n} sessions, {conv} wa-clicks ({rate})")
     lines += [
         "",
-        ":information_source: *converted* = clicked the WhatsApp button. "
+        ":information_source: *converted* = verified inbound WhatsApp lead. "
         "When the visitor keeps the LPDS reference in the prefilled message, "
         "the Twilio bridge now links the resulting CRM lead back to this session.",
         "",

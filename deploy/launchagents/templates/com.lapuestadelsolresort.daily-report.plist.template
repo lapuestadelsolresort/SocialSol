@@ -6,10 +6,9 @@
   <key>ProgramArguments</key>
   <array>
     <string>__PYTHON_BIN__</string>
-    <string>__SOCIALSOL_ROOT__/automation/daily_report.py</string>
+    <string>__SOCIALSOL_ROOT__/automation/daily_consolidated_report.py</string>
   </array>
   <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
-  <key>RunAtLoad</key><true/>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
   <key>EnvironmentVariables</key>
@@ -18,7 +17,7 @@
     <key>RESORT_SOCIAL_CHANNEL</key><string>__RESORT_SOCIAL_CHANNEL__</string>
     <key>OPENCLAW_SLACK_ACCOUNT</key><string>__OPENCLAW_SLACK_ACCOUNT__</string>
   </dict>
-  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/daily-report.log</string>
-  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/daily-report.err</string>
+  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/daily-consolidated-report.log</string>
+  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/daily-consolidated-report.err</string>
 </dict>
 </plist>

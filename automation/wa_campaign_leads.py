@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Pull WhatsApp CRM leads attributed to campaigns — the conversion data
-that was MISSING from the daily social-sol review.
+"""Pull verified inbound WhatsApp leads from the attribution ledger.
 
-Run alongside meta_daily_insights.py to get the full conversion picture:
-  - Meta pixel leads (from meta_daily_insights.py)
-  - WhatsApp CRM leads (this script)
-  - Email CRM leads (future)
+Legacy browser pixel Lead events are excluded because they were button taps,
+not actual conversations.
 
 Usage:
     python3 wa_campaign_leads.py [--days 7] [--dry-run]
@@ -53,17 +50,17 @@ def main():
 
     today = la_now().date()
 
-    # Yesterday's WhatsApp leads
+    # Yesterday's verified inbound WhatsApp leads. Attribution is sourced from
+    # the deterministic ledger, never inferred from a loose time window.
     yesterday = (today - timedelta(days=1)).isoformat()
     y_start, y_end = utc_window(yesterday)
 
     cur.execute("""
-        SELECT id, name, phone, source, utm_source, utm_campaign, campaign_name,
-               inquiry_message, inquiry_category, created_at
-        FROM leads
-        WHERE source IN ('whatsapp', 'meta_ad')
-          AND created_at >= ? AND created_at < ?
-        ORDER BY created_at
+        SELECT ae.lead_id AS id, ae.utm_campaign, ae.created_at
+        FROM attribution_events ae
+        WHERE ae.event_type='whatsapp_lead'
+          AND ae.created_at >= ? AND ae.created_at < ?
+        ORDER BY ae.created_at
     """, (y_start, y_end))
     yesterday_leads = [dict(r) for r in cur.fetchall()]
 
@@ -74,13 +71,12 @@ def main():
 
     cur.execute("""
         SELECT
-            COALESCE(utm_campaign, campaign_name, 'unattributed') as campaign,
-            COUNT(*) as leads,
-            GROUP_CONCAT(name, ', ') as names
-        FROM leads
-        WHERE source IN ('whatsapp', 'meta_ad')
+            COALESCE(utm_campaign, 'unattributed') as campaign,
+            COUNT(DISTINCT lead_id) as leads
+        FROM attribution_events
+        WHERE event_type='whatsapp_lead'
           AND created_at >= ? AND created_at < ?
-        GROUP BY COALESCE(utm_campaign, campaign_name, 'unattributed')
+        GROUP BY COALESCE(utm_campaign, 'unattributed')
         ORDER BY leads DESC
     """, (w_start, w_end))
     campaign_leads = [dict(r) for r in cur.fetchall()]
@@ -88,11 +84,11 @@ def main():
     # All-time WhatsApp leads by campaign
     cur.execute("""
         SELECT
-            COALESCE(utm_campaign, campaign_name, 'unattributed') as campaign,
-            COUNT(*) as leads
-        FROM leads
-        WHERE source IN ('whatsapp', 'meta_ad')
-        GROUP BY COALESCE(utm_campaign, campaign_name, 'unattributed')
+            COALESCE(utm_campaign, 'unattributed') as campaign,
+            COUNT(DISTINCT lead_id) as leads
+        FROM attribution_events
+        WHERE event_type='whatsapp_lead'
+        GROUP BY COALESCE(utm_campaign, 'unattributed')
         ORDER BY leads DESC
     """)
     alltime = [dict(r) for r in cur.fetchall()]
