@@ -12,6 +12,8 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+from campaign_registry import apply_snapshot, fetch_live_snapshot, load_registry
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DB_PATH = os.environ.get("DB_PATH", os.path.join(ROOT, "crm", "data", "crm.db"))
@@ -70,12 +72,14 @@ def load_json(path, default):
 
 def campaign_tags(record):
     tags = set()
-    for key in ("utm_campaign", "campaign_id", "brief_id", "experiment_slug"):
-        if record.get(key):
-            tags.add(str(record[key]))
+    if record.get("utm_campaign"):
+        tags.add(str(record["utm_campaign"]))
     for alias in record.get("utm_aliases") or []:
         if alias:
             tags.add(str(alias))
+    for destination in record.get("destinations") or []:
+        if destination.get("utm_campaign"):
+            tags.add(str(destination["utm_campaign"]))
     return sorted(tags)
 
 
@@ -96,11 +100,9 @@ def experiments_index(cur):
 
 
 def load_campaigns(cur):
-    records = load_json(CAMPAIGNS_PATH, [])
-    if not isinstance(records, list):
-        records = []
+    records = load_registry(CAMPAIGNS_PATH)
     if records:
-        return records
+        return apply_snapshot(records, fetch_live_snapshot(records), datetime.now(timezone.utc).isoformat())
     db_rows = qall(
         cur,
         "SELECT name, status, budget_daily, meta_campaign_id FROM campaigns WHERE status='active' OR status='ACTIVE'",
@@ -152,7 +154,7 @@ def check_campaigns(cur, cutoff, gaps):
             sessions = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND created_at>=?", (*tags, cutoff))
             qualified = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND created_at>=? AND {QUALIFIED}", (*tags, cutoff))
             cta_clicks = q1(cur, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND created_at>=? AND cta_clicked=1", (*tags, cutoff))
-            leads = q1(cur, f"SELECT COUNT(*) FROM leads WHERE utm_campaign IN ({ph}) AND created_at>=?", (*tags, cutoff))
+            leads = q1(cur, f"SELECT COUNT(DISTINCT lead_id) FROM attribution_events WHERE event_type='whatsapp_lead' AND utm_campaign IN ({ph}) AND created_at>=?", (*tags, cutoff))
         else:
             sessions = qualified = cta_clicks = leads = 0
             issues.append("no_utm_tags")

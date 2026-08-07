@@ -49,7 +49,7 @@ const WHATSAPP_URL = 'https://wa.me/15553526612?text=' + encodeURIComponent(
     window.LPDS_BASE = 'https://webhook.lapuestadelsolresort.com';
     window.LPDS_PAGE = 'planners';
   </script>
-  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/tracker.js?v=7"></script>
+  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/px.js?v=8"></script>
   <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/hydrate.js?v=7"></script>
 
   <style is:global>
@@ -288,7 +288,7 @@ const WHATSAPP_URL = 'https://wa.me/15553526612?text=' + encodeURIComponent(
       document.querySelectorAll('.wa-cta').forEach(function(btn) {
         btn.addEventListener('click', function() {
           if (typeof fbq === 'function') {
-            fbq('track', 'Lead', {
+            fbq('trackCustom', 'WhatsAppClick', {
               content_name: 'planner_partner_whatsapp_click',
               content_category: 'venue_partner',
               value: 3500,

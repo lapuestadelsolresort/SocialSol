@@ -6,9 +6,9 @@
 // batches events and flushes via navigator.sendBeacon so they survive unload.
 // Ported from GoldRoute, adapted for the WhatsApp-click funnel:
 //   - cta_view on a wa-cta  → page_sessions.reached_cta = 1
-//   - wa_click              → page_sessions.cta_clicked = 1, converted = 1
-// (the form-funnel flags reached_form/started_form/completed_form are dropped —
-//  these pages have no form; the WhatsApp click IS the conversion.)
+//   - wa_click              → page_sessions.cta_clicked = 1
+// A real conversion is set only after an inbound WhatsApp message is matched
+// deterministically in routes/whatsapp.js.
 //
 // All side effects are best-effort — a failed beacon must never 5xx to the
 // visitor. PRIVACY: event metadata only (lengths, ids, scroll %, timings) —
@@ -124,7 +124,7 @@ function buildRouter(getDb) {
           if (e.kind === 'wa_click') {
             await db.query(sql`
               UPDATE page_sessions
-              SET cta_clicked = 1, converted = 1, last_seen = datetime('now')
+              SET cta_clicked = 1, last_seen = datetime('now')
               WHERE id = ${sid}
             `);
           } else if (e.kind === 'cta_view' && typeof e.target === 'string' && e.target.indexOf('cta:') === 0) {

@@ -292,6 +292,26 @@ async function initDB() {
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_attr_event_type        ON attribution_events(event_type)`);
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_attr_created           ON attribution_events(created_at)`);
 
+  // Idempotency and delivery audit for verified server-side conversions.
+  await db.query(sql`
+    CREATE TABLE IF NOT EXISTS conversion_deliveries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      event_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      request_meta TEXT,
+      response_meta TEXT,
+      error TEXT,
+      delivered_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(provider, event_id)
+    )
+  `);
+  await db.query(sql`CREATE INDEX IF NOT EXISTS idx_conversion_delivery_status ON conversion_deliveries(status, updated_at)`);
+
   // ─── Meta DM inbox ────────────────────────────────────────────────────────
   await db.query(sql`
     CREATE TABLE IF NOT EXISTS meta_messages (
@@ -375,7 +395,7 @@ async function initDB() {
       reached_cta INTEGER DEFAULT 0,               -- a wa-cta entered viewport (cta_view)
       cta_clicked INTEGER DEFAULT 0,               -- wa_click fired
       abandoned_field TEXT,
-      converted INTEGER DEFAULT 0                  -- == cta_clicked; the WhatsApp conversion
+      converted INTEGER DEFAULT 0                  -- verified inbound lead, not a button tap
     )
   `);
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_ps_variant ON page_sessions(variant_id)`);
@@ -604,6 +624,7 @@ app.use((req, res, next) => {
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   if (req.method === 'OPTIONS') {
     if (browserSourceAllowed(req)) return res.sendStatus(204);

@@ -15,6 +15,8 @@
   - `#george-expenses` (`C0BNH8AJJMT`) — George Starkey out-of-pocket expenses → auto-post to QBO liability account
   - All channels share the same CRM (`crm/data/crm.db`)
 - **Lead status rule:** When Jason asks about leads, query the CRM directly first. Never make him ask twice.
+- **HARD RULE — No "want me to look into it?" on broken data:** When any metric looks broken (0% rates, missing events, ratio anomalies, zero conversions with real traffic), investigate IMMEDIATELY and report findings. Do not ask permission to check the obvious. Jason should never have to tell you to do what's clearly the next step. Act first, report what you found.
+- **QC channel:** `#qc-infra` (`C0B1JA6BDRP`) — infrastructure integrity tests, tracking health checks, weekly audits. All automated QC results post here.
 
 ## Active Warm Leads (updated 2026-05-20)
 - **Tara Ashby** (tara@thecharterco.com) — The Charter Co, B2B investor retreat inquiry. Call scheduled Tue May 26 9am PDT. High priority.
@@ -328,3 +330,39 @@ Jason wants a *daily* update in #prospector-paulina. Keep it concise: sends, rep
 **Daily review fix:** `automation/wa_campaign_leads.py` pulls WhatsApp CRM leads by campaign. Review checklist at `memory/review-checklist.md` — MUST query both pixel leads AND WhatsApp CRM leads before reporting campaign metrics or recommending pauses.
 
 **HARD RULE:** Never recommend pausing a campaign based on pixel leads alone. Always check WhatsApp + email CRM leads for the same campaign. If `reached_cta` is 0% for a campaign, suspect tracking failure, not zero conversions.
+
+## #social-sol Accountability System — 2026-08-07
+
+Jason directive: Sol must hold its own workflows accountable. Built and deployed four guardrails, all posting to `#qc-infra` (`C0B1JA6BDRP`):
+
+1. **Daily Tracking Health Check** (`scripts/tracking-health-check.py`, 6:45am PT)
+   - px.js serving check (HTTP 200)
+   - Meta clicks vs CRM sessions ratio per campaign (>30% required)
+   - CTA reach rate per LP (>0% if >10 sessions)
+   - Zero-conversion anomaly detection (>$30 + >50 LPVs + 0 leads from ALL sources = suspicious)
+   - Writes state to `state/tracking-health.json` — downstream scripts read this before making recommendations
+   - If unhealthy, posts a banner to #social-sol warning that today's review has incomplete data
+
+2. **Dual-Source Attribution** (hardcoded into daily review)
+   - Every campaign recommendation must query both Meta pixel leads AND CRM WhatsApp/email leads
+   - `automation/wa_campaign_leads.py` runs alongside `meta_daily_insights.py`
+
+3. **Campaign Pause Decision Gate** (`automation/campaign_pause_gate.py`)
+   - Before recommending any campaign pause, three questions must pass:
+     a. Did we check both pixel AND CRM leads?
+     b. Is tracking confirmed healthy for this campaign's LP? (reads `state/tracking-health.json`)
+     c. Has it been live with verified working tracking for ≥14 days? (tracking fix date: 2026-08-06)
+   - If ANY answer is no → flag as "needs-investigation", not pause-worthy
+
+4. **Weekly Tracking Audit** (`scripts/weekly-tracking-audit.py`, Mondays 7am PT)
+   - Full reconciliation: Meta clicks vs CRM sessions vs pixel events vs WA/email leads, by campaign, trailing 7 days
+   - Pass/fail per campaign with specific failure reasons
+   - This is the systemic check that would have caught the 89% session drop weeks earlier
+
+**Known issue found on first run:** `active-campaigns.json` has two entries for `retarget` (warm-8-30d and hot-7d ad sets) sharing the same `utm_campaign` value. Need to split UTMs for proper attribution.
+
+**LaunchAgents (installed and loaded 2026-08-07):**
+- `com.lapuestadelsolresort.tracking-health.plist` — daily 6:45am PT
+- `com.lapuestadelsolresort.weekly-tracking-audit.plist` — Mondays 7am PT
+
+**Output format rule (Jason directive 2026-08-07):** Concise bullets only. ✅ or 🔴 per item. No prose. When 🔴 appears, Sol investigates and fixes — don't dump the problem on Jason.

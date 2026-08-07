@@ -57,7 +57,7 @@ const AIRBNB_URL = 'https://www.airbnb.com/rooms/869105818174917656?guests=1&adu
     window.LPDS_BASE = 'https://webhook.lapuestadelsolresort.com';
     window.LPDS_PAGE = 'summer-sale';
   </script>
-  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/px.js?v=7"></script>
+  <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/px.js?v=8"></script>
   <script is:inline defer src="https://webhook.lapuestadelsolresort.com/lp/hydrate.js?v=7"></script>
 
   <style is:global>
@@ -338,7 +338,7 @@ const AIRBNB_URL = 'https://www.airbnb.com/rooms/869105818174917656?guests=1&adu
       document.querySelectorAll('.wa-cta').forEach(function(btn) {
         btn.addEventListener('click', function() {
           if (typeof fbq === 'function') {
-            fbq('track', 'Lead', {
+            fbq('trackCustom', 'WhatsAppClick', {
               content_name: 'summer_sale_whatsapp_click',
               content_category: 'summer_sale',
               value: 17500,

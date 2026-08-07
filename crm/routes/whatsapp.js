@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { verifyTwilioSignature } = require('../lib/webhook-auth');
+const { sendVerifiedLead } = require('../lib/meta-capi');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SECRETS_DIR = process.env.SOCIALSOL_SECRETS_DIR || path.join(REPO_ROOT, 'secrets');
@@ -187,6 +188,7 @@ function buildRouter(getDb) {
 
       // ─── Auto-create CRM lead on first contact ────────────────────────────
       let leadCreated = false;
+      let verifiedLead = null;
       if (senderPhone && senderPhone !== '+10005551234') {
         try {
           const refMatch = text.match(/\bLPDS-([A-Z0-9]{12,24})\b/i);
@@ -216,39 +218,8 @@ function buildRouter(getDb) {
             }
           }
 
-          // ── Time-window fallback when ref-match misses ────────────────
-          if (!session) {
-            // Attempt 1: recent CTA-engaged session (last 60 min)
-            const [ctaSession] = await db.query(sql`
-              SELECT id, page_slug, utm_source, utm_medium, utm_campaign, utm_content
-              FROM page_sessions
-              WHERE is_bot = 0
-                AND (cta_clicked = 1 OR reached_cta = 1)
-                AND created_at > datetime('now', '-60 minutes')
-              ORDER BY last_seen DESC
-              LIMIT 1
-            `);
-            if (ctaSession) {
-              session = ctaSession;
-              attrMethod = 'time-window-cta';
-            } else {
-              // Attempt 2: wa_click event in last 24 hours
-              const [waClickSession] = await db.query(sql`
-                SELECT ps.id, ps.page_slug, ps.utm_source, ps.utm_medium, ps.utm_campaign, ps.utm_content
-                FROM page_sessions ps
-                JOIN page_events pe ON pe.session_id = ps.id
-                WHERE ps.is_bot = 0
-                  AND pe.kind = 'wa_click'
-                  AND pe.ts > datetime('now', '-24 hours')
-                ORDER BY pe.ts DESC
-                LIMIT 1
-              `);
-              if (waClickSession) {
-                session = waClickSession;
-                attrMethod = 'time-window-wa-click';
-              }
-            }
-          }
+          // Never guess attribution from a global time window. Without an
+          // exact LPDS reference this inbound message remains unattributed.
           console.log(`[whatsapp] Attribution for ${senderPhone}: method=${attrMethod} session=${session?.id || 'none'}`);
 
           const source = session
@@ -280,6 +251,14 @@ function buildRouter(getDb) {
 
           if (leadCreated) {
             console.log(`[whatsapp] Auto-created CRM lead for ${senderName} (${senderPhone})`);
+            verifiedLead = {
+              eventId: `twilio-${messageSid || dmRowId}`,
+              eventTime: now,
+              phone: senderPhone,
+              campaign: campaignName,
+              utmCampaign,
+              pageSlug: session?.page_slug || null,
+            };
           }
           if (session && lead) {
             await db.query(sql`
@@ -302,6 +281,17 @@ function buildRouter(getDb) {
           }
         } catch (leadErr) {
           console.warn('[whatsapp] Lead auto-creation failed:', leadErr.message);
+        }
+      }
+
+      // A real first inbound conversation is the conversion. Send server-side
+      // after durable CRM storage; failures are audited and never lose the lead.
+      if (verifiedLead) {
+        try {
+          await sendVerifiedLead({ db, sql, ...verifiedLead });
+          console.log(`[whatsapp] Meta CAPI Lead delivered (${verifiedLead.eventId})`);
+        } catch (capiErr) {
+          console.warn('[whatsapp] Meta CAPI delivery failed:', capiErr.message);
         }
       }
 

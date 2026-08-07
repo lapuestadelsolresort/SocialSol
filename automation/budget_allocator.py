@@ -86,12 +86,14 @@ def load_json(path, default):
 
 def campaign_tags(record):
     tags = set()
-    for key in ("utm_campaign", "campaign_id", "brief_id", "experiment_slug"):
-        if record.get(key):
-            tags.add(str(record[key]))
+    if record.get("utm_campaign"):
+        tags.add(str(record["utm_campaign"]))
     for alias in record.get("utm_aliases") or []:
         if alias:
             tags.add(str(alias))
+    for destination in record.get("destinations") or []:
+        if destination.get("utm_campaign"):
+            tags.add(str(destination["utm_campaign"]))
     return sorted(tags)
 
 
@@ -111,14 +113,14 @@ def campaign_mean(con, bucket, record):
     sessions = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph})", tags)
     qualified = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND {QUALIFIED}", tags)
     cta_clicks = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND cta_clicked=1", tags)
-    leads = q1(con, f"SELECT COUNT(*) FROM leads WHERE utm_campaign IN ({ph})", tags)
+    leads = q1(con, f"SELECT COUNT(DISTINCT lead_id) FROM attribution_events WHERE event_type='whatsapp_lead' AND utm_campaign IN ({ph})", tags)
     if bucket == "reach":
         success, exposure = qualified, sessions
     elif bucket == "engagement":
         cta_views = q1(con, f"SELECT COUNT(*) FROM page_sessions WHERE {NOT_BOT} AND utm_campaign IN ({ph}) AND reached_cta=1", tags)
         success, exposure = cta_views, sessions
     else:
-        success, exposure = max(leads, cta_clicks), qualified or sessions
+        success, exposure = leads, qualified or sessions
     return (success + 1.0) / (max(exposure - success, 0) + success + 2.0)
 
 

@@ -98,6 +98,21 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireWaRefs);
   else wireWaRefs();
 
+  // Conversion-intent tracking must remain active under DNT. Facebook's
+  // in-app browser commonly sends DNT=1; suppress only optional behavior.
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    var a = el.closest && el.closest('a[href]');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    var isWhatsApp = href.indexOf('wa.me') !== -1 || href.indexOf('whatsapp') !== -1;
+    if (!isWhatsApp) return;
+    appendWaRef(a);
+    var text = (a.textContent || '').trim().slice(0, 60);
+    send('wa_click', 'btn:' + (text || 'WhatsApp'), { href: a.getAttribute('href') || '', page: 'main-site' });
+    flushNow();
+  }, true);
+
   if (dnt) { window.LPDS_TRACK = function () {}; return; }
 
   // --- scroll depth ---
@@ -115,12 +130,7 @@
     var text = (a.textContent || '').trim().slice(0, 60);
     var href = a.getAttribute('href') || '';
     var isWhatsApp = href.indexOf('wa.me') !== -1 || href.indexOf('whatsapp') !== -1;
-    if (isWhatsApp) {
-      appendWaRef(a);
-      send('wa_click', 'btn:' + (text || 'WhatsApp'), { href: a.getAttribute('href') || '', page: 'main-site' });
-      flushNow();
-      return;
-    }
+    if (isWhatsApp) return; // handled by the capture listener above
 
     // Track other contact/book/reserve buttons as intent, not conversion.
     var lcText = text.toLowerCase();

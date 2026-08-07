@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
-"""Idempotently reconcile campaign/variant experiments and optimizer safety cap."""
+"""Reconcile Meta delivery state, destinations, UTMs, and experiment links.
+
+This job is read-only against Meta. It updates the local runtime registry and
+measurement ledger so reporting never treats local campaign state as truth.
+"""
 
 import argparse
 import json
 import os
 import sqlite3
+from datetime import datetime, timezone
+
+from campaign_registry import (
+    REGISTRY_PATH,
+    apply_snapshot,
+    fetch_live_snapshot,
+    load_registry,
+    write_registry,
+)
+from job_health import record
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DB_PATH = os.environ.get("DB_PATH", os.path.join(ROOT, "crm", "data", "crm.db"))
+JOB_NAME = "resort-marketing-reconcile"
 
 VARIANT_EXPERIMENTS = [
     ("exp-summer-sale-control", "Summer sale control LP", "summer-sale-control-en"),
@@ -16,15 +31,10 @@ VARIANT_EXPERIMENTS = [
 ]
 
 
-def load_campaign_registry():
-    registry_path = os.environ.get(
-        "ACTIVE_CAMPAIGNS_PATH",
-        os.path.join(ROOT, "campaigns", "active-campaigns.json"),
-    )
-    with open(registry_path, encoding="utf-8") as handle:
-        registry = json.load(handle)
+def campaign_experiments(registry):
     experiments = []
-    for campaign in registry.get("campaigns", []):
+    seen = set()
+    for campaign in registry:
         campaign_id = str(campaign.get("campaign_id", "")).strip()
         slug = str(campaign.get("experiment_slug", "")).strip()
         utm = str(campaign.get("utm_campaign", "")).strip()
@@ -32,8 +42,16 @@ def load_campaign_registry():
             raise ValueError(
                 "each campaign requires campaign_id, experiment_slug, and utm_campaign"
             )
-        experiments.append((slug, campaign.get("name") or slug, campaign_id, utm))
-    return experiments, registry.get("budget_cap_daily_usd", 80)
+        if campaign_id in seen:
+            continue
+        seen.add(campaign_id)
+        experiments.append((
+            slug,
+            campaign.get("campaign_name") or campaign.get("name") or slug,
+            campaign_id,
+            utm,
+        ))
+    return experiments
 
 
 def reconcile(con, experiments, budget_cap_daily_usd):
@@ -93,20 +111,56 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    experiments, budget_cap_daily_usd = load_campaign_registry()
+    registry_path = os.environ.get("ACTIVE_CAMPAIGNS_PATH", str(REGISTRY_PATH))
+    registry = load_registry(registry_path)
+    snapshot = fetch_live_snapshot(registry)
+    reconciled_at = datetime.now(timezone.utc).isoformat()
+    updated_registry = apply_snapshot(registry, snapshot, reconciled_at)
+    experiments = campaign_experiments(updated_registry)
     con = sqlite3.connect(DB_PATH, timeout=20)
     try:
         con.execute("PRAGMA busy_timeout=20000")
+        row = con.execute(
+            "SELECT value FROM optimizer_config WHERE key='budget_cap_daily'"
+        ).fetchone()
+        try:
+            budget_cap_daily_usd = float(json.loads(row[0])) if row else 80
+        except (TypeError, ValueError, json.JSONDecodeError):
+            budget_cap_daily_usd = 80
         reconcile(con, experiments, budget_cap_daily_usd)
         if args.dry_run:
             con.rollback()
-            print("dry-run: reconciliation SQL completed and rolled back")
+            changed = sum(1 for before, after in zip(registry, updated_registry) if before != after)
+            print(json.dumps({
+                "dry_run": True,
+                "campaigns_seen": len(snapshot),
+                "active_campaigns": sum(1 for row in snapshot if row["effective_status"] == "ACTIVE"),
+                "registry_records_changed": changed,
+                "active_daily_budget_usd": round(sum(
+                    row.get("daily_budget_usd") or 0
+                    for row in snapshot if row["effective_status"] == "ACTIVE"
+                ), 2),
+            }, indent=2))
         else:
+            write_registry(updated_registry, registry_path)
             con.commit()
-            print("marketing state reconciled")
+            record(JOB_NAME, True, f"{len(snapshot)} campaigns; {sum(1 for row in snapshot if row['effective_status'] == 'ACTIVE')} active")
+            print(json.dumps({
+                "reconciled_at": reconciled_at,
+                "campaigns_seen": len(snapshot),
+                "active_campaigns": sum(1 for row in snapshot if row["effective_status"] == "ACTIVE"),
+                "active_daily_budget_usd": round(sum(
+                    row.get("daily_budget_usd") or 0
+                    for row in snapshot if row["effective_status"] == "ACTIVE"
+                ), 2),
+            }, indent=2))
     finally:
         con.close()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        record(JOB_NAME, False, str(exc)[:300])
+        raise

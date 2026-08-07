@@ -112,12 +112,21 @@ describe('px.js client-side tracker', () => {
   });
 });
 
+describe('Squarespace tracker conversion intent under DNT', () => {
+  it('registers WhatsApp capture tracking before the DNT bailout', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'public', 'lp', 'sq-tracker.js'), 'utf-8');
+    const waPos = source.indexOf("send('wa_click'");
+    const dntPos = source.indexOf('if (dnt)');
+    assert.ok(waPos > 0 && dntPos > 0 && waPos < dntPos);
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. LANDING PAGE MARKUP — data-cta attributes + script src
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Landing page markup', () => {
-  const pages = ['weddings', 'retreats', 'summer-sale', 'fitness'];
+  const pages = ['weddings', 'retreats', 'summer-sale', 'fitness', 'planners'];
 
   for (const page of pages) {
     describe(page, () => {
@@ -187,12 +196,11 @@ describe('Server-side track.js event processing', () => {
     trackSource = fs.readFileSync(path.join(ROOT, 'routes', 'track.js'), 'utf-8');
   });
 
-  it('wa_click sets cta_clicked = 1 and converted = 1', () => {
+  it('wa_click records intent but does not claim a verified conversion', () => {
     assert.ok(trackSource.includes("e.kind === 'wa_click'"), 'Must handle wa_click events');
-    assert.ok(
-      trackSource.includes('cta_clicked = 1') && trackSource.includes('converted = 1'),
-      'wa_click must set both cta_clicked and converted to 1'
-    );
+    const waBlock = trackSource.slice(trackSource.indexOf("e.kind === 'wa_click'"), trackSource.indexOf("e.kind === 'cta_view'"));
+    assert.ok(waBlock.includes('cta_clicked = 1'), 'wa_click must record the tap');
+    assert.ok(!waBlock.includes('converted = 1'), 'wa_click must not be treated as a verified conversion');
   });
 
   it('cta_view sets reached_cta = 1', () => {
@@ -252,18 +260,11 @@ describe('WhatsApp attribution (whatsapp.js)', () => {
     );
   });
 
-  it('has time-window-cta fallback', () => {
-    assert.ok(
-      waSource.includes('time-window-cta'),
-      'Must have time-window CTA fallback for attribution'
-    );
-  });
-
-  it('has time-window-wa-click fallback', () => {
-    assert.ok(
-      waSource.includes('time-window-wa-click'),
-      'Must have time-window wa_click fallback for attribution'
-    );
+  it('never guesses attribution from an unrelated time-window session', () => {
+    assert.ok(!waSource.includes("datetime('now', '-60 minutes')"));
+    assert.ok(!waSource.includes("datetime('now', '-24 hours')"));
+    assert.ok(!waSource.includes('time-window-cta'));
+    assert.ok(!waSource.includes('time-window-wa-click'));
   });
 
   it('sets source to meta_ad when session has utm_source=meta', () => {
@@ -298,7 +299,7 @@ describe('Campaign lead reporting', () => {
     assert.ok(fs.existsSync(scriptPath), 'wa_campaign_leads.py must exist');
     const content = fs.readFileSync(scriptPath, 'utf-8');
     assert.ok(content.includes('whatsapp'), 'Must query WhatsApp leads');
-    assert.ok(content.includes('meta_ad'), 'Must include meta_ad attributed leads');
+    assert.ok(content.includes('attribution_events'), 'Must use the deterministic attribution ledger');
     assert.ok(content.includes('utm_campaign'), 'Must group leads by utm_campaign');
   });
 
@@ -392,18 +393,20 @@ describe('Full funnel regression guards', () => {
     }
   });
 
-  it('Olivia (wa-33) is attributed to us-weddings campaign', async () => {
+  it('deterministic WhatsApp attribution never duplicates one session reference', async () => {
     if (!fs.existsSync(DB_PATH)) return;
     const sqlite = require('@databases/sqlite');
     const { sql } = require('@databases/sqlite');
     const db = sqlite(DB_PATH, { readOnly: true });
     try {
-      const [lead] = await db.query(sql`
-        SELECT source, utm_campaign FROM leads WHERE phone = '+12102888824'
+      const [{ n }] = await db.query(sql`
+        SELECT COUNT(*) n FROM (
+          SELECT whatsapp_ref FROM page_sessions
+          WHERE whatsapp_ref IS NOT NULL
+          GROUP BY whatsapp_ref HAVING COUNT(*) > 1
+        )
       `);
-      assert.ok(lead, 'Olivia lead must exist');
-      assert.equal(lead.source, 'meta_ad', 'Olivia must be attributed as meta_ad');
-      assert.equal(lead.utm_campaign, 'us-weddings', 'Olivia must be attributed to us-weddings');
+      assert.equal(n, 0, 'whatsapp_ref must identify at most one session');
     } finally {
       await db.dispose();
     }
@@ -418,6 +421,10 @@ describe('Full funnel regression guards', () => {
     assert.ok(
       serverSource.includes('Access-Control-Allow-Origin'),
       'Must set Access-Control-Allow-Origin header'
+    );
+    assert.ok(
+      serverSource.includes('Access-Control-Allow-Credentials') && serverSource.includes("'true'"),
+      'Credentialed LP requests require Access-Control-Allow-Credentials: true'
     );
     assert.ok(
       serverSource.includes('Content-Type'),
@@ -477,22 +484,24 @@ describe('Scale guards for new campaigns', () => {
     }
   });
 
-  it('wa_campaign_leads.py queries both whatsapp and meta_ad sources', () => {
+  it('wa_campaign_leads.py queries verified WhatsApp attribution events', () => {
     const script = fs.readFileSync(
       path.join(ROOT, '..', 'automation', 'wa_campaign_leads.py'), 'utf-8'
     );
-    assert.ok(script.includes("'whatsapp'"), 'Must query whatsapp source');
-    assert.ok(script.includes("'meta_ad'"), 'Must query meta_ad source');
+    assert.ok(script.includes('attribution_events'), 'Must query the attribution ledger');
+    assert.ok(script.includes("event_type='whatsapp_lead'"), 'Must query verified inbound leads');
   });
 
-  it('whatsapp.js attribution covers all methods in priority order', () => {
+  it('whatsapp.js attribution permits only deterministic methods', () => {
     const waSource = fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8');
-    const methods = ['ref', 'session-id-prefix', 'time-window-cta', 'time-window-wa-click', 'unattributed'];
+    const methods = ['ref', 'session-id-prefix', 'unattributed'];
     for (const method of methods) {
       assert.ok(
         waSource.includes(method),
         `Attribution must include '${method}' method`
       );
     }
+    assert.ok(!waSource.includes('time-window-cta'));
+    assert.ok(!waSource.includes('time-window-wa-click'));
   });
 });
