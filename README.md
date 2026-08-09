@@ -29,7 +29,7 @@ business at sale.
 | Agent | Domain | What it does | Slack channel |
 |---|---|---|---|
 | **Social Sol** | Marketing | Daily organic Instagram + paid Meta campaigns → landing pages → WhatsApp funnel | `#social-sol` |
-| **Prospector Paulina** | Marketing | B2B outbound to wedding planners and retreat coordinators; venue partner program | `#prospector-paulina` |
+| **Prospector Paulina** | Marketing | B2B email outreach to named wedding planners and retreat coordinators; separate from paid Meta delivery | `#prospector-paulina` |
 | **Reengager Regina** | Marketing | Past-guest and stale-inquiry reactivation campaigns | `#reengager-regina` |
 | **Sarah Coach** | Guest comms | Drafts replies to inbound guest messages in Sarah's voice; she edits and sends | `#sarah-coach` |
 | **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |
@@ -61,6 +61,11 @@ business at sale.
 - **CRM** (`http://localhost:3456`) — Express + SQLite backend shared by every
   agent. Contacts, leads, outreach sends, suppressions, multi-touch
   attribution, voice draft logs, and media assets.
+- **Paid-channel boundary** — Paulina email and Meta paid acquisition share
+  landing pages and CRM storage, but use separate UTM namespaces, campaign
+  controls, and reports. Only verified WhatsApp leads carrying a configured
+  paid-Meta UTM are sent to Meta CAPI; email, organic, direct, and unattributed
+  leads remain CRM-only.
 - **Media Library** (`/api/media/search`) — 223 indexed assets from the
   Oct 2025 property shoot (drone, A-cam, B-cam, wedding photos). Vision-
   captioned, embedding-searchable, persona-weighted ranking. Vertical render

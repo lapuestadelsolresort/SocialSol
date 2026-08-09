@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { verifyTwilioSignature } = require('../lib/webhook-auth');
-const { sendVerifiedLead } = require('../lib/meta-capi');
+const { isMetaAttributed, sendVerifiedLead } = require('../lib/meta-capi');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SECRETS_DIR = process.env.SOCIALSOL_SECRETS_DIR || path.join(REPO_ROOT, 'secrets');
@@ -252,14 +252,20 @@ function buildRouter(getDb) {
 
           if (leadCreated) {
             console.log(`[whatsapp] Auto-created CRM lead for ${senderName} (${senderPhone})`);
-            verifiedLead = {
-              eventId: `twilio-${messageSid || dmRowId}`,
-              eventTime: now,
-              phone: senderPhone,
-              campaign: campaignName,
-              utmCampaign,
-              pageSlug: session?.page_slug || null,
-            };
+            if (isMetaAttributed({ utmSource, utmMedium, utmCampaign })) {
+              verifiedLead = {
+                eventId: `twilio-${messageSid || dmRowId}`,
+                eventTime: now,
+                phone: senderPhone,
+                campaign: campaignName,
+                utmSource,
+                utmMedium,
+                utmCampaign,
+                pageSlug: session?.page_slug || null,
+              };
+            } else {
+              console.log(`[whatsapp] Meta CAPI skipped: non-Meta attribution (${utmSource}/${utmMedium}/${utmCampaign || 'none'})`);
+            }
           }
           if (session && lead) {
             await db.query(sql`
@@ -285,8 +291,9 @@ function buildRouter(getDb) {
         }
       }
 
-      // A real first inbound conversation is the conversion. Send server-side
-      // after durable CRM storage; failures are audited and never lose the lead.
+      // A real first inbound conversation from a configured Meta UTM is the
+      // paid conversion. Send after durable CRM storage; other channels stay
+      // in CRM only and failures remain available to the retry worker.
       if (verifiedLead) {
         try {
           await sendVerifiedLead({ db, sql, ...verifiedLead });

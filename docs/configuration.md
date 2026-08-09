@@ -22,6 +22,18 @@ chmod 600 /path/to/secrets/*.json
 
 Live campaign mappings belong in `campaigns/active-campaigns.json`, copied from the sanitized example. That file is deliberately ignored because it contains operational identifiers and budgets.
 
+Tracked campaign briefs are the desired configuration. `active-campaigns.json`
+stores runtime IDs, observed Meta status, approval-request timestamps, and the
+verifiable approval receipt. Reconciliation must update only `meta_*` observed
+fields; it must not overwrite a brief or declared registry status to hide drift.
+
+The registry also defines the Meta CAPI allow-list. A verified WhatsApp lead is
+sent to Meta only when its UTM campaign is present in the registry and its UTM
+source/medium identify paid Meta delivery. This prevents Paulina email,
+organic, direct, and unattributed leads from entering Meta attribution or
+optimization. Failed deliveries are durable in `conversion_deliveries`, retried
+by `crm/scripts/retry-meta-capi.js`, and treated as tracking-health failures.
+
 Agent configuration is handled the same way:
 
 ```bash
@@ -53,3 +65,9 @@ npm run render:launchagents -- --output /tmp/socialsol-launchagents
 
 Review the generated files before copying them to `~/Library/LaunchAgents`.
 Rendering does not install, load, or replace any running job.
+
+The Meta CAPI retry definition is
+`com.lapuestadelsolresort.meta-capi-retry.plist`. It runs every 15 minutes,
+keeps the original event id/time for Meta deduplication, and stops retrying
+events older than Meta's seven-day acceptance window or after the configured
+attempt cap. Those records remain red in tracking health for investigation.

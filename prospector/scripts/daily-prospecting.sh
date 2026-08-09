@@ -5,7 +5,7 @@
 # 1. Engagement analysis + hypothesis (posts to Slack)
 # 2. Research: finds wedding/event planners only
 # 3. Attach eligible planner contacts to the partner-program campaign
-# 4. Compose 5 drafts → auto-approve → orchestrator sends them
+# 4. Compose 5 drafts → composer applies its configured approval policy
 #
 # No human approval required. Jason sees daily report in #prospector-paulina.
 # ────────────────────────────────────────────────────────────────────────────
@@ -125,27 +125,23 @@ print(len(d.get('failed', [])))
 
 log "Composed: $COMPOSED_COUNT | Failed: $FAILED_COUNT | Draft IDs: $DRAFT_IDS"
 
-# ── 5. Auto-approve all new drafts → orchestrator will send ─────────────────
+# ── 5. Report the composer's approval result ─────────────────────────────────
 if [[ -n "$DRAFT_IDS" && "$COMPOSED_COUNT" -gt 0 ]]; then
-  log "Auto-approving $COMPOSED_COUNT drafts: $DRAFT_IDS"
-
-  # Build SQL IN clause
-  APPROVED=$(sqlite3 "$CRM_DB" "
-    UPDATE outreach_sends
-    SET
-      status        = 'approved',
-      approved_by   = 'sol_autopilot',
-      approved_at   = datetime('now'),
-      scheduled_at  = datetime('now')
-    WHERE id IN ($DRAFT_IDS)
-      AND status = 'pending_approval';
-    SELECT changes();
-  " 2>>"$LOG")
-
-  log "Auto-approved rows: $APPROVED"
-  "$OPENCLAW" message send --channel slack --account "$SLACK_ACCOUNT" --target "$SLACK_CHANNEL" \
-    --message "✅ *$COMPOSED_COUNT emails auto-approved and queued for send* — orchestrator will dispatch within minutes." \
-    2>/dev/null || log "WARN: Slack post failed"
+  AUTO_APPROVED_COUNT=$(echo "$COMPOSE_OUTPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(sum(1 for c in d.get('composed', []) if c.get('auto_approved')))
+" 2>/dev/null || echo "0")
+  log "Composer approval result: $AUTO_APPROVED_COUNT/$COMPOSED_COUNT auto-approved"
+  if [[ "$AUTO_APPROVED_COUNT" -eq "$COMPOSED_COUNT" ]]; then
+    "$OPENCLAW" message send --channel slack --account "$SLACK_ACCOUNT" --target "$SLACK_CHANNEL" \
+      --message "✅ *$COMPOSED_COUNT emails passed the configured autonomous approval gate* — orchestrator will dispatch within minutes." \
+      2>/dev/null || log "WARN: Slack post failed"
+  else
+    "$OPENCLAW" message send --channel slack --account "$SLACK_ACCOUNT" --target "$SLACK_CHANNEL" \
+      --message "ℹ️ *$COMPOSED_COUNT emails composed; $AUTO_APPROVED_COUNT auto-approved.* Remaining drafts stay pending under the configured policy." \
+      2>/dev/null || log "WARN: Slack post failed"
+  fi
 else
   # Check if we've exhausted the campaign
   ELIGIBLE=$(sqlite3 "$CRM_DB" "

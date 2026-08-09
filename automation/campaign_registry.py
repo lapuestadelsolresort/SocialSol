@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -24,6 +25,19 @@ META_SECRETS_PATH = SECRETS_DIR / "meta.json"
 
 class MetaAPIError(RuntimeError):
     pass
+
+
+def _http_error_message(exc):
+    try:
+        payload = json.loads(exc.read().decode("utf-8"))
+        error = payload.get("error") or {}
+        details = error.get("error_user_msg") or error.get("message")
+        code = error.get("code")
+        subcode = error.get("error_subcode")
+        suffix = "/".join(str(value) for value in (code, subcode) if value is not None)
+        return f"{details} ({suffix})" if suffix else str(details)
+    except Exception:
+        return str(exc)
 
 
 def load_json(path, default=None):
@@ -84,8 +98,41 @@ def graph_api(secrets, endpoint, **params):
     try:
         with urllib.request.urlopen(req, timeout=30) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise MetaAPIError(f"Meta API request failed for {endpoint}: {_http_error_message(exc)}") from exc
     except Exception as exc:
         raise MetaAPIError(f"Meta API request failed for {endpoint}: {exc}") from exc
+    if payload.get("error"):
+        error = payload["error"]
+        raise MetaAPIError(f"Meta API error for {endpoint}: {error.get('message', 'unknown')}")
+    return payload
+
+
+def graph_post(secrets, endpoint, **params):
+    """POST a form-encoded mutation to Meta without putting tokens in URLs."""
+    base = str(secrets.get("graph_api_base") or "https://graph.facebook.com").rstrip("/")
+    base_path = urllib.parse.urlsplit(base).path.rstrip("/")
+    versioned = base_path.rsplit("/", 1)[-1].startswith("v") and base_path.rsplit("/", 1)[-1][1:2].isdigit()
+    url = f"{base}/{endpoint.lstrip('/')}" if versioned else f"{base}/{graph_version(secrets)}/{endpoint.lstrip('/')}"
+    encoded = {}
+    for key, value in params.items():
+        if isinstance(value, (dict, list, tuple, bool)):
+            encoded[key] = json.dumps(value, separators=(",", ":"))
+        elif value is not None:
+            encoded[key] = str(value)
+    req = urllib.request.Request(
+        url,
+        data=urllib.parse.urlencode(encoded).encode("utf-8"),
+        method="POST",
+        headers={"Authorization": f"Bearer {secrets['access_token']}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as response:
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        raise MetaAPIError(f"Meta API mutation failed for {endpoint}: {_http_error_message(exc)}") from exc
+    except Exception as exc:
+        raise MetaAPIError(f"Meta API mutation failed for {endpoint}: {exc}") from exc
     if payload.get("error"):
         error = payload["error"]
         raise MetaAPIError(f"Meta API error for {endpoint}: {error.get('message', 'unknown')}")
@@ -265,7 +312,6 @@ def apply_snapshot(records, snapshot, reconciled_at):
         row = dict(original)
         live = by_id.get(str(row.get("campaign_id") or ""))
         if live:
-            row["status"] = live["effective_status"]
             row["meta_status"] = live["status"]
             row["meta_effective_status"] = live["effective_status"]
             row["meta_reconciled_at"] = reconciled_at

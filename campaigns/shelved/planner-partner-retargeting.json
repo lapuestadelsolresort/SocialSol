@@ -1,7 +1,7 @@
 {
   "brief_id": "planner-partner-retargeting",
   "campaign_name": "LPDS — Planners — Partner Retargeting",
-  "status": "AWAITING_CREATIVE_REVIEW",
+  "status": "SHELVED",
   "channel": "meta",
   "objective": "OUTCOME_TRAFFIC",
   "optimization_goal": "LANDING_PAGE_VIEWS",
@@ -12,13 +12,25 @@
   "landing_page_url": "https://planners.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=planner-retarget&utm_content=partner-program-v1",
   "utm_campaign": "planner-retarget",
   "experiment_slug": "exp-meta-planner-partner-retargeting",
+  "replacement_brief_id": "planner-partner-prospecting",
+  "shelved_at": "2026-08-09T22:11:24.421408+00:00",
+  "shelved_reason": "Replaced after custom-audience relaxation and paid self-seeding were confirmed. Live Meta campaign is paused and runtime registry entry is retired.",
   "audience": {
     "name": "LPDS — Planner LP Visitors — 180d",
     "source": "pixel",
+    "audience_id": "120253888839710558",
     "pixel_id": "837757775519925",
     "retention_days": 180,
     "url_contains": "planners.lapuestadelsolresort.com",
-    "countries": ["US", "CA"],
+    "excluded_utm_campaigns": [
+      "planner-prospecting",
+      "planner-retarget"
+    ],
+    "reactivation_threshold": 100,
+    "countries": [
+      "US",
+      "CA"
+    ],
     "expansion": false
   },
   "creative_brief": {
@@ -35,11 +47,12 @@
     "required_ratio": "4:5",
     "required_review_channel": "#social-sol"
   },
-  "activation_gate": [
-    "Final creative generated with an approved Social Sol creative pipeline",
-    "Creative and landing-page QC passed",
-    "Human approval recorded in #social-sol",
-    "Meta campaign, audience, ad set, creative, and ad IDs written to active-campaigns.json"
+  "reactivation_gate": [
+    "Clean organic/email planner audience reaches at least 100 non-bot sessions",
+    "Paid planner UTMs remain excluded from the audience rule",
+    "Fresh creative and landing-page QC pass",
+    "Human approval resolves to Jason's real Slack reply in #social-sol",
+    "Paused Meta configuration reads back with all expansion controls off"
   ],
-  "notes": "Planner-only retargeting seeded by attributed Paulina visits. Do not use broad wedding-consumer targeting or send traffic to the weddings landing page."
+  "notes": "Historical planner retargeting brief. Keep shelved until the clean organic/email seed reaches 100. Do not count Meta paid planner traffic toward readiness."
 }

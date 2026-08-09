@@ -14,6 +14,7 @@ Copy `config.example.json` to ignored `config.json` and configure `.env` before
 running. Research runs, fetched-page cache, draft state, and recent-send logs
 are runtime data and remain outside Git.
 
-Automated approval is off in the example configuration. Enabling
-`composer.auto_approve` changes a human-reviewed workflow into an autonomous
-sending workflow and should be treated as a production change.
+Automated approval is off in the example configuration so a fresh installation
+fails safely. Production intentionally enables `composer.auto_approve` under
+Jason's standing autonomy directive. The composer is the single authority for
+that choice; scheduled shell jobs must not update approval state directly.

@@ -141,6 +141,7 @@ async function pullEngagementData(db) {
     total, delivered, bounced, opened, replied, clicked,
     open_rate: delivered > 0 ? ((opened / delivered) * 100).toFixed(1) : '0.0',
     reply_rate: delivered > 0 ? ((replied / delivered) * 100).toFixed(1) : '0.0',
+    click_rate: delivered > 0 ? ((clicked / delivered) * 100).toFixed(1) : '0.0',
     bounce_rate: total > 0 ? ((bounced / total) * 100).toFixed(1) : '0.0',
     byHook, bySubjectPrefix,
     replyDetails, bounceDetails,
@@ -177,14 +178,14 @@ async function generateHypothesis(stats, prevState) {
     .map(h => `Day ${h.day}: ${h.hypothesis} → Test: ${h.test} → Result: ${h.result || 'pending'}`)
     .join('\n');
 
-  const prompt = `You are the outreach analyst for La Puesta del Sol Resort (a private oceanfront resort in Riviera Nayarit, Mexico). You run cold email prospecting only to wedding and event planners. The offer is a venue partner program with direct resort access, hosted site visits, co-marketing support, and a documented 10% referral commission. The email's only ask is an attributed click to the planner partner page; it must not ask for a booking or couple introduction.
+  const prompt = `You are the outreach analyst for La Puesta del Sol Resort (a private oceanfront resort in Riviera Nayarit, Mexico). You run cold email prospecting only to wedding and event planners. The offer is a venue partner program with direct resort access, hosted site visits, co-marketing support, and a documented 10% referral commission. A reply is the primary conversion event. An attributed click to the planner partner page is a secondary engagement signal. The email must not ask for a booking or couple introduction.
 
 ## Last 14 Days Engagement Data
 - Total sent: ${stats.total}
 - Delivered: ${stats.delivered} | Bounced: ${stats.bounced} (${stats.bounce_rate}%)
 - Opened: ${stats.opened} (open rate: ${stats.open_rate}%)
 - Replied: ${stats.replied} (reply rate: ${stats.reply_rate}%)
-- Clicked: ${stats.clicked}
+- Clicked: ${stats.clicked} (secondary click rate: ${stats.click_rate}%)
 
 ## Engagement by Hook Angle
 ${JSON.stringify(stats.byHook, null, 2)}
@@ -205,7 +206,7 @@ ${prevHypotheses || 'None yet (Day 1)'}
 1. In 2-3 sentences: what does the data tell us? Be honest — if we have no opens yet, say so and why that might be.
 2. Form ONE clear hypothesis about what to test tomorrow (subject line style, hook angle, persona segment, send timing, email length, etc.)
 3. State the specific test: what exactly changes tomorrow?
-4. Define what success looks like (e.g. "at least 1 open in next 5 sends").
+4. Define what success looks like using replies among delivered emails. Opens and clicks can diagnose the funnel but cannot be the win condition.
 
 Keep it sharp and actionable. Max 200 words total. Format as JSON:
 {
@@ -257,7 +258,7 @@ async function main() {
       data_summary: `${stats.total} emails sent, ${stats.replied} replied, ${stats.opened} opened.`,
       hypothesis: 'Insufficient data — continuing with current approach.',
       test: 'No change today.',
-      success_metric: 'At least 1 open.',
+      success_metric: 'At least 1 reply in the next 10 delivered emails.',
       composer_hint: null,
     };
   }
@@ -273,8 +274,8 @@ async function main() {
     result: null,
     stats_snapshot: {
       total: stats.total, delivered: stats.delivered, bounced: stats.bounced,
-      opened: stats.opened, replied: stats.replied,
-      open_rate: stats.open_rate, reply_rate: stats.reply_rate,
+      opened: stats.opened, replied: stats.replied, clicked: stats.clicked,
+      open_rate: stats.open_rate, reply_rate: stats.reply_rate, click_rate: stats.click_rate,
     },
   };
   state.hypotheses = state.hypotheses || [];
@@ -301,7 +302,8 @@ async function main() {
   const msg = `📈 *Engagement Report — Day ${state.day} (${entry.date})*
 
 *Last 14 days:* ${stats.total} sent → ${stats.delivered} delivered | ${stats.bounced} bounced (${stats.bounce_rate}%)
-*Opens:* ${stats.opened} (${stats.open_rate}%) | *Replies:* ${stats.replied} (${stats.reply_rate}%)${replyLines}${bounceLines}
+*Primary — replies:* ${stats.replied} (${stats.reply_rate}% of delivered)${replyLines}
+*Secondary — clicks:* ${stats.clicked} (${stats.click_rate}%) | *Diagnostic opens:* ${stats.opened} (${stats.open_rate}%)${bounceLines}
 
 *By hook angle:*
 ${hookLines}

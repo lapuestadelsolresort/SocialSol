@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "automation"))
 from campaign_measurement import crm_metrics, meta_metrics  # noqa: E402
 from campaign_registry import fetch_live_snapshot, group_registry, load_meta_secrets, load_registry  # noqa: E402
+from campaign_config import compare_brief_to_live  # noqa: E402
+from capi_health import meta_capi_delivery_health, meta_capi_failure_message  # noqa: E402
+from meta_campaign_control import fetch_live_configuration  # noqa: E402
 from job_health import record  # noqa: E402
 
 DB_PATH = Path(os.environ.get("DB_PATH", ROOT / "crm/data/crm.db"))
@@ -165,6 +168,30 @@ def run(day, dry_run=False, no_post=False):
 
     meta, crm = meta_metrics(secrets, campaigns, day), crm_metrics(DB_PATH, campaigns, day)
     infra_failures, infra = infrastructure_checks(destinations)
+    capi_health = meta_capi_delivery_health(DB_PATH)
+    infra.append({"name": "meta_capi_delivery", **capi_health})
+    if not capi_health["ok"]:
+        infra_failures.append(meta_capi_failure_message(capi_health))
+    for record in records:
+        cid = str(record.get("campaign_id") or "")
+        brief_id = str(record.get("brief_id") or "")
+        brief_path = ROOT / "campaigns" / f"{brief_id}.json"
+        if cid not in live or not brief_id or not brief_path.exists():
+            continue
+        try:
+            brief = read_json(brief_path, {}) or {}
+            configuration = fetch_live_configuration(record, secrets=secrets)
+            drift = compare_brief_to_live(brief, configuration)
+            if drift:
+                infra_failures.append(
+                    f"campaign configuration drift: {brief_id} ({', '.join(row['field'] for row in drift)})"
+                )
+                infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": False, "drift": drift})
+            else:
+                infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": True})
+        except Exception as exc:
+            infra_failures.append(f"campaign configuration could not be verified: {brief_id}: {exc}")
+            infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": False, "error": str(exc)})
     failures = list(infra_failures)
     per_campaign = {}
     for campaign in campaigns:
@@ -210,7 +237,7 @@ def run(day, dry_run=False, no_post=False):
     lines = [f"{status} *Tracking Integrity — {day}*", f"{len(campaigns)} active campaigns checked against live Meta destinations."]
     lines.extend(f"• {failure}" for failure in failures)
     if not failures:
-        lines.append("Credentialed CORS, destination scripts, UTM session ratios, and event flow passed.")
+        lines.append("Credentialed CORS, destination scripts, UTM session ratios, event flow, and Meta CAPI delivery passed.")
     if not no_post:
         post_slack("\n".join(lines), dry_run)
     elif dry_run:

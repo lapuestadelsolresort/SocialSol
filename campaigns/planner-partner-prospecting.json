@@ -1,0 +1,91 @@
+{
+  "brief_id": "planner-partner-prospecting",
+  "campaign_name": "LPDS \u2014 Planners \u2014 Partner Prospecting",
+  "adset_name": "LPDS \u2014 Planners \u2014 Partner Prospecting \u2014 Ad Set",
+  "ad_name": "LPDS \u2014 Planners \u2014 Partner Prospecting \u2014 Ad",
+  "creative_name": "LPDS \u2014 Planners \u2014 Partner Prospecting \u2014 Creative",
+  "status": "ACTIVE",
+  "channel": "meta",
+  "objective": "OUTCOME_TRAFFIC",
+  "optimization_goal": "LANDING_PAGE_VIEWS",
+  "billing_event": "IMPRESSIONS",
+  "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+  "budget_level": "campaign",
+  "campaign_daily_budget_usd": 5,
+  "bucket": "leads",
+  "page_slug": "planners",
+  "landing_page_url": "https://planners.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=planner-prospecting&utm_content=partner-program-v1",
+  "utm_campaign": "planner-prospecting",
+  "utm_content": "partner-program-v1",
+  "experiment_slug": "exp-meta-planner-partner-prospecting",
+  "replaces_brief_id": "planner-partner-retargeting",
+  "audience": {
+    "source": "detailed_targeting",
+    "countries": [
+      "US",
+      "CA"
+    ],
+    "location_types": [
+      "home",
+      "recent"
+    ],
+    "age_min": 25,
+    "age_max": 65,
+    "publisher_platforms": [
+      "facebook",
+      "instagram"
+    ],
+    "interests": [
+      {
+        "id": "6003092932417",
+        "name": "Event management"
+      }
+    ],
+    "work_positions": [
+      {
+        "id": "108004922554685",
+        "name": "Wedding planner"
+      },
+      {
+        "id": "341163972750380",
+        "name": "Event Planner"
+      },
+      {
+        "id": "103175993068816",
+        "name": "Event Planner/Coordinator"
+      },
+      {
+        "id": "426505937508897",
+        "name": "Meeting/Event Planner"
+      }
+    ],
+    "custom_audience_ids": [],
+    "expansion": false
+  },
+  "creative": {
+    "source_brief_id": "planner-partner-retargeting",
+    "reuse_copy_and_image": true
+  },
+  "creative_brief": {
+    "audience": "Wedding and event planning professionals in the US and Canada",
+    "message": "A venue partnership built around your couples",
+    "proof": [
+      "10% documented referral commission",
+      "Hosted site visits",
+      "Direct resort contact",
+      "Co-marketing support",
+      "22 bedrooms and events up to 85 guests"
+    ],
+    "cta": "Review the partner program",
+    "required_ratio": "4:5",
+    "required_review_channel": "#social-sol"
+  },
+  "activation_gate": [
+    "Creative and landing-page QC passed",
+    "Human approval resolves to Jason's real Slack message in #social-sol",
+    "Paused Meta campaign read-back matches targeting, countries, budget, creative URL, and expansion settings",
+    "Replacement campaign, ad set, creative, and ad IDs are recorded in active-campaigns.json"
+  ],
+  "notes": "Active paid-Meta planner prospecting. No custom audience and no audience relaxation. The prior retargeting campaign was paused and retired after this campaign and its children read ACTIVE. Paulina email outreach remains a separate channel with its own UTM and reporting.",
+  "activated_at": "2026-08-09T22:11:24.425027+00:00"
+}
