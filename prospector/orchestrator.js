@@ -42,8 +42,8 @@ const { execFile, execFileSync } = require('child_process');
 const createDB = require('@databases/sqlite');
 const { sql } = require('@databases/sqlite');
 
-const dns = require('dns').promises;
 const { evaluateCompliance, recordComplianceFailure } = require('./lib/compliance');
+const { verifyEmail } = require('./lib/email-verification');
 const { buildUnsubscribeArtifacts } = require('./lib/headers');
 const unsubscribeLib = require('../crm/lib/unsubscribe');
 const {
@@ -232,82 +232,10 @@ function appendRecentSend(send, contact) {
 
 // ─── Email verification ─────────────────────────────────────────────────────
 
-// Generic/role-based prefixes that are almost always unmonitored catch-alls.
-// Sending to these drives bounces and damages sender reputation.
 const ZB_SECRET_PATH = secretPath('zerobounce.json');
 
 function loadZBKey() {
   try { return JSON.parse(fs.readFileSync(ZB_SECRET_PATH, 'utf8')).api_key; } catch (_) { return null; }
-}
-
-const RISKY_PREFIXES = new Set([
-  'hello', 'info', 'contact', 'team', 'hi', 'mail', 'admin', 'support',
-  'sales', 'marketing', 'office', 'enquiries', 'enquiry', 'inquiries',
-  'inquiry', 'general', 'webmaster', 'postmaster', 'noreply', 'no-reply',
-  'careers', 'jobs', 'billing', 'accounts', 'hr', 'press', 'media',
-]);
-
-async function verifyEmail(email, { allowRoleEmails = false } = {}) {
-  if (!email || !email.includes('@')) return { ok: false, reason: 'invalid_format' };
-  const [prefix, domain] = email.toLowerCase().split('@');
-
-  // 1. Risky generic prefix check (free, instant)
-  //    Skipped when allowRoleEmails is true (e.g. small-vendor planner outreach
-  //    where info@/bookings@ IS the real inbox).
-  if (!allowRoleEmails && RISKY_PREFIXES.has(prefix)) {
-    return { ok: false, reason: 'risky_prefix', detail: `"${prefix}@" is a generic catch-all inbox` };
-  }
-
-  // 2. MX record check (free, confirms domain can receive email)
-  try {
-    const mx = await dns.resolveMx(domain);
-    if (!mx || mx.length === 0) return { ok: false, reason: 'no_mx', detail: `No MX records for ${domain}` };
-  } catch (e) {
-    return { ok: false, reason: 'mx_lookup_failed', detail: e.message };
-  }
-
-  // 3. ZeroBounce SMTP verification (1 credit — confirms mailbox exists)
-  const zbKey = loadZBKey();
-  if (zbKey) {
-    try {
-      const zbRes = await fetch(
-        `https://api.zerobounce.net/v2/validate?api_key=${zbKey}&email=${encodeURIComponent(email)}&ip_address=`
-      );
-      const zb = await zbRes.json();
-      log(`  zerobounce: ${email} → status=${zb.status} sub_status=${zb.sub_status || ''}`);
-      const HARD_BLOCK = new Set(['invalid', 'spamtrap', 'abuse']);
-      if (HARD_BLOCK.has(zb.status)) {
-        return {
-          ok: false,
-          reason: `zerobounce_${zb.status}`,
-          detail: `ZeroBounce: ${zb.status}${zb.sub_status ? ` (${zb.sub_status})` : ''}`,
-        };
-      }
-      // do_not_mail (role_based, etc.) — block unless campaign allows role emails
-      if (zb.status === 'do_not_mail' && !allowRoleEmails) {
-        return {
-          ok: false,
-          reason: `zerobounce_${zb.status}`,
-          detail: `ZeroBounce: ${zb.status}${zb.sub_status ? ` (${zb.sub_status})` : ''}`,
-        };
-      }
-      if (zb.status === 'do_not_mail' && allowRoleEmails) {
-        log(`  zerobounce: ${email} is do_not_mail but allow_role_emails=true — sending anyway`);
-      }
-      if (zb.status === 'catch-all') {
-        // Catch-all domains accept everything — log but allow; risky_prefix already blocked obvious ones
-        log(`  zerobounce: ${email} is catch-all — allowing but flagging`);
-        return { ok: true, catchAll: true };
-      }
-    } catch (e) {
-      // ZeroBounce network failure — don't block the send, log and continue
-      warn(`  zerobounce lookup failed for ${email} (non-fatal): ${e.message}`);
-    }
-  } else {
-    warn('  zerobounce key not found — skipping SMTP check');
-  }
-
-  return { ok: true };
 }
 
 // ─── Per-row send pipeline ──────────────────────────────────────────────────
@@ -378,8 +306,18 @@ async function processSend(db, config, send, contact, campaign) {
     }
   }
 
-  // e. Email verification — MX check + risky-prefix heuristic.
-  const verification = await verifyEmail(contactEmail, { allowRoleEmails: !!campaign.allowRoleEmails });
+  // e. Re-verify immediately before sending. Composition only selects
+  // pre-verified contacts, but this second gate catches addresses that changed
+  // or became risky while a draft was waiting in the schedule.
+  const verificationPolicy = config.email_verification || {};
+  const verification = await verifyEmail(contactEmail, {
+    apiKey: loadZBKey(),
+    allowRoleEmails:
+      verificationPolicy.allow_role_emails === true && !!campaign.allowRoleEmails,
+    allowCatchAll: verificationPolicy.allow_catch_all === true,
+    failClosed: verificationPolicy.fail_closed !== false,
+    logger: (message) => log(`  ${message}`),
+  });
   if (!verification.ok) {
     const reason = `email_verification_failed:${verification.reason}`;
     const detail = verification.detail || verification.reason;
@@ -391,7 +329,7 @@ async function processSend(db, config, send, contact, campaign) {
     `);
     await db.query(sql`
       UPDATE contacts
-      SET email_status='risky', updated_at=datetime('now')
+      SET email_status=${verification.emailStatus || 'risky'}, updated_at=datetime('now')
       WHERE id=${contactId} AND email_status != 'bounced'
     `);
     // Notify Slack
@@ -400,6 +338,10 @@ async function processSend(db, config, send, contact, campaign) {
       .catch(() => {});
     return { ok: false, reason };
   }
+  await db.query(sql`
+    UPDATE contacts SET email_status='verified', updated_at=datetime('now')
+    WHERE id=${contactId} AND email_status != 'bounced'
+  `);
   log(`  #${sendId} email verified ok: ${contactEmail}`);
 
   // f. Send via Resend.

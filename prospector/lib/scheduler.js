@@ -149,20 +149,27 @@ async function computeScheduledAt(db, sql, config, campaignId) {
   const capIndex = calendarWeeksSinceFirstSend(firstSendAt) + 1;
   const cap = capForWeek(config, capIndex);
   if (typeof cap !== 'number') {
-    throw new Error(`computeScheduledAt: cap undefined for week ${capIndex} (config.weekly_send_caps may be missing key 'week_${capIndex}' or 'week_4_plus')`);
+    throw new Error(`computeScheduledAt: cap undefined for week ${capIndex} (config.weekly_send_caps needs an exact week_${capIndex} or a matching week_N_plus tier)`);
   }
 
-  // 2. Count already-scheduled-or-sent rows for this campaign in current calendar week.
-  //    Counts statuses: approved, sent, delivered, opened, clicked, replied
-  //    (any status that consumed an outbound slot this week).
+  // 2. Count already-scheduled-or-sent rows for this campaign in the current
+  //    calendar week. Any sent row consumes capacity even if its terminal
+  //    status later becomes bounced or complained.
   const weekStart = startOfCurrentCalendarWeekPT();
+  const weekEnd = startOfCurrentCalendarWeekPT(
+    new Date(new Date(weekStart).getTime() + 8 * DAY_MS),
+  );
   const [{ n: countThisWeek }] = await db.query(sql`
     SELECT COUNT(*) AS n FROM outreach_sends
     WHERE campaign_id = ${campaignId}
-      AND status IN ('approved','sent','delivered','opened','clicked','replied')
       AND (
-        (sent_at IS NOT NULL AND datetime(sent_at) >= datetime(${weekStart}))
-        OR (sent_at IS NULL AND scheduled_at IS NOT NULL AND datetime(scheduled_at) >= datetime(${weekStart}))
+        (sent_at IS NOT NULL
+          AND datetime(sent_at) >= datetime(${weekStart})
+          AND datetime(sent_at) < datetime(${weekEnd}))
+        OR
+        (sent_at IS NULL AND status = 'approved' AND scheduled_at IS NOT NULL
+          AND datetime(scheduled_at) >= datetime(${weekStart})
+          AND datetime(scheduled_at) < datetime(${weekEnd}))
       )
   `);
 

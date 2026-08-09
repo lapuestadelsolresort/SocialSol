@@ -8,8 +8,10 @@
  * and flips state.json.paused if a threshold is tripped.
  *
  * Thresholds (from config.orchestrator.thresholds):
- *   - 3 bounces in 24h    → paused_by='auto_threshold:bounce_24h'
- *   - 1 complaint in 7d   → paused_by='auto_threshold:complaint_7d'
+ *   - absolute bounce count in 24h
+ *   - bounce percentage over 7d once the minimum sample is reached
+ *   - absolute complaint count in 7d
+ *   - complaint percentage over 7d once the minimum sample is reached
  *
  * Idempotency (spec §5.4): if state.json.paused is already true with a
  * paused_by starting with 'auto_threshold:', skip — Resend retries shouldn't
@@ -54,8 +56,12 @@ function writePauseState(statePath, reason, pausedBy) {
 async function checkThresholdsAndMaybePause(db, sql, config, hooks, opts = {}) {
   const statePath = opts.statePath || DEFAULT_STATE_PATH;
   const thresholds = config.orchestrator?.thresholds || {};
-  const bounceCap = thresholds.bounces_24h ?? 3;
+  const bounceCap = thresholds.bounces_24h ?? 2;
+  const bounceRateCap = thresholds.bounce_rate_7d ?? 0.04;
+  const bounceRateMinSent = thresholds.bounce_rate_min_sent ?? 20;
   const complaintCap = thresholds.complaints_7d ?? 1;
+  const complaintRateCap = thresholds.complaint_rate_7d ?? 0.001;
+  const complaintRateMinSent = thresholds.complaint_rate_min_sent ?? 20;
 
   // Idempotency guard.
   const state = readState(statePath);
@@ -93,6 +99,37 @@ async function checkThresholdsAndMaybePause(db, sql, config, hooks, opts = {}) {
     return { tripped: true, reason, paused_by: pausedBy };
   }
 
+  // Rate guard: a single bounce at meaningful volume can be a stronger signal
+  // than the absolute cap. The minimum sample prevents one event among the
+  // first few messages from producing a noisy percentage decision.
+  const [{ sent_n: sent7d, bounce_n: bounces7d }] = await db.query(sql`
+    SELECT
+      COUNT(*) AS sent_n,
+      SUM(CASE WHEN bounced_at IS NOT NULL THEN 1 ELSE 0 END) AS bounce_n
+    FROM outreach_sends
+    WHERE sent_at IS NOT NULL AND datetime(sent_at) >= datetime('now', '-7 days')
+  `);
+  const bounceRate = Number(sent7d) > 0 ? Number(bounces7d || 0) / Number(sent7d) : 0;
+  if (Number(sent7d) >= bounceRateMinSent && bounceRate >= bounceRateCap) {
+    const percent = (bounceRate * 100).toFixed(2);
+    const reason = `${bounces7d}/${sent7d} sends bounced in last 7 days (${percent}%; cap: ${(bounceRateCap * 100).toFixed(2)}%)`;
+    const pausedBy = 'auto_threshold:bounce_rate_7d';
+    writePauseState(statePath, reason, pausedBy);
+    if (hooks.slackPost) {
+      try {
+        await hooks.slackPost([
+          `🚨 AUTO-PAUSED — ${reason}`,
+          `The rate gate activates after ${bounceRateMinSent} sends.`,
+          'Run `!resume` only after the queue and sender reputation are investigated.',
+        ].join('\n'));
+      } catch (e) { console.warn('[threshold-pause] slack post failed:', e.message); }
+    }
+    if (hooks.healthcheckFail) {
+      try { hooks.healthcheckFail(); } catch { /* fail-soft */ }
+    }
+    return { tripped: true, reason, paused_by: pausedBy, rate: bounceRate };
+  }
+
   // Complaint check (cross-campaign, last 7d).
   const [{ n: complaintN }] = await db.query(sql`
     SELECT COUNT(*) AS n FROM outreach_sends
@@ -121,6 +158,36 @@ async function checkThresholdsAndMaybePause(db, sql, config, hooks, opts = {}) {
       try { hooks.healthcheckFail(); } catch { /* fail-soft */ }
     }
     return { tripped: true, reason, paused_by: pausedBy };
+  }
+
+  const [{ sent_n: complaintSent7d, complaint_n: complaints7d }] = await db.query(sql`
+    SELECT
+      COUNT(*) AS sent_n,
+      SUM(CASE WHEN complained_at IS NOT NULL THEN 1 ELSE 0 END) AS complaint_n
+    FROM outreach_sends
+    WHERE sent_at IS NOT NULL AND datetime(sent_at) >= datetime('now', '-7 days')
+  `);
+  const complaintRate = Number(complaintSent7d) > 0
+    ? Number(complaints7d || 0) / Number(complaintSent7d)
+    : 0;
+  if (Number(complaintSent7d) >= complaintRateMinSent && complaintRate >= complaintRateCap) {
+    const percent = (complaintRate * 100).toFixed(3);
+    const reason = `${complaints7d}/${complaintSent7d} sends complained in last 7 days (${percent}%; cap: ${(complaintRateCap * 100).toFixed(3)}%)`;
+    const pausedBy = 'auto_threshold:complaint_rate_7d';
+    writePauseState(statePath, reason, pausedBy);
+    if (hooks.slackPost) {
+      try {
+        await hooks.slackPost([
+          `🚨 AUTO-PAUSED — ${reason}`,
+          `The rate gate activates after ${complaintRateMinSent} sends.`,
+          'Run `!resume` only after the complaint source is investigated.',
+        ].join('\n'));
+      } catch (e) { console.warn('[threshold-pause] slack post failed:', e.message); }
+    }
+    if (hooks.healthcheckFail) {
+      try { hooks.healthcheckFail(); } catch { /* fail-soft */ }
+    }
+    return { tripped: true, reason, paused_by: pausedBy, rate: complaintRate };
   }
 
   return { tripped: false };

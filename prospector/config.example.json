@@ -9,15 +9,16 @@
   "sender_reply_to": "reply@example.com",
   "physical_address": "Replace with the legal sender address",
   "weekly_send_caps": {
-    "week_1": 5,
-    "week_2": 10,
-    "week_3": 15,
-    "week_4_plus": 20
+    "week_1": 20,
+    "week_2": 40,
+    "week_3": 50,
+    "week_4": 75,
+    "week_5_plus": 100
   },
   "composer": {
     "model": "claude-sonnet-4-6",
     "max_recompose_attempts": 1,
-    "compose_batch_max_n": 5,
+    "compose_batch_max_n": 20,
     "stale_draft_days": 7,
     "auto_approve": false
   },
@@ -26,17 +27,31 @@
   },
   "orchestrator": {
     "tick_limit": 5,
+    "send_days_per_week": 5,
     "send_window": {
-      "start_hour_pt": 8,
-      "end_hour_pt": 16,
+      "start_hour_pt": 9,
+      "end_hour_pt": 17,
       "min_gap_minutes": 20,
-      "max_gap_minutes": 45,
+      "max_gap_minutes": 25,
       "weekdays_only": true
     },
     "thresholds": {
       "bounces_24h": 2,
-      "complaints_7d": 1
+      "bounce_rate_7d": 0.04,
+      "bounce_rate_min_sent": 20,
+      "complaints_7d": 1,
+      "complaint_rate_7d": 0.001,
+      "complaint_rate_min_sent": 20
     }
+  },
+  "email_verification": {
+    "required_before_compose": true,
+    "queue_target_verified": 20,
+    "queue_buffer_days": 2,
+    "max_per_daily_run": 25,
+    "allow_role_emails": false,
+    "allow_catch_all": false,
+    "fail_closed": true
   },
   "research": {
     "model": "claude-sonnet-4-6",
