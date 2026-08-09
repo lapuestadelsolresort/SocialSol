@@ -1,0 +1,48 @@
+{
+  "updated_at": "2026-08-09T13:45:09.037707+00:00",
+  "campaigns": {
+    "120253804145810558": {
+      "campaign_name": "LPDS \u2014 Corporate Retreats",
+      "utm_tags": [
+        "corporate_retreats_video",
+        "us-corporate"
+      ],
+      "healthy": true,
+      "verified_since": "2026-08-07T22:42:05.689345+00:00",
+      "last_verified_at": "2026-08-09T13:45:09.037707+00:00",
+      "last_failure_at": null
+    },
+    "120253888841160558": {
+      "campaign_name": "LPDS \u2014 Planners \u2014 Partner Retargeting",
+      "utm_tags": [
+        "planner-retarget"
+      ],
+      "healthy": true,
+      "verified_since": "2026-08-08T13:45:13.017923+00:00",
+      "last_verified_at": "2026-08-09T13:45:09.037707+00:00",
+      "last_failure_at": "2026-08-07T22:42:05.689345+00:00"
+    },
+    "120252592746560558": {
+      "campaign_name": "LPDS \u2014 Retargeting \u2014 Website Visitors",
+      "utm_tags": [
+        "dining",
+        "retarget",
+        "retarget_video"
+      ],
+      "healthy": true,
+      "verified_since": "2026-08-08T13:45:13.017923+00:00",
+      "last_verified_at": "2026-08-09T13:45:09.037707+00:00",
+      "last_failure_at": "2026-08-07T22:42:05.689345+00:00"
+    },
+    "120253804145040558": {
+      "campaign_name": "LPDS \u2014 Weddings",
+      "utm_tags": [
+        "us-weddings"
+      ],
+      "healthy": true,
+      "verified_since": "2026-08-08T13:45:13.017923+00:00",
+      "last_verified_at": "2026-08-08T13:45:13.017923+00:00",
+      "last_failure_at": null
+    }
+  }
+}

@@ -23,6 +23,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SECRETS_DIR = process.env.SOCIALSOL_SECRETS_DIR || path.join(REPO_ROOT, 'secrets');
 const SECRETS_PATH = path.join(SECRETS_DIR, 'twilio.json');
 const SOCIAL_SOL_CHANNEL = process.env.RESORT_SOCIAL_CHANNEL || '';
+const WHATSAPP_CHANNEL = process.env.RESORT_WHATSAPP_CHANNEL || SOCIAL_SOL_CHANNEL;
 const OPENCLAW = process.env.OPENCLAW_BIN || '/opt/homebrew/bin/openclaw';
 const SLACK_ACCOUNT = process.env.OPENCLAW_SLACK_ACCOUNT || '';
 const DEFAULT_WEBHOOK_URL = process.env.TWILIO_WEBHOOK_URL
@@ -37,7 +38,7 @@ function loadTwilioSecrets() {
 /** Post to Slack and return the message ts (for threading). */
 function postToSlack(message) {
   return new Promise((resolve) => {
-    if (!SOCIAL_SOL_CHANNEL || !SLACK_ACCOUNT) {
+    if (!WHATSAPP_CHANNEL || !SLACK_ACCOUNT) {
       console.warn('[whatsapp] Slack integration is not configured');
       resolve(null);
       return;
@@ -46,7 +47,7 @@ function postToSlack(message) {
       'message', 'send',
       '--channel', 'slack',
       '--account', SLACK_ACCOUNT,
-      '--target', `channel:${SOCIAL_SOL_CHANNEL}`,
+      '--target', `channel:${WHATSAPP_CHANNEL}`,
       '--message', message,
       '--json',
     ], { timeout: 12000 }, (err, stdout) => {

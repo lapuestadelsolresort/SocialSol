@@ -70,7 +70,8 @@
   function applyCta(cta) {
     cta = cta || {};
     document.querySelectorAll('a.wa-cta').forEach(function (a) {
-      if (cta.text) setAnchorLabel(a, cta.text);
+      // Skip the floating icon-only button — text would overflow the circle.
+      if (cta.text && a.id !== 'wa-float') setAnchorLabel(a, cta.text);
       if (cta.whatsapp_prefill) {
         a.setAttribute('href', 'https://wa.me/' + WA_NUMBER + '?text=' + encodeURIComponent(cta.whatsapp_prefill));
       }
