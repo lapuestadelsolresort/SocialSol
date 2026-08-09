@@ -27,7 +27,7 @@ These planners design destination weddings for couples in their 30s, with guest 
 
 ## 2. What we want from this email
 
-**Open + click into the venue partner program.** That is the entire goal. We are not asking for a couple introduction, date inquiry, or booking on the first email. A reply is a bonus; the attributed page view on the planner landing page is the primary conversion event. The CTA is a link, not a meeting and not a quote — see §6.
+**A reply is the primary conversion event.** A planner who answers has opened a real professional conversation, even if they never click. An attributed visit to the venue partner page is a useful secondary engagement signal, not the success criterion. We are not asking for a couple introduction, date inquiry, or booking on the first email. The email can still use the low-friction partner-page link described in §6, but Paulina evaluates the campaign on delivered-to-reply rate first.
 
 (This sentence is invariant across every persona. The content of each persona changes; the goal does not.)
 
@@ -69,7 +69,7 @@ Each pain ties to a concrete property capability or Sarah behavior. The composer
 
 ## 6. The ask (CTA)
 
-- **Primary CTA:** Click the attributed planner partner-program link.
+- **Email CTA:** Click the attributed planner partner-program link; this remains a low-friction way to inspect the offer, while a direct email reply is the primary measured conversion.
 - **Landing page URL:** https://planners.lapuestadelsolresort.com/?utm_source=paulina&utm_medium=email&utm_campaign=planner_partner_program_v1
 - **Next step after click:** Review the partnership terms, property fit, and indicative pricing; then WhatsApp Sarah to ask a question, discuss an upcoming couple, or arrange a hosted visit.
 - **What we are NOT asking for in this email:** Not asking for a couple introduction, quote, booking, calendar commitment, or scheduled call. Just an informed look at the partner program.
@@ -137,7 +137,7 @@ Ground-truth examples live in `library/examples/wedding-planner/`. The composer 
 **Resolved (Jason, 2026-07-31):**
 - Paulina is planner-only and focuses on the venue partner program rather than asking for a booking.
 - §6 landing page URL is the attributed `planners.lapuestadelsolresort.com` URL above. WhatsApp remains the human handoff.
-- The funnel is: Paulina cold email → planner partner page → planner-specific Meta retargeting → Sarah conversation → documented referral → couple enters the normal wedding sales funnel.
+- The funnel is: Paulina cold email → planner reply or partner-page visit → Sarah conversation → documented referral → couple enters the normal wedding sales funnel. Paid planner prospecting is measured separately and never seeds its own retargeting audience.
 
 **Still open:**
 - When the first testimonial lands, update §5 and re-generate examples to include a quote-grounded variant.

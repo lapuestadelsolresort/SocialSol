@@ -89,7 +89,47 @@ curl -s -X POST "$G/<CAMPAIGN_ID>" -d "status=PAUSED" -d "access_token=$TOKEN"
 curl -s -X DELETE "$G/<CAMPAIGN_ID>?access_token=$TOKEN"
 ```
 
-**Hard rule before any campaign goes LIVE:** confirm with Jason in #social-sol (or #business-intel) — proposed budget + targeting + creative + objective. He approves → flip status from PAUSED to ACTIVE. Never publish unconfirmed paid spend.
+**Hard rule before any campaign goes LIVE:** use the brief-driven control path below. It creates the campaign paused, reads targeting back from Meta, and refuses activation until Jason's real Slack reply resolves in `#social-sol`. A hand-written approval block is not evidence.
+
+```bash
+# Preview and provision safely (campaign paused; children configured active)
+PYTHONPATH=automation python3 automation/meta_campaign_control.py plan \
+  --brief campaigns/<brief>.json
+PYTHONPATH=automation python3 automation/meta_campaign_control.py provision \
+  --brief campaigns/<brief>.json --apply
+
+# Bind the posted request and then record Jason's thread reply
+PYTHONPATH=automation python3 automation/campaign_approval.py bind-request \
+  --brief-id <brief-id> --request-ts <request-ts> --apply
+PYTHONPATH=automation python3 automation/campaign_approval.py record \
+  --brief-id <brief-id> --slack-ts <reply-ts> --apply
+
+# Re-resolves the Slack message, rechecks all live configuration, activates the
+# replacement, and pauses the old campaign only after every child reads ACTIVE.
+PYTHONPATH=automation python3 automation/meta_campaign_control.py activate \
+  --brief campaigns/<brief>.json --apply
+```
+
+Run `automation/planner_audience_sync.py` for planner pixel-rule changes and
+`automation/planner_audience_health.py` for the paid-session quarantine/readiness
+report. All mutation commands require `--apply`; dry-run/read-back is the default.
+
+**Meta CAPI boundary and recovery:** verified WhatsApp leads are eligible only
+when their source, medium, and campaign resolve to a configured paid Meta UTM in
+`campaigns/active-campaigns.json`. Paulina/email, organic, direct, unknown, and
+unattributed leads are never sent to Meta.
+
+```bash
+# Inspect retryable failures without changing Meta or the CRM
+node crm/scripts/retry-meta-capi.js --dry-run
+
+# Replay one audited failure with its original id and event time
+node crm/scripts/retry-meta-capi.js --event-id <twilio-event-id>
+```
+
+`com.lapuestadelsolresort.meta-capi-retry` retries recent failures every 15
+minutes. `scripts/tracking-health-check.py` fails closed while a Meta CAPI
+delivery is failed or has remained pending for more than 15 minutes.
 
 **Browser automation for Meta is no longer needed.** Sol can do the full ad lifecycle (create/edit/pause/delete + read insights) via the API now.
 
@@ -104,6 +144,12 @@ All channels share the same CRM (`crm/data/crm.db`). Each has a distinct job:
 | #business-intel | `C0B384L2TNC` | Ops summaries, Spanish translation, ad approvals, business monitoring |
 | #social-sol | `C0AF8A8R4H2` | Organic IG posts, paid Meta campaigns |
 | #sarah-coach | (see Project_Status.md) | Inbound reply drafting in Sarah's voice |
+
+Paulina's campaign pause state, send caps, email replies, and Slack workflow
+cannot change Meta campaign status or budget. Paid campaign control lives only
+in the brief/registry Meta automation. Shared CRM records are separated by
+exact UTM values: Paulina uses `paulina/email`; paid Meta uses registered
+Meta/Facebook/Instagram paid-source combinations.
 
 **When Jason asks about lead status in either channel: query the CRM first. Give the answer directly. Do not say "let me dig deeper."**
 

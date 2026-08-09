@@ -36,6 +36,10 @@ try {
   );
   const findings = [];
   for (const file of output.toString('utf8').split('\0').filter(Boolean)) {
+    // `git ls-files --cached` still lists an unstaged working-tree deletion.
+    // A deleted file has no current contents to scan and must not crash the
+    // repository-wide check while a legitimate move is in progress.
+    if (!fs.existsSync(file)) continue;
     if (forbiddenFiles.has(file)) {
       findings.push(`${file}: forbidden private/runtime file`);
       continue;

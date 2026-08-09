@@ -366,3 +366,15 @@ Jason directive: Sol must hold its own workflows accountable. Built and deployed
 - `com.lapuestadelsolresort.weekly-tracking-audit.plist` — Mondays 7am PT
 
 **Output format rule (Jason directive 2026-08-07):** Concise bullets only. ✅ or 🔴 per item. No prose. When 🔴 appears, Sol investigates and fixes — don't dump the problem on Jason.
+
+## Planner Campaign Remediation — 2026-08-09
+
+- The original planner retargeting campaign was discovered with custom-audience relaxation enabled despite the brief saying expansion was off. Paid traffic made up ~92% of its planner-page seed, creating a self-referential loop.
+- The website audience rule now excludes both `planner-retarget` and `planner-prospecting`; the clean 180-day CRM baseline is 14 non-bot sessions and retargeting stays shelved until 100 clean sessions.
+- `planner-partner-prospecting.json` is the replacement source of truth: $5/day, US/CA, professional planner/event targeting, no custom audience, both Meta relaxation controls zero.
+- Cutover completed 2026-08-09 after Jason's verified Slack approval. The replacement campaign, ad set, and ad all read `ACTIVE`; the original campaign is `PAUSED` and its runtime registry record is `RETIRED`.
+- Paid campaign activation now uses `automation/meta_campaign_control.py` plus `automation/campaign_approval.py`; never activate from a manually written approval block.
+- Paulina remains autonomous by standing directive. The composer is the single approval authority; scheduled shell jobs do not write approval state directly. Reply rate is the primary planner-outreach conversion, with LP click as secondary.
+- Jo Ann S. Woodward is retired and suppressed; do not contact. Robin Manoogian's reciprocal-referral follow-up draft was routed to Sarah for review.
+- Paulina email and Meta paid are separate acquisition channels. They share the planner LP and CRM but use distinct UTMs and controls. Paulina/organic/direct visits may build the clean future retargeting seed; paid planner UTMs are quarantined.
+- Meta CAPI accepts only configured paid-Meta UTMs. The 2026-08-09 Corporate Retreats WhatsApp failure was repaired with the original event id using `action_source=chat`; a 15-minute retry worker and fail-closed delivery-health check prevent silent failures.

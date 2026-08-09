@@ -10,7 +10,16 @@
       "budget_level": "campaign",
       "page_slug": "retreats",
       "utm_campaign": "example-campaign",
-      "experiment_slug": "exp-example-campaign"
+      "experiment_slug": "exp-example-campaign",
+      "approval": {
+        "approved_by": "replace-with-approver-name",
+        "approved_by_user_id": "replace-with-slack-user-id",
+        "slack_channel": "replace-with-slack-channel-id",
+        "approval_request_ts": "replace-with-request-message-ts",
+        "slack_ts": "replace-with-real-reply-ts",
+        "quoted_text": "replace-with-exact-approval-message",
+        "verified_at": "replace-with-ISO-8601-timestamp"
+      }
     }
   ]
 }

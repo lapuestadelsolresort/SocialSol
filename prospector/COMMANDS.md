@@ -22,7 +22,9 @@ node prospector/composer.js compose-batch <campaign_slug> [count]
 ```
 
 Drafts pass the compliance gate before entering the shared CRM. The example
-configuration keeps automatic approval disabled.
+configuration keeps automatic approval disabled. Production may enable it by
+standing directive; the composer owns that gate and records the result on every
+composed draft.
 
 ## Send orchestration
 

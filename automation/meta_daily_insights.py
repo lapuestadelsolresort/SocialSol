@@ -42,6 +42,7 @@ FRIENDLY_NAMES = {
     "LPDS — Weddings": "Weddings",
     "LPDS — Corporate Retreats": "Corporate Retreats",
     "LPDS — Groups / Milestones": "Groups / Milestones",
+    "LPDS — Planners — Partner Prospecting": "Planner Partner Prospecting",
     "LPDS — Planners — Partner Retargeting": "Planner Partner Retargeting",
     "LPDS — Retargeting — Website Visitors": "Retargeting",
     # Legacy (ad set level, kept for backward compat)

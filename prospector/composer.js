@@ -552,7 +552,12 @@ async function composeBatch({ campaign_slug, n }) {
         contact_id: row.contact_id,
         campaign_id: campaign.id,
       });
-      if (r.ok) composed.push({ contact_id: row.contact_id, draft_id: r.draft_id, hook_angle: r.hook_angle });
+      if (r.ok) composed.push({
+        contact_id: row.contact_id,
+        draft_id: r.draft_id,
+        hook_angle: r.hook_angle,
+        auto_approved: Boolean(r.auto_approved),
+      });
       else failed.push({ contact_id: row.contact_id, reason: r.reason, details: r.details });
     }
     return { ok: true, requested, eligible_count: eligible.length, composed, failed };
