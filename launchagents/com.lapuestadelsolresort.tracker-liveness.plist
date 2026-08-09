@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lapuestadelsolresort.tracker-liveness</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/jasonmini/.openclaw/SocialSol/scripts/tracker-liveness-test.py</string>
+    </array>
+    <!-- Runs daily at 7:00am PT — after the 6:45am tracking-health-check -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/jasonmini/.openclaw/SocialSol/logs/tracker-liveness.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jasonmini/.openclaw/SocialSol/logs/tracker-liveness.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>OPENCLAW_SLACK_ACCOUNT</key>
+        <string>ig-drafts</string>
+        <key>TRACKING_QC_CHANNEL</key>
+        <string>C0B1JA6BDRP</string>
+    </dict>
+</dict>
+</plist>

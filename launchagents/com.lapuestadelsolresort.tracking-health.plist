@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lapuestadelsolresort.tracking-health</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/jasonmini/.openclaw/SocialSol/scripts/tracking-health-check.py</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>45</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/jasonmini/.openclaw/SocialSol/logs/tracking-health.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jasonmini/.openclaw/SocialSol/logs/tracking-health.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>OPENCLAW_SLACK_ACCOUNT</key>
+        <string>ig-drafts</string>
+    </dict>
+</dict>
+</plist>

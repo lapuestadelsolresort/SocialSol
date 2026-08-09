@@ -1,0 +1,139 @@
+{
+  "timestamp": "2026-08-09T13:45:09.037707+00:00",
+  "measurement_date": "2026-08-08",
+  "healthy": true,
+  "failure_count": 0,
+  "failures": [],
+  "campaigns": {
+    "120253804145810558": {
+      "campaign_name": "LPDS \u2014 Corporate Retreats",
+      "utm_tags": [
+        "corporate_retreats_video",
+        "us-corporate"
+      ],
+      "meta_link_clicks": 23,
+      "sessions": 27,
+      "qualified": 26,
+      "cta_reached": 26,
+      "wa_taps": 0,
+      "sessions_with_behavior": 26,
+      "verified_wa_leads": 0,
+      "session_click_ratio": 1.1739,
+      "healthy": true,
+      "failures": []
+    },
+    "120253888841160558": {
+      "campaign_name": "LPDS \u2014 Planners \u2014 Partner Retargeting",
+      "utm_tags": [
+        "planner-retarget"
+      ],
+      "meta_link_clicks": 18,
+      "sessions": 18,
+      "qualified": 16,
+      "cta_reached": 16,
+      "wa_taps": 0,
+      "sessions_with_behavior": 18,
+      "verified_wa_leads": 0,
+      "session_click_ratio": 1.0,
+      "healthy": true,
+      "failures": []
+    },
+    "120252592746560558": {
+      "campaign_name": "LPDS \u2014 Retargeting \u2014 Website Visitors",
+      "utm_tags": [
+        "dining",
+        "retarget",
+        "retarget_video"
+      ],
+      "meta_link_clicks": 99,
+      "sessions": 112,
+      "qualified": 97,
+      "cta_reached": 80,
+      "wa_taps": 8,
+      "sessions_with_behavior": 109,
+      "verified_wa_leads": 0,
+      "session_click_ratio": 1.1313,
+      "healthy": true,
+      "failures": []
+    }
+  },
+  "infrastructure": [
+    {
+      "name": "cors_preflight",
+      "ok": true,
+      "status": 204
+    },
+    {
+      "name": "cors_credentialed_post",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://lapuestadelsolresort.com/villas?utm_source=meta&utm_medium=paid&utm_campaign=corporate_retreats_video&utm_content=king-suite",
+      "expected": "/lp/sq-tracker.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://lapuestadelsolresort.com/villas?utm_source=meta&utm_medium=paid&utm_campaign=corporate_retreats_video&utm_content=kitchen-living",
+      "expected": "/lp/sq-tracker.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://lapuestadelsolresort.com/villas?utm_source=meta&utm_medium=paid&utm_campaign=corporate_retreats_video&utm_content=villa-walkthrough",
+      "expected": "/lp/sq-tracker.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://retreats.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-corporate&utm_content=c1-outcome-v3",
+      "expected": "/lp/px.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://retreats.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-corporate&utm_content=c2-value-v3",
+      "expected": "/lp/px.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://planners.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=planner-retarget&utm_content=partner-program-v1",
+      "expected": "/lp/px.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://dining.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=dining&utm_content=oceanfront-dining-2",
+      "expected": "/lp/px.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://dining.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=dining&utm_content=oceanfront-dining",
+      "expected": "/lp/px.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=retarget_video",
+      "expected": "/lp/sq-tracker.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://lapuestadelsolresort.com/contact?utm_source=meta&utm_medium=paid&utm_campaign=retarget&utm_content=r2-value-v3",
+      "expected": "/lp/sq-tracker.js",
+      "ok": true
+    },
+    {
+      "name": "destination_tracker",
+      "url": "https://lapuestadelsolresort.com/contact?utm_source=meta&utm_medium=paid&utm_campaign=retarget&utm_content=r1-urgency-v3",
+      "expected": "/lp/sq-tracker.js",
+      "ok": true
+    }
+  ],
+  "source_of_truth": "live Meta campaign state and active ad destinations"
+}
