@@ -350,6 +350,13 @@ async function compose({ persona_id, contact_id, campaign_id, options = {} } = {
     if (!contact) return { ok: false, reason: 'contact_not_found', details: { contact_id } };
     const campaign = await loadCampaign(db, campaign_id);
     if (!campaign) return { ok: false, reason: 'campaign_not_found', details: { campaign_id } };
+    if (config.email_verification?.required_before_compose !== false && contact.email_status !== 'verified') {
+      return {
+        ok: false,
+        reason: 'email_not_preverified',
+        details: { contact_id, email_status: contact.email_status || 'unknown' },
+      };
+    }
 
     const pre = await preCheckCompliance(db, config, { contact, campaign });
     if (!pre.pass) {
@@ -492,7 +499,9 @@ async function compose({ persona_id, contact_id, campaign_id, options = {} } = {
         });
         if (approveResult.status === 200) {
           autoApproved = true;
-          console.log(`[composer] Draft #${draftId} auto-approved → scheduled_at=${approveResult.body?.scheduled_at || '?'}`);
+          // stdout is reserved for the CLI's final JSON object. The daily job
+          // captures and parses it; operational messages must stay on stderr.
+          console.error(`[composer] Draft #${draftId} auto-approved → scheduled_at=${approveResult.body?.scheduled_at || '?'}`);
         } else {
           console.warn(`[composer] Draft #${draftId} auto-approve failed (HTTP ${approveResult.status}): ${JSON.stringify(approveResult.body)}`);
         }
@@ -529,11 +538,16 @@ async function composeBatch({ campaign_slug, n }) {
     if (!personaId) return { ok: false, reason: 'campaign_has_no_persona', details: { campaign_slug } };
 
     // Eligibility: contacts attached to this campaign with no outreach_sends
-    // row in any non-cancelled status (FIFO by attached_at).
+    // row in any non-cancelled status. In production, queue verification is a
+    // hard prerequisite so Claude time and sender reputation are spent only
+    // on named, deliverable mailboxes.
+    const requireVerified = config.email_verification?.required_before_compose !== false;
     const eligible = await db.query(sql`
       SELECT cc.contact_id
       FROM campaign_contacts cc
+      JOIN contacts c ON c.id = cc.contact_id
       WHERE cc.campaign_id = ${campaign.id}
+        AND (${requireVerified ? 1 : 0} = 0 OR c.email_status = 'verified')
         AND NOT EXISTS (
           SELECT 1 FROM outreach_sends os
           WHERE os.contact_id = cc.contact_id

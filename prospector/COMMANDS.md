@@ -26,6 +26,20 @@ configuration keeps automatic approval disabled. Production may enable it by
 standing directive; the composer owns that gate and records the result on every
 composed draft.
 
+## Queue verification and capacity
+
+```bash
+node prospector/scripts/daily-capacity.js <campaign_slug>
+node prospector/scripts/preverify-queue.js <campaign_slug> --target-valid 20 --max 25 --dry-run
+node prospector/scripts/preverify-queue.js <campaign_slug> --target-valid 20 --max 25
+```
+
+`daily-capacity.js` is read-only and prints the current ramp tier, weekly and
+daily commitments, and safe composition batch as JSON. `preverify-queue.js`
+uses ZeroBounce credits unless `--dry-run` is present; it updates only the
+contact's `email_status` and prints a PII-free JSON summary. Role inboxes,
+catch-alls, invalid results, and verifier outages are blocked by default.
+
 ## Send orchestration
 
 ```bash
@@ -35,7 +49,8 @@ node prospector/orchestrator.js
 
 The orchestrator sends only due, approved rows and honors
 `prospector/state.json` pause state. The LaunchAgent invokes it every five
-minutes in production.
+minutes in production. It re-verifies every recipient and fails closed if the
+verification provider is unavailable.
 
 ## Supporting maintenance
 

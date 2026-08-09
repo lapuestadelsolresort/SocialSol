@@ -154,8 +154,23 @@ function calendarWeeksSinceFirstSend(firstSendAt, now = new Date()) {
 
 function capForWeek(config, capIndex) {
   const caps = config.weekly_send_caps || {};
-  if (capIndex >= 4) return caps.week_4_plus;
-  return caps[`week_${capIndex}`];
+  const exact = caps[`week_${capIndex}`];
+  if (typeof exact === 'number') return exact;
+
+  // Support an arbitrary final ramp tier (for example week_5_plus) while
+  // preserving the legacy week_4_plus configuration. Pick the highest
+  // matching floor so adding a later tier never changes earlier weeks.
+  const plusTiers = Object.entries(caps)
+    .map(([key, value]) => {
+      const match = key.match(/^week_(\d+)_plus$/);
+      return match && typeof value === 'number'
+        ? { week: Number(match[1]), value }
+        : null;
+    })
+    .filter((tier) => tier && capIndex >= tier.week)
+    .sort((a, b) => b.week - a.week);
+
+  return plusTiers[0]?.value;
 }
 
 // ─── URL extraction (item 4) ───────────────────────────────────────────────

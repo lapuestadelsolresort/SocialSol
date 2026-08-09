@@ -29,7 +29,7 @@ business at sale.
 | Agent | Domain | What it does | Slack channel |
 |---|---|---|---|
 | **Social Sol** | Marketing | Daily organic Instagram + paid Meta campaigns → landing pages → WhatsApp funnel | `#social-sol` |
-| **Prospector Paulina** | Marketing | B2B email outreach to named wedding planners and retreat coordinators; separate from paid Meta delivery | `#prospector-paulina` |
+| **Prospector Paulina** | Marketing | Verified B2B email outreach to named wedding planners and retreat coordinators, with staged send-volume and deliverability gates; separate from paid Meta delivery | `#prospector-paulina` |
 | **Reengager Regina** | Marketing | Past-guest and stale-inquiry reactivation campaigns | `#reengager-regina` |
 | **Sarah Coach** | Guest comms | Drafts replies to inbound guest messages in Sarah's voice; she edits and sends | `#sarah-coach` |
 | **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |

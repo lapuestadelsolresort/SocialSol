@@ -5,7 +5,9 @@
 # 1. Engagement analysis + hypothesis (posts to Slack)
 # 2. Research: finds wedding/event planners only
 # 3. Attach eligible planner contacts to the partner-program campaign
-# 4. Compose 5 drafts → composer applies its configured approval policy
+# 4. Calculate the staged daily capacity (10 → 15 → 20)
+# 5. Pre-verify enough named mailboxes to keep a safe queue buffer
+# 6. Compose that day's capacity → composer applies its approval policy
 #
 # No human approval required. Jason sees daily report in #prospector-paulina.
 # ────────────────────────────────────────────────────────────────────────────
@@ -97,45 +99,66 @@ ATTACHED=$(sqlite3 "$CRM_DB" "
 ")
 log "Attached $ATTACHED eligible planner contacts to $CAMPAIGN_SLUG"
 
-# ── 4. Compose batch ─────────────────────────────────────────────────────────
-log "Composing partner-program drafts for $CAMPAIGN_SLUG"
+# ── 4. Calculate today's staged capacity ─────────────────────────────────────
+CAPACITY_OUTPUT=$(node "$SCRIPTS_DIR/daily-capacity.js" "$CAMPAIGN_SLUG" 2>>"$LOG")
+if ! jq -e '.ok == true and (.batch_size | type == "number")' <<<"$CAPACITY_OUTPUT" >/dev/null; then
+  log "ERROR: capacity calculation returned invalid JSON: $CAPACITY_OUTPUT"
+  exit 1
+fi
+BATCH_SIZE=$(jq -r '.batch_size' <<<"$CAPACITY_OUTPUT")
+DAILY_TARGET=$(jq -r '.daily_target' <<<"$CAPACITY_OUTPUT")
+WEEKLY_CAP=$(jq -r '.weekly_cap' <<<"$CAPACITY_OUTPUT")
+CAMPAIGN_WEEK=$(jq -r '.campaign_week' <<<"$CAPACITY_OUTPUT")
+log "Capacity: campaign week $CAMPAIGN_WEEK | daily target $DAILY_TARGET | weekly cap $WEEKLY_CAP | compose now $BATCH_SIZE"
+
+if [[ "$BATCH_SIZE" -eq 0 ]]; then
+  log "Daily or weekly capacity already committed — no new drafts needed"
+  exit 0
+fi
+
+# ── 5. Pre-verify the queue before spending composer tokens ──────────────────
+# Keep a two-day buffer of verified named mailboxes. Verification is fail-closed:
+# role inboxes, catch-alls, invalid addresses, and verifier outages do not compose.
+QUEUE_BUFFER_DAYS=$(jq -r '.email_verification.queue_buffer_days // 2' "$PROSPECTOR/config.json")
+TARGET_VERIFIED=$((BATCH_SIZE * QUEUE_BUFFER_DAYS))
+MAX_VERIFY=$(jq -r '.email_verification.max_per_daily_run // 25' "$PROSPECTOR/config.json")
+log "Pre-verifying queue: target $TARGET_VERIFIED available (${QUEUE_BUFFER_DAYS}-day buffer), max $MAX_VERIFY checks"
+VERIFY_OUTPUT=$(node "$SCRIPTS_DIR/preverify-queue.js" "$CAMPAIGN_SLUG" \
+  --target-valid "$TARGET_VERIFIED" --max "$MAX_VERIFY" 2>>"$LOG")
+if ! jq -e '.ok == true' <<<"$VERIFY_OUTPUT" >/dev/null; then
+  log "ERROR: queue verification returned invalid JSON: $VERIFY_OUTPUT"
+  exit 1
+fi
+VERIFIED_AVAILABLE=$(jq -r '.verified_available_after // .verified_available_before // 0' <<<"$VERIFY_OUTPUT")
+CHECKED_COUNT=$(jq -r '.checked // 0' <<<"$VERIFY_OUTPUT")
+RISKY_COUNT=$(jq -r '.risky // 0' <<<"$VERIFY_OUTPUT")
+INVALID_COUNT=$(jq -r '.invalid // 0' <<<"$VERIFY_OUTPUT")
+log "Verification: $CHECKED_COUNT checked | $VERIFIED_AVAILABLE verified available | $RISKY_COUNT risky | $INVALID_COUNT invalid"
+
+# ── 6. Compose batch ─────────────────────────────────────────────────────────
+log "Composing up to $BATCH_SIZE partner-program drafts for $CAMPAIGN_SLUG"
 cd "$PROSPECTOR"
-COMPOSE_OUTPUT=$(node composer.js compose-batch "$CAMPAIGN_SLUG" 5 2>>"$LOG")
+COMPOSE_OUTPUT=$(node composer.js compose-batch "$CAMPAIGN_SLUG" "$BATCH_SIZE" 2>>"$LOG")
+if ! jq -e '.ok == true and (.composed | type == "array") and (.failed | type == "array")' <<<"$COMPOSE_OUTPUT" >/dev/null; then
+  log "ERROR: composer returned invalid JSON: $COMPOSE_OUTPUT"
+  exit 1
+fi
 log "Compose result: $COMPOSE_OUTPUT"
 
 # Extract draft IDs from compose output (JSON array of {draft_id: N})
-DRAFT_IDS=$(echo "$COMPOSE_OUTPUT" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-ids = [str(c['draft_id']) for c in d.get('composed', [])]
-print(','.join(ids))
-" 2>/dev/null || echo "")
-
-COMPOSED_COUNT=$(echo "$COMPOSE_OUTPUT" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(len(d.get('composed', [])))
-" 2>/dev/null || echo "0")
-
-FAILED_COUNT=$(echo "$COMPOSE_OUTPUT" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(len(d.get('failed', [])))
-" 2>/dev/null || echo "0")
+DRAFT_IDS=$(jq -r '[.composed[].draft_id | tostring] | join(",")' <<<"$COMPOSE_OUTPUT")
+COMPOSED_COUNT=$(jq -r '.composed | length' <<<"$COMPOSE_OUTPUT")
+FAILED_COUNT=$(jq -r '.failed | length' <<<"$COMPOSE_OUTPUT")
 
 log "Composed: $COMPOSED_COUNT | Failed: $FAILED_COUNT | Draft IDs: $DRAFT_IDS"
 
-# ── 5. Report the composer's approval result ─────────────────────────────────
+# ── 7. Report the composer's approval result ─────────────────────────────────
 if [[ -n "$DRAFT_IDS" && "$COMPOSED_COUNT" -gt 0 ]]; then
-  AUTO_APPROVED_COUNT=$(echo "$COMPOSE_OUTPUT" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(sum(1 for c in d.get('composed', []) if c.get('auto_approved')))
-" 2>/dev/null || echo "0")
+  AUTO_APPROVED_COUNT=$(jq -r '[.composed[] | select(.auto_approved == true)] | length' <<<"$COMPOSE_OUTPUT")
   log "Composer approval result: $AUTO_APPROVED_COUNT/$COMPOSED_COUNT auto-approved"
   if [[ "$AUTO_APPROVED_COUNT" -eq "$COMPOSED_COUNT" ]]; then
     "$OPENCLAW" message send --channel slack --account "$SLACK_ACCOUNT" --target "$SLACK_CHANNEL" \
-      --message "✅ *$COMPOSED_COUNT emails passed the configured autonomous approval gate* — orchestrator will dispatch within minutes." \
+      --message "✅ *$COMPOSED_COUNT emails passed the configured autonomous approval gate* — orchestrator will dispatch them across the scheduled send window." \
       2>/dev/null || log "WARN: Slack post failed"
   else
     "$OPENCLAW" message send --channel slack --account "$SLACK_ACCOUNT" --target "$SLACK_CHANNEL" \
@@ -143,10 +166,13 @@ print(sum(1 for c in d.get('composed', []) if c.get('auto_approved')))
       2>/dev/null || log "WARN: Slack post failed"
   fi
 else
-  # Check if we've exhausted the campaign
+  # Distinguish a truly exhausted queue from a queue that currently has no
+  # safe pre-verified mailbox. The latter is a quality guardrail, not success.
   ELIGIBLE=$(sqlite3 "$CRM_DB" "
     SELECT COUNT(*) FROM campaign_contacts cc
+    JOIN contacts c ON c.id=cc.contact_id
     WHERE cc.campaign_id=$CAMPAIGN_ID
+      AND c.email_status='verified'
       AND
     NOT EXISTS (
       SELECT 1 FROM outreach_sends os
@@ -154,9 +180,25 @@ else
     );
   " 2>/dev/null || echo "0")
 
-  if [[ "$ELIGIBLE" -eq 0 ]]; then
+  QUEUED_TOTAL=$(sqlite3 "$CRM_DB" "
+    SELECT COUNT(*) FROM campaign_contacts cc
+    JOIN contacts c ON c.id=cc.contact_id
+    WHERE cc.campaign_id=$CAMPAIGN_ID
+      AND COALESCE(c.do_not_contact, 0)=0
+      AND NOT EXISTS (
+        SELECT 1 FROM outreach_sends os
+        WHERE os.contact_id=cc.contact_id AND os.campaign_id=cc.campaign_id AND os.status != 'cancelled'
+      );
+  " 2>/dev/null || echo "0")
+
+  if [[ "$ELIGIBLE" -eq 0 && "$QUEUED_TOTAL" -gt 0 ]]; then
+    log "Safety gate held composition: $QUEUED_TOTAL queued contacts but none pre-verified"
     "$OPENCLAW" message send --channel slack --account "$SLACK_ACCOUNT" --target "$SLACK_CHANNEL" \
-      --message "ℹ️ Campaign queue exhausted — today's research results will be attached tomorrow. ${FAILED_COUNT} compose failures logged." \
+      --message "🛡️ *No email was composed because no safe pre-verified mailbox was available.* Verification checked $CHECKED_COUNT contacts; role, catch-all, invalid, and unknown results remain blocked." \
+      2>/dev/null || true
+  elif [[ "$ELIGIBLE" -eq 0 ]]; then
+    "$OPENCLAW" message send --channel slack --account "$SLACK_ACCOUNT" --target "$SLACK_CHANNEL" \
+      --message "ℹ️ Campaign queue exhausted — today's research did not leave any new eligible planner contacts. ${FAILED_COUNT} compose failures logged." \
       2>/dev/null || true
   else
     log "WARN: Composed 0 drafts despite $ELIGIBLE eligible contacts. Check composer logs."
