@@ -29,6 +29,24 @@ The SQLite database belongs at `crm/data/crm.db` by default. The entire `crm/dat
 
 Use `automation/crm_backup.py` for verified, compressed, encrypted backups rather than copying a live WAL-mode database file.
 
+## OwnerRez: contacts versus occupancy
+
+`crm/scripts/ownerrez-sync.js` is a contact-enrichment pipeline. It only syncs
+OwnerRez records with a `guest_id`, so the CRM must not be used to answer what
+is booked or whether dates are available.
+
+Use the read-only full-occupancy query for calendar and availability work. It
+downloads the complete OwnerRez booking/block list and includes every active
+record in the requested window regardless of `guest_id` or `type`:
+
+```bash
+node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2026-09-07
+node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2026-09-07 --json
+```
+
+The Monday `#reservations` job uses this same query through
+`crm/scripts/ownerrez-weekly-calendar.js --dry-run`.
+
 ## Squarespace
 
 The reviewed site-wide injection is `squarespace-injection-v6.html`. It loads the versioned Squarespace tracker, preserves UTMs, records contact intent, captures successful form submissions, and adds the WhatsApp attribution reference.

@@ -40,8 +40,8 @@ business at sale.
 
 | Automation | Schedule | Channel |
 |---|---|---|
-| OwnerRez booking/guest sync | Every 15 min + real-time webhooks | `#business-intel` |
-| OwnerRez weekly booking calendar | Monday 8am PT | `#reservations` |
+| OwnerRez CRM contact sync | Every 15 min + real-time webhooks | `#business-intel` |
+| OwnerRez full-occupancy calendar | Monday 8am PT | `#reservations` |
 | OwnerRez message → voice corpus ingestion | Daily 6:30am + real-time on webhook | — |
 | CRM → Meta Custom Audience retargeting sync | Daily | `#social-sol` |
 | Inbound email scanner (Gmail) | Every 15 min | `#social-sol` |
@@ -94,8 +94,8 @@ business at sale.
 ```
 crm/                   Express CRM server, SQLite migrations, tests
 ├── routes/            Webhook handlers (Twilio, Meta, Resend, Cal.com, OwnerRez)
-├── scripts/           Sync jobs (OwnerRez sync, message ingest, weekly calendar,
-│                      voice corpus indexer, inbound email scanner)
+├── scripts/           Sync jobs (OwnerRez CRM sync, message ingest, full occupancy
+│                      query/calendar, voice corpus indexer, inbound email scanner)
 ├── lib/               Shared libraries (API auth, Gmail client, voice retrieval,
 │                      Chroma connect, suppressions, webhook verification)
 └── data/              SQLite databases (never committed)
@@ -167,7 +167,7 @@ memory/                Sync state files (not committed)
 
 | Service | Purpose |
 |---|---|
-| **OwnerRez** | PMS of record. Full read/write API + 24 webhook subscriptions (booking, guest, property, message, quote, inquiry, surcharge, discount × create/update/delete). 15-min CRM sync + real-time webhook handler. Message thread ingestion into voice corpus. Weekly booking calendar to ops team. |
+| **OwnerRez** | PMS of record. Full read/write API + 24 webhook subscriptions (booking, guest, property, message, quote, inquiry, surcharge, discount × create/update/delete). 15-min CRM contact sync + real-time webhook handler. The separate full-occupancy query includes guestless reservations, blocks, holds, and linked availability and powers the weekly ops calendar. Message thread ingestion into voice corpus. |
 | **Meta Marketing API** | Paid campaigns, custom audience sync, Pixel/CAPI attribution, Instagram Graph API for organic posting and DM bridge |
 | **Google Drive** | Resort photo library (6 folders), corporate document storage, HEIC→JPEG conversion pipeline |
 | **Twilio** | WhatsApp webhook bridge for guest conversations |
@@ -240,6 +240,7 @@ See `SECURITY.md` for reporting and credential-handling guidance.
    here depends on it.
 7. The Voice Service corpus is the single most sensitive training asset — do
    not bulk-export or expose message bodies outside the CRM.
-8. OwnerRez is the PMS of record. When in doubt about bookings, availability,
-   or guest data, query the API directly — do not rely on cached CRM data
-   alone.
+8. OwnerRez is the PMS of record. The CRM sync is contact-only and must never
+   answer booking or availability questions. Use
+   `node crm/scripts/ownerrez-full-occupancy.js --start YYYY-MM-DD --end YYYY-MM-DD`
+   to query all active reservations and blocks directly from OwnerRez.
