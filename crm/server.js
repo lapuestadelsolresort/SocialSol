@@ -124,6 +124,7 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'crm.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const { sql } = require('@databases/sqlite');
+const { ensureSchemaAsync: ensureSquarespaceSchema } = require('./lib/squarespace-schema');
 
 // ─── Database Setup (async init) ─────────────────────────────────────────────
 let db;
@@ -538,6 +539,10 @@ async function initDB() {
       details TEXT
     )
   `);
+
+  // Squarespace is the commerce/payment source for direct bookings only.
+  // This read model never replaces OwnerRez as the occupancy source.
+  await ensureSquarespaceSchema(db, sql);
 
   // Never auto-seed fake data — real leads only
   // (seedData() removed from auto-init)
@@ -2521,6 +2526,10 @@ app.post('/api/staging/bulk', async (req, res) => {
 // ─── OwnerRez Webhook ──────────────────────────────────────────────────────────
 const { buildRouter: buildOwnerRezRouter } = require('./routes/ownerrez');
 app.use('/api/ownerrez', buildOwnerRezRouter(() => db));
+
+// ─── Squarespace direct-booking commerce read model ──────────────────────────
+const { buildRouter: buildSquarespaceRouter } = require('./routes/squarespace');
+app.use('/api/squarespace', buildSquarespaceRouter(() => db));
 
 // ─── WhatsApp Bridge via Twilio ────────────────────────────────────────────────
 const { buildRouter: buildWhatsAppRouter } = require('./routes/whatsapp');

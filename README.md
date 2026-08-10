@@ -42,6 +42,7 @@ business at sale.
 |---|---|---|
 | OwnerRez CRM contact sync | Every 15 min + real-time webhooks | `#business-intel` |
 | OwnerRez full-occupancy calendar | Monday 8am PT | `#reservations` |
+| Squarespace direct-commerce sync | Every 5 min | `#business-intel`, `#accounting`, `#reservations` |
 | OwnerRez message → voice corpus ingestion | Daily 6:30am + real-time on webhook | — |
 | CRM → Meta Custom Audience retargeting sync | Daily | `#social-sol` |
 | Inbound email scanner (Gmail) | Every 15 min | `#social-sol` |
@@ -168,6 +169,7 @@ memory/                Sync state files (not committed)
 | Service | Purpose |
 |---|---|
 | **OwnerRez** | PMS of record. Full read/write API + 24 webhook subscriptions (booking, guest, property, message, quote, inquiry, surcharge, discount × create/update/delete). 15-min CRM contact sync + real-time webhook handler. The separate full-occupancy query includes guestless reservations, blocks, holds, and linked availability and powers the weekly ops calendar. Message thread ingestion into voice corpus. |
+| **Squarespace Commerce** | Direct-booking financial source. Server-side, read-only import of customers, orders, payments, fees, and refunds into the CRM, with conservative OwnerRez cross-links and agent-specific reporting. Airbnb/Vrbo bookings remain in OwnerRez and their payouts enter accounting only through Kapital. |
 | **Meta Marketing API** | Paid campaigns, custom audience sync, Pixel/CAPI attribution, Instagram Graph API for organic posting and DM bridge |
 | **Google Drive** | Resort photo library (6 folders), corporate document storage, HEIC→JPEG conversion pipeline |
 | **Twilio** | WhatsApp webhook bridge for guest conversations |
