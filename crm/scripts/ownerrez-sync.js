@@ -2,8 +2,9 @@
 /**
  * ownerrez-sync.js — OwnerRez → CRM real-time sync
  *
- * Polls OwnerRez API for new inquiries, bookings, and guest data.
- * Upserts into contacts + leads tables so the full funnel is visible:
+ * Polls OwnerRez API for new inquiries, contact-bearing reservations, and
+ * guest data. This is a CRM contact pipeline, not an occupancy source.
+ * Upserts into contacts + leads tables so the contact funnel is visible:
  *   - New Airbnb/VRBO/website inquiries → leads (status=new) + contacts
  *   - Confirmed bookings → contacts (status=booked) with full guest data
  *
@@ -362,13 +363,17 @@ async function sync(opts = {}) {
     console.error('[ownerrez-sync] Inquiry sync error:', e.message);
   }
 
-  // 2. Sync bookings (with guest data)
+  // 2. Sync reservation contacts. Guestless reservations and blocks belong in
+  // the full occupancy query, not the CRM, because there is no contact to add.
   try {
     const bookings = await fetchBookings(since);
-    const realBookings = bookings.filter(b => b.guest_id && b.type === 'booking');
-    console.log(`[ownerrez-sync] Found ${realBookings.length} bookings (${bookings.length} total incl. blocks)`);
+    const contactBookings = bookings.filter(b => b.guest_id);
+    console.log(
+      `[ownerrez-sync] Found ${contactBookings.length} contact-bearing reservation(s) ` +
+      `(${bookings.length} total booking/block changes; guestless items excluded from CRM only)`
+    );
 
-    for (const bk of realBookings) {
+    for (const bk of contactBookings) {
       const guest = await fetchGuest(bk.guest_id);
       if (!guest) continue;
 
@@ -386,8 +391,8 @@ async function sync(opts = {}) {
       await new Promise(r => setTimeout(r, 200));
     }
 
-    if (realBookings.length > 0) {
-      const newest = realBookings.reduce((a, b) =>
+    if (bookings.length > 0) {
+      const newest = bookings.reduce((a, b) =>
         (b.created_utc || '') > (a.created_utc || '') ? b : a
       );
       state.last_booking_utc = newest.created_utc || since;
