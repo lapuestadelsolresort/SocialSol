@@ -13,6 +13,7 @@ Production can use JSON secret files under `SOCIALSOL_SECRETS_DIR`:
 - `resort-api-auth.json` — Basic-auth user/password for remote internal CRM APIs
 - `healthchecks.json` — Healthchecks ping base URL and per-job identifiers
 - `resort-backup.json` — encrypted backup destination and passphrase file path
+- `squarespace.json` — replacement Squarespace Commerce API key used only by the server-side, read-only sync
 
 All secret files must be readable only by the service account:
 

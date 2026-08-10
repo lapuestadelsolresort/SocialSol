@@ -50,3 +50,10 @@ The Monday `#reservations` job uses this same query through
 ## Squarespace
 
 The reviewed site-wide injection is `squarespace-injection-v6.html`. It loads the versioned Squarespace tracker, preserves UTMs, records contact intent, captures successful form submissions, and adds the WhatsApp attribution reference.
+
+The separate server-side Commerce integration imports direct-booking contacts,
+orders, payments, processing fees, and refunds into normalized CRM tables. It
+does not replace OwnerRez as the booking/occupancy source of truth, and it does
+not treat Airbnb or Vrbo payouts as Squarespace revenue. See
+`../squarespace/README.md` for authentication, migration, protected API routes,
+reporting, and cutover instructions.

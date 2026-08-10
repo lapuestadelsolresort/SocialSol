@@ -1,0 +1,6 @@
+-- Migration 018: Squarespace commerce read model.
+-- Apply through crm/scripts/migrate-squarespace.js so the same idempotent
+-- schema definition is used by runtime initialization and tests.
+--
+-- This marker file documents migration ordering. The executable schema lives
+-- in crm/lib/squarespace-schema.js to prevent drift between SQLite clients.

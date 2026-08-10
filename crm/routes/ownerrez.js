@@ -60,6 +60,16 @@ const SYNC_EVENT_TYPES = new Set([
 // Message events trigger voice corpus ingestion
 const MESSAGE_EVENT_TYPES = new Set(['message']);
 
+function normalizeEventType(event) {
+  if (!event || typeof event !== 'object') return 'unknown';
+  if (event.event_type || event.type) return String(event.event_type || event.type).toLowerCase();
+  const entityType = event.entity_type || (typeof event.entity === 'string' ? event.entity : null);
+  const action = event.action;
+  if (entityType && action) return `${String(entityType).toLowerCase()}_${String(action).toLowerCase()}`;
+  if (entityType) return String(entityType).toLowerCase();
+  return 'unknown';
+}
+
 function shouldTriggerSync(eventType) {
   if (!eventType) return false;
   const lower = eventType.toLowerCase();
@@ -83,7 +93,8 @@ function triggerBackgroundSync(event) {
   const args = [scriptPath];
 
   // If we can extract a guest_id, sync just that guest
-  const guestId = event.guest_id || event.data?.guest_id;
+  const guestId = event.guest_id || event.data?.guest_id || event.entity?.guest_id
+    || (String(event.entity_type || '').toLowerCase() === 'guest' ? event.entity_id : null);
   if (guestId) {
     args.push('--guest', String(guestId));
   } else {
@@ -119,7 +130,7 @@ function slackSend(channel, message) {
  * - #reservations (REDACTED_SLACK_CHANNEL) gets bookings only (bilingual)
  */
 function notifyEvent(event) {
-  const eventType = event.event_type || event.type || 'unknown';
+  const eventType = normalizeEventType(event);
   const lower = eventType.toLowerCase();
 
   if (lower.includes('booking') && lower.includes('creat')) {
@@ -162,7 +173,7 @@ function buildRouter(getDb) {
   router.post('/webhook', requireBasicAuth, async (req, res) => {
     const event = req.body;
     const receivedAt = new Date().toISOString();
-    const eventType = event.event_type || event.type || 'unknown';
+    const eventType = normalizeEventType(event);
 
     // Respond immediately (OwnerRez needs < 2s response)
     try {
@@ -210,4 +221,4 @@ function buildRouter(getDb) {
   return router;
 }
 
-module.exports = { buildRouter };
+module.exports = { buildRouter, normalizeEventType };
