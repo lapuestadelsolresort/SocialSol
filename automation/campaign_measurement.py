@@ -134,3 +134,68 @@ def unattributed_verified_leads(db_path, start_day, end_day=None):
         ).fetchone()[0])
     finally:
         con.close()
+
+
+def squarespace_commerce_metrics(db_path, start_day, end_day=None):
+    """Return non-attributed direct-booking commerce totals for a local day window."""
+    start_utc, end_utc = utc_window(start_day, end_day)
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        required = {
+            "squarespace_orders", "squarespace_payments", "squarespace_processing_fees",
+            "squarespace_refunds", "squarespace_order_ownerrez_links",
+        }
+        if not required.issubset(tables):
+            return {
+                "available": False, "orders": 0, "gross_order_value": 0.0,
+                "collected": 0.0, "fees": 0.0, "refunded_fees": 0.0, "refunds": 0.0,
+                "net_after_fees_and_refunds": 0.0, "ownerrez_exceptions": 0,
+            }
+        orders = con.execute(
+            """SELECT COUNT(*), COALESCE(SUM(CAST(grand_total_value AS REAL)),0)
+                 FROM squarespace_orders
+                WHERE created_on>=? AND created_on<?""",
+            (start_utc, end_utc),
+        ).fetchone()
+        payments = con.execute(
+            """SELECT COALESCE(SUM(CAST(amount_value AS REAL)),0)
+                 FROM squarespace_payments WHERE paid_on>=? AND paid_on<?""",
+            (start_utc, end_utc),
+        ).fetchone()[0]
+        fees = con.execute(
+            """SELECT COALESCE(SUM(CAST(f.amount_value AS REAL)),0),
+                      COALESCE(SUM(CAST(f.refunded_amount_value AS REAL)),0)
+                 FROM squarespace_processing_fees f
+                 JOIN squarespace_payments p ON p.payment_id=f.payment_id
+                WHERE p.paid_on>=? AND p.paid_on<?""",
+            (start_utc, end_utc),
+        ).fetchone()
+        refunds = con.execute(
+            """SELECT COALESCE(SUM(CAST(amount_value AS REAL)),0)
+                 FROM squarespace_refunds WHERE refunded_on>=? AND refunded_on<?""",
+            (start_utc, end_utc),
+        ).fetchone()[0]
+        exceptions = con.execute(
+            """SELECT COUNT(*)
+                 FROM squarespace_orders o
+                 LEFT JOIN squarespace_order_ownerrez_links l ON l.order_id=o.order_id
+                WHERE o.created_on>=? AND o.created_on<?
+                  AND (l.status IS NULL OR l.status!='matched')""",
+            (start_utc, end_utc),
+        ).fetchone()[0]
+        return {
+            "available": True,
+            "orders": int(orders[0]),
+            "gross_order_value": float(orders[1]),
+            "collected": float(payments),
+            "fees": float(fees[0]),
+            "refunded_fees": float(fees[1]),
+            "refunds": float(refunds),
+            "net_after_fees_and_refunds": (
+                float(payments) - float(fees[0]) + float(fees[1]) - float(refunds)
+            ),
+            "ownerrez_exceptions": int(exceptions),
+        }
+    finally:
+        con.close()

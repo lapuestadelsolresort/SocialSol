@@ -10,7 +10,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from campaign_measurement import crm_metrics, meta_metrics, unattributed_verified_leads
+from campaign_measurement import (
+    crm_metrics,
+    meta_metrics,
+    squarespace_commerce_metrics,
+    unattributed_verified_leads,
+)
 from campaign_registry import fetch_live_snapshot, group_registry, load_meta_secrets, load_registry
 from job_health import get_status, record
 
@@ -64,6 +69,7 @@ def build_report(day):
     meta = meta_metrics(secrets, campaigns, day)
     crm = crm_metrics(DB_PATH, campaigns, day)
     unattributed = unattributed_verified_leads(DB_PATH, day)
+    commerce = squarespace_commerce_metrics(DB_PATH, day)
     health = health_for_day(day)
     warnings = []
     total_spend = 0.0
@@ -100,6 +106,16 @@ def build_report(day):
     ]
     if unattributed:
         parts.append(f"  • *Unattributed inbound WhatsApp leads:* {unattributed} (kept separate; never guessed)")
+    if commerce["available"]:
+        parts += [
+            "",
+            "*Squarespace direct commerce (not campaign-attributed):*",
+            f"  • {commerce['orders']} order(s) | ${commerce['collected']:.2f} collected | "
+            f"${commerce['fees']:.2f} fees | ${commerce['refunds']:.2f} refunds | "
+            f"${commerce['net_after_fees_and_refunds']:.2f} net",
+        ]
+        if commerce["ownerrez_exceptions"]:
+            parts.append(f"  • ⚠️ {commerce['ownerrez_exceptions']} order(s) need OwnerRez link review")
     if warnings:
         parts += ["", "*Meta delivery flags:*", *warnings]
     elif health.get("healthy"):

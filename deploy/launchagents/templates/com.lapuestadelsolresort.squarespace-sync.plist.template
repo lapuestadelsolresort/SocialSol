@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lapuestadelsolresort.squarespace-sync</string>
+  <key>ProgramArguments</key><array>
+    <string>__NODE_BIN__</string>
+    <string>__SOCIALSOL_ROOT__/crm/scripts/squarespace-sync.js</string>
+    <string>--json</string>
+  </array>
+  <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>SOCIALSOL_SECRETS_DIR</key><string>__SOCIALSOL_SECRETS_DIR__</string>
+  </dict>
+  <key>StartInterval</key><integer>300</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/squarespace-sync.log</string>
+  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/squarespace-sync.err</string>
+</dict></plist>

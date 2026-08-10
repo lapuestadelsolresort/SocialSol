@@ -1,0 +1,23 @@
+{
+  "sync": {
+    "overlap_minutes": 15,
+    "initial_backfill_since": "2020-01-01T00:00:00.000Z",
+    "payment_states": [
+      "NOT_CHARGED",
+      "AUTHORIZED",
+      "PAID",
+      "REFUNDED",
+      "PENDING",
+      "FAILED",
+      "REFUND_PENDING",
+      "REFUND_FAILED",
+      "PARTIALLY_PAID"
+    ]
+  },
+  "item_departments": {
+    "housekeeping": ["housekeeping", "cleaning", "linen", "laundry", "maid"],
+    "food_beverage": ["meal", "breakfast", "lunch", "dinner", "catering", "beverage", "chef", "food", "all inclusive"],
+    "guest_activity": ["tour", "excursion", "activity", "massage", "transportation", "surf", "lesson", "camp"]
+  },
+  "manual_ownerrez_links": {}
+}

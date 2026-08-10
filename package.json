@@ -22,6 +22,9 @@
     "check:stack": "npm run check:secrets && npm run check:javascript && npm run check:python && npm run check:shell && npm run check:launchagents && npm run test:automation && npm test && npm run test:prospector && npm run test:regina && npm run build:landing",
     "render:launchagents": "node scripts/render-launchagents.js",
     "init:runtime": "bash scripts/init-runtime.sh",
+    "migrate:squarespace": "node crm/scripts/migrate-squarespace.js",
+    "sync:squarespace": "node crm/scripts/squarespace-sync.js",
+    "report:squarespace": "node crm/scripts/squarespace-report.js --all",
     "build:landing": "npm run build --workspaces --if-present",
     "audit:production": "npm audit --omit=dev",
     "check:secrets": "node scripts/check-secrets.js"

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lapuestadelsolresort.squarespace-report</string>
+  <key>ProgramArguments</key><array>
+    <string>__NODE_BIN__</string>
+    <string>__SOCIALSOL_ROOT__/crm/scripts/squarespace-report.js</string>
+    <string>--all</string>
+    <string>--post</string>
+  </array>
+  <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key><string>__OPENCLAW_SLACK_ACCOUNT__</string>
+    <key>RESORT_BIZEVENT_CHANNEL</key><string>__RESORT_BIZEVENT_CHANNEL__</string>
+    <key>RESORT_ACCOUNTING_CHANNEL</key><string>__RESORT_ACCOUNTING_CHANNEL__</string>
+    <key>RESORT_RESERVATIONS_CHANNEL</key><string>__RESORT_RESERVATIONS_CHANNEL__</string>
+    <key>RESORT_HOUSEKEEPING_CHANNEL</key><string>__RESORT_HOUSEKEEPING_CHANNEL__</string>
+    <key>SQUARESPACE_SLACK_ENABLED</key><string>__SQUARESPACE_SLACK_ENABLED__</string>
+  </dict>
+  <key>StartInterval</key><integer>600</integer>
+  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/squarespace-report.log</string>
+  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/squarespace-report.err</string>
+</dict></plist>

@@ -33,6 +33,7 @@ campaigns/active-campaigns.json
 accounting/*.csv
 accounting/fx_cache/
 accounting/config.json
+squarespace/config.json
 **/logs/
 **/memory/
 **/backups/

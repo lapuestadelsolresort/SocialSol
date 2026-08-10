@@ -4,6 +4,11 @@ Parses Kapital Bank (Mexico) CSV statements and classifies each transaction
 into QuickBooks Online expense/income categories. Converts MXN → USD using
 the Banxico daily FIX rate.
 
+Squarespace Commerce is a separate direct-booking financial feed. Its orders,
+payments, processing fees, and refunds are imported into the CRM for
+reconciliation and receipt association. Airbnb and Vrbo payouts are not
+Squarespace orders; they enter accounting only through Kapital statements.
+
 ## Files
 
 | File | Purpose |
