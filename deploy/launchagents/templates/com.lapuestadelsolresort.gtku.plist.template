@@ -22,5 +22,12 @@
   <string>__SOCIALSOL_ROOT__/memory/gtku-log.txt</string>
   <key>RunAtLoad</key>
   <false/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SOCIALSOL_ROOT</key><string>__SOCIALSOL_ROOT__</string>
+    <key>SOCIALSOL_SECRETS_DIR</key><string>__SOCIALSOL_SECRETS_DIR__</string>
+    <key>POSTIZ_INTEGRATION_ID</key><string>__POSTIZ_INTEGRATION_ID__</string>
+    <key>GTKU_GOOGLE_ACCOUNT</key><string>__GTKU_GOOGLE_ACCOUNT__</string>
+  </dict>
 </dict>
 </plist>

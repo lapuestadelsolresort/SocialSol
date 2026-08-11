@@ -4,21 +4,36 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+// Load ignored runtime configuration before rendering service environments.
+require('../lib/runtime-paths');
+const { loadPolicy } = require('../crm/lib/channel-policy');
+
 const root = path.resolve(process.env.SOCIALSOL_ROOT || path.join(__dirname, '..'));
 const nodeBin = path.resolve(process.env.NODE_BIN || process.execPath);
 const pythonBin = path.resolve(process.env.PYTHON_BIN || '/opt/homebrew/bin/python3');
+const policy = loadPolicy();
+let localTargets = {};
+try {
+  localTargets = JSON.parse(fs.readFileSync(path.join(root, 'paloma', 'config.json'), 'utf8')).channels || {};
+} catch {}
+function policyChannel(name) {
+  return Object.entries(policy.channels || {}).find(([, channel]) => channel.name === name)?.[0] || '';
+}
 const runtimeValues = {
   '__SOCIALSOL_SECRETS_DIR__': process.env.SOCIALSOL_SECRETS_DIR || path.join(root, 'secrets'),
-  '__RESORT_SOCIAL_CHANNEL__': process.env.RESORT_SOCIAL_CHANNEL || '',
-  '__RESORT_BIZEVENT_CHANNEL__': process.env.RESORT_BIZEVENT_CHANNEL || '',
-  '__RESORT_ACCOUNTING_CHANNEL__': process.env.RESORT_ACCOUNTING_CHANNEL || '',
-  '__RESORT_RESERVATIONS_CHANNEL__': process.env.RESORT_RESERVATIONS_CHANNEL || '',
-  '__RESORT_HOUSEKEEPING_CHANNEL__': process.env.RESORT_HOUSEKEEPING_CHANNEL || '',
+  '__RESORT_SOCIAL_CHANNEL__': process.env.RESORT_SOCIAL_CHANNEL || policyChannel('social-sol'),
+  '__RESORT_BIZEVENT_CHANNEL__': process.env.RESORT_BIZEVENT_CHANNEL || policyChannel('business-intel'),
+  '__RESORT_ACCOUNTING_CHANNEL__': process.env.RESORT_ACCOUNTING_CHANNEL || policyChannel('accounting'),
+  '__RESORT_RESERVATIONS_CHANNEL__': process.env.RESORT_RESERVATIONS_CHANNEL || policyChannel('reservations'),
+  '__RESORT_HOUSEKEEPING_CHANNEL__': process.env.RESORT_HOUSEKEEPING_CHANNEL || policyChannel('receipt-housekeeper'),
   '__SQUARESPACE_SLACK_ENABLED__': process.env.SQUARESPACE_SLACK_ENABLED || '0',
   '__PROSPECTOR_SLACK_CHANNEL__': process.env.PROSPECTOR_SLACK_CHANNEL || '',
   '__OPENCLAW_SLACK_ACCOUNT__': process.env.OPENCLAW_SLACK_ACCOUNT || '',
-  '__TRACKING_QC_CHANNEL__': process.env.TRACKING_QC_CHANNEL || '',
+  '__RESORT_OPS_ALERTS_CHANNEL__': process.env.RESORT_OPS_ALERTS_CHANNEL || '',
+  '__TRACKING_QC_CHANNEL__': process.env.TRACKING_QC_CHANNEL || localTargets.tracking_qc || '',
   '__GMAIL_IMPERSONATE_USER__': process.env.GMAIL_IMPERSONATE_USER || '',
+  '__POSTIZ_INTEGRATION_ID__': process.env.POSTIZ_INTEGRATION_ID || '',
+  '__GTKU_GOOGLE_ACCOUNT__': process.env.GTKU_GOOGLE_ACCOUNT || '',
 };
 const outputIndex = process.argv.indexOf('--output');
 const outputDir = outputIndex >= 0

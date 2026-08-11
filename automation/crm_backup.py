@@ -94,12 +94,13 @@ def main():
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(BACKUP_DIR, 0o700)
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    force = "--force" in sys.argv[1:]
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ" if force else "%Y-%m-%d")
     plain = BACKUP_DIR / f".crm-{stamp}.db.tmp"
     compressed = BACKUP_DIR / f".crm-{stamp}.db.gz.tmp"
     encrypted = BACKUP_DIR / f"crm-{stamp}.db.gz.enc"
     previous = get_status(JOB_NAME)
-    if previous.get("status") == "ok" and previous.get("detail") == encrypted.name and encrypted.is_file():
+    if not force and previous.get("status") == "ok" and previous.get("detail") == encrypted.name and encrypted.is_file():
         print(f"backup already completed today: {encrypted}")
         return
 

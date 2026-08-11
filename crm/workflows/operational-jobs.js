@@ -1,0 +1,355 @@
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { sql } = require('@databases/sqlite');
+const { ROOT } = require('../../lib/runtime-paths');
+const { nodeCommand, pythonCommand, resolveRepoFile } = require('../lib/workflow-command');
+const { makeDurableJob } = require('./durable-job');
+
+function safeAccountingCsv(input) {
+  const supplied = typeof input.csvPath === 'string' ? input.csvPath.trim() : '';
+  if (!supplied) throw new Error('csvPath is required');
+  const absolute = path.resolve(ROOT, supplied);
+  const relative = path.relative(path.join(ROOT, 'accounting'), absolute);
+  if (relative.startsWith('..') || path.isAbsolute(relative) || path.extname(absolute).toLowerCase() !== '.csv') {
+    throw new Error('Kapital CSV must be a .csv file inside the accounting runtime directory');
+  }
+  if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) throw new Error('Kapital CSV does not exist');
+  return absolute;
+}
+
+function parseRequiredJson(command, label) {
+  if (!command?.parsed || typeof command.parsed !== 'object') {
+    return { verified: false, reason: `${label} did not emit a machine-readable result` };
+  }
+  return null;
+}
+
+const paulinaDaily = makeDurableJob({
+  name: 'paulina.daily',
+  capability: 'paulina.send',
+  provider: 'resend',
+  operation: 'paulina.orchestrate',
+  autonomous: true,
+  notificationChannelName: 'prospector-paulina',
+  requestSummary: () => ({ campaignScope: 'configured_active_campaign', autonomous: true }),
+  buildCommand: ({ shadowMode }) => nodeCommand('prospector/orchestrator.js', shadowMode ? ['--dry-run'] : [], {
+    timeoutMs: 15 * 60_000,
+  }),
+  async verify({ services, state }) {
+    const reportCommand = await services.runCommand(nodeCommand('prospector/scripts/performance-status.js', ['--json']));
+    let report;
+    try { report = JSON.parse(reportCommand.stdout); } catch { report = null; }
+    if (!report?.generated_at || report?.scope?.owner !== 'paulina') {
+      return { verified: false, reason: 'Paulina CRM performance readback was unavailable', retryable: true };
+    }
+    return {
+      verified: true,
+      source: 'crm.outreach_sends',
+      sourceRef: report.scope.active_campaign_slug || 'paulina',
+      providerStatus: 'crm_readback_verified',
+      evidence: report,
+      summary: {
+        productionSent: report.all_time?.production_sent || 0,
+        delivered: report.all_time?.production_delivered || 0,
+        bounced: report.all_time?.bounced || 0,
+        queueReady: report.active_queue?.verified_ready || 0,
+        commandHash: state.execute?.providerRef,
+      },
+    };
+  },
+  summarize: ({ verification }) => ({ report: verification.summary }),
+});
+
+function validateReginaCampaign(input) {
+  const slug = typeof input.campaignSlug === 'string' ? input.campaignSlug.trim() : '';
+  if (!/^[a-z0-9_]{1,80}$/.test(slug)) throw new Error('valid campaignSlug is required');
+  if (!fs.existsSync(path.join(ROOT, 'regina', 'library', 'campaigns', `${slug}.json`))) {
+    throw new Error(`unknown Regina campaign: ${slug}`);
+  }
+  if (input.count !== undefined) {
+    const count = Number(input.count);
+    if (!Number.isInteger(count) || count < 1 || count > 100) throw new Error('count must be an integer from 1 to 100');
+  }
+}
+
+function reginaVerification(campaignSlug) {
+  return async ({ db, run, state }) => {
+    const [row] = await db.query(sql`SELECT
+      COUNT(*) AS created,
+      SUM(CASE WHEN sent_at IS NOT NULL THEN 1 ELSE 0 END) AS sent,
+      SUM(CASE WHEN status IN ('failed','send_failed') THEN 1 ELSE 0 END) AS failed
+      FROM outreach_sends WHERE created_at >= ${run.started_at}`);
+    if (state.execute.exitCode !== 0) return { verified: false, reason: 'Regina process did not exit cleanly' };
+    return {
+      verified: true,
+      source: 'crm.outreach_sends',
+      sourceRef: campaignSlug,
+      providerStatus: 'crm_readback_verified',
+      evidence: { campaignSlug, since: run.started_at, ...row, commandOutput: state.execute.stdout },
+      summary: { created: row?.created || 0, sent: row?.sent || 0, failed: row?.failed || 0 },
+    };
+  };
+}
+
+const reginaDaily = makeDurableJob({
+  name: 'regina.daily',
+  capability: 'regina.send',
+  provider: 'resend',
+  operation: 'regina.anniversary',
+  autonomous: true,
+  notificationChannelName: 'reengager-regina',
+  requestSummary: () => ({ campaignSlug: 'anniversary', autonomous: true }),
+  buildCommand: ({ shadowMode }) => nodeCommand('regina/scripts/anniversary-cron.js', shadowMode ? ['--dry-run'] : [], {
+    timeoutMs: 15 * 60_000,
+  }),
+  verify: reginaVerification('anniversary'),
+  summarize: ({ verification }) => ({ report: verification.summary }),
+});
+
+const reginaCampaign = makeDurableJob({
+  name: 'regina.campaign',
+  capability: 'regina.send',
+  provider: 'resend',
+  operation: 'regina.batch',
+  validate: validateReginaCampaign,
+  notificationChannelName: 'reengager-regina',
+  requestSummary: input => ({ campaignSlug: input.campaignSlug, count: input.count || null }),
+  buildCommand: ({ input, shadowMode }) => {
+    const args = ['--campaign-slug', input.campaignSlug];
+    if (input.count !== undefined) args.push('--n', String(input.count));
+    if (shadowMode) args.push('--dry-run');
+    return nodeCommand('regina/scripts/batch.js', args, { timeoutMs: 20 * 60_000 });
+  },
+  verify: async context => reginaVerification(context.input.campaignSlug)(context),
+  summarize: ({ verification }) => ({ report: verification.summary }),
+});
+
+const socialPublishRoutine = makeDurableJob({
+  name: 'social.publish_routine',
+  capability: 'social.publish',
+  provider: 'postiz',
+  operation: 'instagram.schedule_gtku',
+  autonomous: true,
+  notificationChannelName: 'social-sol',
+  requestSummary: () => ({ series: 'get_to_know_us' }),
+  buildCommand: ({ shadowMode }) => ({
+    executable: '/bin/bash',
+    args: [resolveRepoFile('crm/scripts/gtku-daily.sh')],
+    env: shadowMode ? { DRY_RUN: '1' } : {},
+    timeoutMs: 20 * 60_000,
+  }),
+  async verify({ db, input, run, state }) {
+    const stdout = state.execute.stdout || '';
+    if (/DRY_RUN=1/.test(stdout)) {
+      return { verified: true, source: 'postiz.dry_run', providerStatus: 'dry_run_verified', evidence: { stdout } };
+    }
+    let seriesState = {};
+    try { seriesState = JSON.parse(fs.readFileSync(path.join(ROOT, 'memory', 'gtku-state.json'), 'utf8')); } catch {}
+    const scheduled = stdout.match(/Posted:\s*([^\s]+)/)?.[1] || null;
+    const legitimateNoop = /All videos posted|Marked .* as skipped/.test(stdout);
+    if (!legitimateNoop && (!scheduled || String(seriesState.last_postiz_id || '') !== scheduled)) {
+      return { verified: false, reason: 'Postiz schedule was not confirmed in the series state', retryable: true };
+    }
+    return {
+      verified: true,
+      source: 'postiz.schedule_state',
+      sourceRef: scheduled,
+      providerStatus: scheduled ? 'scheduled_readback_verified' : 'no_op_verified',
+      evidence: { scheduledPostId: scheduled, statePostId: seriesState.last_postiz_id || null, stdout },
+      summary: { scheduledPostId: scheduled, noOp: legitimateNoop },
+    };
+  },
+  summarize: ({ verification }) => ({ report: verification.summary || { dryRun: true } }),
+});
+
+const crmSync = makeDurableJob({
+  name: 'crm.sync',
+  capability: 'crm.write',
+  provider: 'ownerrez+squarespace',
+  operation: 'crm.sync_authoritative_sources',
+  autonomous: true,
+  notificationChannelName: 'business-intel',
+  requestSummary: () => ({ sources: ['ownerrez', 'squarespace'] }),
+  buildCommand: () => nodeCommand('crm/scripts/sync-all.js', [], { timeoutMs: 30 * 60_000 }),
+  async verify({ state }) {
+    const invalid = parseRequiredJson(state.execute, 'CRM sync');
+    if (invalid) return invalid;
+    const result = state.execute.parsed;
+    if (result.ok !== true || !result.sources?.ownerrez || result.sources?.squarespace?.ok !== true) {
+      return { verified: false, reason: 'one or more authoritative CRM sources did not verify', retryable: true };
+    }
+    return {
+      verified: true,
+      source: 'crm.source_watermarks',
+      providerStatus: 'all_sources_verified',
+      evidence: result,
+      summary: result.sources,
+    };
+  },
+  summarize: ({ verification }) => ({ sources: verification.summary }),
+});
+
+const ownerrezCrmSync = makeDurableJob({
+  name: 'ownerrez.crm.sync',
+  capability: 'crm.write',
+  provider: 'ownerrez',
+  operation: 'crm.contact_sync',
+  autonomous: true,
+  notificationChannelName: 'business-intel',
+  notifyOnWrite: false,
+  requestSummary: () => ({ source: 'ownerrez', authority: 'guest_and_booking_contact_data' }),
+  buildCommand: () => nodeCommand('crm/scripts/ownerrez-sync.js', [], {
+    env: { WORKFLOW_MANAGED: '1' }, timeoutMs: 25 * 60_000,
+  }),
+  async verify({ state }) {
+    const summary = state.execute.parsed;
+    if (!summary || typeof summary.inquiries !== 'number' || typeof summary.bookings !== 'number') {
+      return { verified: false, reason: 'OwnerRez contact sync did not emit a verifiable summary', retryable: true };
+    }
+    return {
+      verified: true,
+      source: 'ownerrez.api+crm.readback',
+      providerStatus: 'contact_sync_verified',
+      evidence: summary,
+      summary,
+    };
+  },
+  summarize: ({ verification }) => ({ ownerrez: verification.summary }),
+});
+
+const squarespaceCrmSync = makeDurableJob({
+  name: 'squarespace.crm.sync',
+  capability: 'crm.write',
+  provider: 'squarespace',
+  operation: 'commerce_sync',
+  autonomous: true,
+  notificationChannelName: 'business-intel',
+  notifyOnWrite: false,
+  requestSummary: () => ({ source: 'squarespace', authority: 'direct_charges_and_fees' }),
+  buildCommand: () => nodeCommand('crm/scripts/squarespace-sync.js', ['--json'], { timeoutMs: 20 * 60_000 }),
+  async verify({ state }) {
+    const summary = state.execute.parsed;
+    if (!summary || summary.ok !== true) {
+      return { verified: false, reason: 'Squarespace commerce sync did not emit a verified result', retryable: true };
+    }
+    return {
+      verified: true,
+      source: 'squarespace.api+crm.readback',
+      providerStatus: 'commerce_sync_verified',
+      evidence: summary,
+      summary,
+    };
+  },
+  summarize: ({ verification }) => ({ squarespace: verification.summary }),
+});
+
+const accountingClassify = makeDurableJob({
+  name: 'accounting.classify',
+  capability: 'accounting.write',
+  effectType: 'classification',
+  provider: 'kapital',
+  operation: 'classify_statement',
+  autonomous: true,
+  notifyOnWrite: false,
+  validate: input => { safeAccountingCsv(input); },
+  requestSummary: input => ({ csv: path.basename(safeAccountingCsv(input)) }),
+  buildCommand: ({ input }) => pythonCommand('accounting/run_classify.py', [safeAccountingCsv(input), '--json'], {
+    timeoutMs: 20 * 60_000,
+  }),
+  async verify({ db, input, run, state }) {
+    const invalid = parseRequiredJson(state.execute, 'Kapital classifier');
+    if (invalid) return invalid;
+    const summary = state.execute.parsed.summary;
+    if (!summary || summary.total !== summary.auto + summary.guess + summary.unknown) {
+      return { verified: false, reason: 'Kapital classification totals failed reconciliation' };
+    }
+    const sourceFileHash = crypto.createHash('sha256').update(fs.readFileSync(safeAccountingCsv(input))).digest('hex');
+    let persisted = 0;
+    for (const tier of ['auto', 'guess', 'unknown']) {
+      for (const txn of state.execute.parsed.results?.[tier] || []) {
+        const sourceKey = require('../lib/workflow-store').sha256({
+          provider: 'kapital', date: txn.date, reference: txn.reference || txn.clave,
+          description: txn.description, amount: txn.amount, direction: txn.direction,
+        });
+        await db.query(sql`INSERT INTO accounting_bank_transactions (
+            id, source_key, transaction_date, description, reference, direction,
+            currency, amount, amount_usd, category_key, category_name,
+            classification_tier, classification_reason, source_file_hash,
+            workflow_run_id, status
+          ) VALUES (
+            ${sourceKey}, ${sourceKey}, ${txn.date || null}, ${txn.description || null},
+            ${txn.reference || txn.clave || null}, ${txn.direction || null}, 'MXN',
+            ${Number(txn.amount || 0)}, ${txn.amount_usd == null ? null : Number(txn.amount_usd)},
+            ${txn.category || null}, ${txn.category_name || null}, ${tier},
+            ${txn.reason || txn.note || null}, ${sourceFileHash}, ${run.id}, 'classified'
+          ) ON CONFLICT(source_key) DO UPDATE SET
+            category_key=excluded.category_key,
+            category_name=excluded.category_name,
+            classification_tier=excluded.classification_tier,
+            classification_reason=excluded.classification_reason,
+            amount_usd=excluded.amount_usd,
+            workflow_run_id=excluded.workflow_run_id,
+            updated_at=datetime('now')`);
+        persisted += 1;
+      }
+    }
+    return {
+      verified: true,
+      source: 'kapital.statement_classification',
+      providerStatus: 'classification_reconciled',
+      evidence: state.execute.parsed,
+      summary: { ...summary, persisted },
+    };
+  },
+  summarize: ({ verification }) => ({ classification: verification.summary }),
+});
+
+const qboWrite = makeDurableJob({
+  name: 'qbo.write',
+  capability: 'qbo.write',
+  provider: 'quickbooks',
+  operation: 'kapital_transactions.write',
+  autonomous: true,
+  notificationChannelName: 'accounting',
+  validate: input => { safeAccountingCsv(input); },
+  requestSummary: input => ({ csv: path.basename(safeAccountingCsv(input)), classificationTier: 'auto_only' }),
+  buildCommand: ({ input, shadowMode }) => pythonCommand(
+    'accounting/qbo_push.py',
+    [safeAccountingCsv(input), ...(shadowMode ? [] : ['--live']), '--json'],
+    { timeoutMs: 30 * 60_000 },
+  ),
+  async verify({ state }) {
+    const invalid = parseRequiredJson(state.execute, 'QBO writer');
+    if (invalid) return invalid;
+    const summary = state.execute.parsed;
+    const written = (summary.expenses_pushed || 0) + (summary.income_pushed || 0) + (summary.transfers_pushed || 0);
+    const unverified = (summary.details || []).filter(row => row.status === 'PUSHED' && row.verified_by_readback !== true);
+    if ((summary.errors || []).length || unverified.length) {
+      return { verified: false, reason: 'one or more QBO writes failed provider readback' };
+    }
+    return {
+      verified: true,
+      source: 'quickbooks.entity_readback',
+      providerStatus: written ? 'entities_readback_verified' : 'no_new_entities_verified',
+      evidence: summary,
+      summary: { written, dedupSkipped: summary.dedup_skipped || 0, skipped: summary.skipped || 0 },
+    };
+  },
+  summarize: ({ verification }) => ({ qbo: verification.summary }),
+});
+
+module.exports = {
+  accountingClassify,
+  crmSync,
+  ownerrezCrmSync,
+  paulinaDaily,
+  qboWrite,
+  reginaCampaign,
+  reginaDaily,
+  safeAccountingCsv,
+  socialPublishRoutine,
+  squarespaceCrmSync,
+};

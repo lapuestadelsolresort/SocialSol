@@ -19,6 +19,8 @@ EXPECTED = {
     "resort-marketing-reconcile": timedelta(hours=30),
     "resort-lp-phase-gate": timedelta(hours=30),
     "resort-crm-backup": timedelta(hours=30),
+    "resort-crm-restore-drill": timedelta(days=8),
+    "resort-workflow-health": timedelta(minutes=15),
     "resort-log-rotation": timedelta(days=8),
     "resort-crm-audience-sync": timedelta(hours=30),
 }

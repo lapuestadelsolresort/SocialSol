@@ -82,6 +82,7 @@ def main():
         print()
 
     # Output
+    machine_output = None
     if output_json:
         # JSON output (for programmatic use)
         output = {
@@ -103,6 +104,7 @@ def main():
                 'total': sum(len(v) for v in results.values()),
             }
         }
+        machine_output = output
         print(json.dumps(output, indent=2, default=str))
     else:
         # Determine month label from transactions
@@ -137,6 +139,9 @@ def main():
     print(f"Auto: {len(results['auto'])} | Guess: {len(results['guess'])} | Unknown: {len(results['unknown'])}")
     if dry_run:
         print("🔒 DRY RUN — nothing pushed to QBO")
+    if machine_output is not None:
+        # Final compact line is the durable runner's unambiguous parse target.
+        print(json.dumps(machine_output, separators=(',', ':'), default=str))
 
 
 if __name__ == '__main__':

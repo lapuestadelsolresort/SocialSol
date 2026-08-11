@@ -1,0 +1,61 @@
+{
+  "id": "resort-workflows",
+  "name": "Resort Workflows",
+  "description": "Channel-authorized tools and deterministic Slack command handlers for the durable resort workflow control plane.",
+  "version": "1.0.0",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["resort_workflow"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "agentIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "minItems": 1
+      },
+      "crmBaseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:3456"
+      },
+      "slackAccountId": {
+        "type": "string"
+      },
+      "whatsappChannelIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "ownerrezChannelIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "receiptChannelIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "controlledChannelIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "controlPlaneTokenEnv": {
+        "type": "string",
+        "default": "RESORT_WORKFLOW_CONTROL_TOKEN"
+      },
+      "controlPlaneTokenFile": {
+        "type": "string"
+      },
+      "shadowMode": {
+        "type": "boolean",
+        "default": true
+      },
+      "liveWorkflowNames": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

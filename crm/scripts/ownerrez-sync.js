@@ -24,11 +24,11 @@ const https = require('https');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SECRETS_DIR = process.env.SOCIALSOL_SECRETS_DIR || path.join(REPO_ROOT, 'secrets');
-const DB_PATH = path.join(REPO_ROOT, 'crm', 'data', 'crm.db');
+const DB_PATH = path.resolve(process.env.DB_PATH || path.join(REPO_ROOT, 'crm', 'data', 'crm.db'));
 const STATE_PATH = path.join(REPO_ROOT, 'memory', 'ownerrez-sync-state.json');
 const OPENCLAW = process.env.OPENCLAW_BIN || '/opt/homebrew/bin/openclaw';
 const SLACK_ACCOUNT = process.env.OPENCLAW_SLACK_ACCOUNT || '';
-const BIZ_CHANNEL = process.env.RESORT_BIZEVENT_CHANNEL || 'REDACTED_SLACK_CHANNEL';
+const BIZ_CHANNEL = process.env.RESORT_BIZEVENT_CHANNEL || '';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 let SECRETS = {};
@@ -295,6 +295,7 @@ function upsertLead(inquiry, guest) {
 
 // ─── Slack notification ──────────────────────────────────────────────────────
 function notifySlack(message) {
+  if (process.env.WORKFLOW_MANAGED === '1') return;
   if (!SLACK_ACCOUNT || !BIZ_CHANNEL) {
     console.log('[ownerrez-sync] Slack notification (no channel configured):', message);
     return;
@@ -323,6 +324,7 @@ async function sync(opts = {}) {
   openDb();
 
   const stats = { inquiries: 0, bookings: 0, contacts_created: 0, contacts_updated: 0, leads_created: 0 };
+  const syncErrors = [];
 
   // 1. Sync inquiries
   try {
@@ -361,6 +363,7 @@ async function sync(opts = {}) {
     }
   } catch (e) {
     console.error('[ownerrez-sync] Inquiry sync error:', e.message);
+    syncErrors.push(`inquiries: ${e.message}`);
   }
 
   // 2. Sync reservation contacts. Guestless reservations and blocks belong in
@@ -399,12 +402,21 @@ async function sync(opts = {}) {
     }
   } catch (e) {
     console.error('[ownerrez-sync] Booking sync error:', e.message);
+    syncErrors.push(`bookings: ${e.message}`);
+  }
+
+  if (syncErrors.length) {
+    db.close();
+    const error = new Error(`OwnerRez sync incomplete: ${syncErrors.join('; ')}`);
+    error.code = 'ownerrez_sync_incomplete';
+    throw error;
   }
 
   saveState(state);
   db.close();
 
   console.log(`[ownerrez-sync] Done:`, stats);
+  console.log(JSON.stringify(stats));
 
   // Notify if there's anything new
   if (stats.contacts_created > 0 || stats.leads_created > 0) {

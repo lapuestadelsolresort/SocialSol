@@ -6,10 +6,14 @@ or Deposit (income) records. Handles token refresh, vendor lookup,
 and MXN→USD conversion.
 """
 
+import base64
+import hashlib
 import json
+import os
 import urllib.request
 import urllib.error
-from datetime import date
+import urllib.parse
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -19,30 +23,65 @@ class QBOClient:
 
     def __init__(self, secrets_path: str = None):
         if secrets_path is None:
-            secrets_path = str(Path(__file__).parent.parent / 'secrets' / 'quickbooks.json')
+            secrets_dir = Path(os.environ.get(
+                'SOCIALSOL_SECRETS_DIR', Path(__file__).parent.parent / 'secrets'
+            ))
+            secrets_path = str(secrets_dir / 'quickbooks.json')
         self.secrets_path = secrets_path
         self._load_secrets()
-        self.base_url = f"https://quickbooks.api.intuit.com/v3/company/{self.realm_id}"
 
     def _load_secrets(self):
         with open(self.secrets_path) as f:
             data = json.load(f)
-        self.realm_id = data['realm_id']
-        self.client_id = data['production']['client_id']
-        self.client_secret = data['production']['client_secret']
-        self.access_token = data['tokens']['access_token']
-        self.refresh_token = data['tokens']['refresh_token']
+        tokens = data.get('tokens', {})
+        self.realm_id = data.get('realmId') or data.get('realm_id')
+        credentials = data.get('production') or data.get('development') or {}
+        if not credentials.get('client_id'):
+            dev_path = Path(self.secrets_path).with_name('quickbooks-dev.json')
+            if dev_path.is_file():
+                credentials = json.loads(dev_path.read_text())
+        self.client_id = credentials.get('client_id')
+        self.client_secret = credentials.get('client_secret')
+        self.access_token = data.get('access_token') or tokens.get('access_token')
+        self.refresh_token = data.get('refresh_token') or tokens.get('refresh_token')
+        missing = [name for name, value in {
+            'realm id': self.realm_id,
+            'client id': self.client_id,
+            'client secret': self.client_secret,
+            'access token': self.access_token,
+            'refresh token': self.refresh_token,
+        }.items() if not value]
+        if missing:
+            raise ValueError(f"QuickBooks credentials missing: {', '.join(missing)}")
+        base = str(data.get('base_url') or '').rstrip('/')
+        if '/v3/company/' in base:
+            self.base_url = base
+        else:
+            api_host = (
+                'https://sandbox-quickbooks.api.intuit.com'
+                if data.get('env') == 'sandbox'
+                else 'https://quickbooks.api.intuit.com'
+            )
+            self.base_url = f"{api_host}/v3/company/{self.realm_id}"
 
     def _save_tokens(self, access_token: str, refresh_token: str):
         with open(self.secrets_path) as f:
             data = json.load(f)
-        data['tokens']['access_token'] = access_token
-        data['tokens']['refresh_token'] = refresh_token
+        now = datetime.now(timezone.utc).isoformat()
+        if data.get('tokens') is not None or data.get('production') is not None or data.get('realm_id') is not None:
+            data.setdefault('tokens', {})['access_token'] = access_token
+            data['tokens']['refresh_token'] = refresh_token
+            data['tokens']['obtained_at'] = now
+        else:
+            data['access_token'] = access_token
+            data['refresh_token'] = refresh_token
+            data['updated_at'] = now
         tmp = self.secrets_path + '.tmp'
         with open(tmp, 'w') as f:
             json.dump(data, f, indent=2)
-        import os
-        os.rename(tmp, self.secrets_path)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.secrets_path)
         os.chmod(self.secrets_path, 0o600)
         self.access_token = access_token
         self.refresh_token = refresh_token
@@ -50,16 +89,21 @@ class QBOClient:
     def refresh_auth(self) -> bool:
         """Refresh the OAuth2 token."""
         try:
-            body = (
-                f"grant_type=refresh_token"
-                f"&refresh_token={self.refresh_token}"
-                f"&client_id={self.client_id}"
-                f"&client_secret={self.client_secret}"
-            ).encode()
+            body = urllib.parse.urlencode({
+                'grant_type': 'refresh_token',
+                'refresh_token': self.refresh_token,
+            }).encode()
+            basic = base64.b64encode(
+                f"{self.client_id}:{self.client_secret}".encode()
+            ).decode()
             req = urllib.request.Request(
                 "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
                 data=body,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                headers={
+                    "Authorization": f"Basic {basic}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                },
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -73,9 +117,19 @@ class QBOClient:
             print(f"Token refresh failed: {e}")
         return False
 
-    def _api_call(self, method: str, endpoint: str, body: dict = None, retry: bool = True) -> dict:
+    def _api_call(
+        self,
+        method: str,
+        endpoint: str,
+        body: dict = None,
+        retry: bool = True,
+        request_id: str = None,
+    ) -> dict:
         """Make an authenticated API call to QBO."""
-        url = f"{self.base_url}/{endpoint}?minorversion=75"
+        separator = '&' if '?' in endpoint else '?'
+        url = f"{self.base_url}/{endpoint}{separator}minorversion=75"
+        if request_id:
+            url += f"&requestid={urllib.parse.quote(str(request_id)[:50])}"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Accept": "application/json",
@@ -94,7 +148,7 @@ class QBOClient:
         except urllib.error.HTTPError as e:
             if e.code == 401 and retry:
                 if self.refresh_auth():
-                    return self._api_call(method, endpoint, body, retry=False)
+                    return self._api_call(method, endpoint, body, retry=False, request_id=request_id)
             error_body = e.read().decode() if e.fp else str(e)
             raise RuntimeError(f"QBO API {e.code}: {error_body}")
 
@@ -104,7 +158,7 @@ class QBOClient:
         encoded = urllib.parse.quote(sql)
         return self._api_call("GET", f"query?query={encoded}")
 
-    def create_purchase(self, txn: Dict) -> Dict:
+    def create_purchase(self, txn: Dict, request_id: str = None) -> Dict:
         """
         Create a Purchase (Check/CashPurchase) in QBO for an expense transaction.
 
@@ -161,10 +215,10 @@ class QBOClient:
         # SPEI fees are now pushed as separate records (not bundled)
         # to avoid 'split' display in QBO
 
-        result = self._api_call("POST", "purchase", purchase)
+        result = self._api_call("POST", "purchase", purchase, request_id=request_id)
         return result.get('Purchase', result)
 
-    def create_spei_fee(self, fee: Dict, parent_txn: Dict) -> Dict:
+    def create_spei_fee(self, fee: Dict, parent_txn: Dict, request_id: str = None) -> Dict:
         """
         Create a separate Purchase for a SPEI commission or IVA line.
         """
@@ -202,10 +256,10 @@ class QBOClient:
             }],
         }
 
-        result = self._api_call("POST", "purchase", purchase)
+        result = self._api_call("POST", "purchase", purchase, request_id=request_id)
         return result.get('Purchase', result)
 
-    def create_deposit(self, txn: Dict) -> Dict:
+    def create_deposit(self, txn: Dict, request_id: str = None) -> Dict:
         """
         Create a Deposit in QBO for an income transaction.
         """
@@ -247,10 +301,10 @@ class QBOClient:
             }],
         }
 
-        result = self._api_call("POST", "deposit", deposit)
+        result = self._api_call("POST", "deposit", deposit, request_id=request_id)
         return result.get('Deposit', result)
 
-    def create_transfer(self, txn: Dict) -> Dict:
+    def create_transfer(self, txn: Dict, request_id: str = None) -> Dict:
         """
         Create a Transfer in QBO for owner funding or internal transfers.
         """
@@ -275,8 +329,14 @@ class QBOClient:
             "PrivateNote": memo,
         }
 
-        result = self._api_call("POST", "transfer", transfer)
+        result = self._api_call("POST", "transfer", transfer, request_id=request_id)
         return result.get('Transfer', result)
+
+    def read_entity(self, entity_type: str, entity_id: str) -> Dict:
+        """Read a just-written entity back from QBO."""
+        result = self._api_call("GET", f"{entity_type}/{entity_id}")
+        key = {'purchase': 'Purchase', 'deposit': 'Deposit', 'transfer': 'Transfer'}[entity_type]
+        return result.get(key, result)
 
     def _resolve_account_id(self, category_key: str) -> Optional[str]:
         """Look up QBO account ID from config category key."""
@@ -312,6 +372,17 @@ class QBOClient:
         return vendor.get('id')
 
 
+def qbo_request_id(txn: Dict, record_type: str, suffix: str = '') -> str:
+    """Stable, non-PII QBO requestid for a Kapital-derived write."""
+    raw = '|'.join([
+        'socialsol', record_type, str(txn.get('date') or ''),
+        str(txn.get('reference') or txn.get('clave') or txn.get('description') or ''),
+        str(txn.get('amount') or ''), str(txn.get('category') or ''), suffix,
+    ])
+    digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()[:36]
+    return f"ss-{record_type[:3]}-{digest}"[:50]
+
+
 def push_classified_to_qbo(
     results: Dict[str, List[Dict]],
     push_auto: bool = True,
@@ -337,6 +408,7 @@ def push_classified_to_qbo(
         'transfers_pushed': 0,
         'skipped': 0,
         'errors': [],
+        'warnings': [],
         'details': [],
     }
 
@@ -360,7 +432,7 @@ def push_classified_to_qbo(
         summary['dedup_skipped'] = len(dupes)
         if dupes:
             for d in dupes:
-                summary['errors'].append(
+                summary['warnings'].append(
                     f"DEDUP SKIP: {d.get('date')} ${d.get('amount_usd', 0):.2f} — {d.get('_dedup_reason', 'duplicate')}"
                 )
         # Rebuild bucket lists with only new transactions
@@ -371,14 +443,9 @@ def push_classified_to_qbo(
         if push_guess:
             buckets_to_push.append(('guess', [t for t in results.get('guess', []) if id(t) in new_set]))
     except Exception as e:
-        # If dedup fails, proceed without it but log the error
-        summary['errors'].append(f"Dedup check failed (proceeding anyway): {e}")
-        summary['dedup_skipped'] = 0
-        buckets_to_push = []
-        if push_auto:
-            buckets_to_push.append(('auto', results.get('auto', [])))
-        if push_guess:
-            buckets_to_push.append(('guess', results.get('guess', [])))
+        # A failed duplicate check makes a live retry unsafe. Fail closed
+        # before creating any QBO entity.
+        raise RuntimeError(f"QBO dedup preflight failed; no writes attempted: {e}") from e
 
     for bucket_name, txns in buckets_to_push:
         for txn in txns:
@@ -424,28 +491,45 @@ def push_classified_to_qbo(
                 continue
 
             try:
+                request_id = qbo_request_id(txn, record_type)
                 if record_type == 'transfer':
-                    result = client.create_transfer(txn)
+                    result = client.create_transfer(txn, request_id=request_id)
                     qbo_id = result.get('Id', 'unknown')
                     summary['transfers_pushed'] += 1
                 elif record_type == 'deposit':
-                    result = client.create_deposit(txn)
+                    result = client.create_deposit(txn, request_id=request_id)
                     qbo_id = result.get('Id', 'unknown')
                     summary['income_pushed'] += 1
                 else:
-                    result = client.create_purchase(txn)
+                    result = client.create_purchase(txn, request_id=request_id)
                     qbo_id = result.get('Id', 'unknown')
                     summary['expenses_pushed'] += 1
 
                     # Push SPEI fees as separate records
-                    for fee in txn.get('spei_fees', []):
+                    for fee_index, fee in enumerate(txn.get('spei_fees', [])):
                         fee_usd = fee.get('amount_usd', 0) or 0
                         if fee_usd > 0:
                             try:
-                                client.create_spei_fee(fee, txn)
+                                fee_request_id = qbo_request_id(txn, 'purchase', f"spei-{fee_index}")
+                                fee_result = client.create_spei_fee(
+                                    fee, txn, request_id=fee_request_id
+                                )
+                                fee_id = fee_result.get('Id')
+                                if not fee_id:
+                                    raise RuntimeError('QBO SPEI fee create returned no Id')
+                                fee_readback = client.read_entity('purchase', fee_id)
+                                if str(fee_readback.get('Id')) != str(fee_id):
+                                    raise RuntimeError(f'QBO SPEI fee readback mismatch for {fee_id}')
                                 summary['expenses_pushed'] += 1
                             except Exception as fe:
                                 summary['errors'].append(f"SPEI fee for {txn.get('date')}: {fe}")
+
+                if not qbo_id or qbo_id == 'unknown':
+                    raise RuntimeError('QBO create returned no entity Id')
+                entity_type = 'purchase' if record_type == 'expense' else record_type
+                readback = client.read_entity(entity_type, qbo_id)
+                if str(readback.get('Id')) != str(qbo_id):
+                    raise RuntimeError(f"QBO {record_type} readback mismatch for {qbo_id}")
 
                 summary['details'].append({
                     'date': str(txn.get('date')),
@@ -453,6 +537,8 @@ def push_classified_to_qbo(
                     'category': txn.get('category_name'),
                     'vendor': txn.get('vendor_name'),
                     'qbo_id': qbo_id,
+                    'request_id': request_id,
+                    'verified_by_readback': True,
                     'record_type': record_type,
                     'bucket': bucket_name,
                     'status': 'PUSHED',
@@ -471,11 +557,12 @@ if __name__ == '__main__':
     from fx_rates import get_usd_rate, convert_mxn_to_usd
 
     if len(sys.argv) < 2:
-        print("Usage: python qbo_push.py <csv_file> [--live]")
+        print("Usage: python qbo_push.py <csv_file> [--live] [--json]")
         sys.exit(1)
 
     csv_path = sys.argv[1]
     is_live = '--live' in sys.argv
+    output_json = '--json' in sys.argv
 
     meta, txns = parse_kapital_csv(csv_path)
     classifier = KapitalClassifier()
@@ -498,21 +585,27 @@ if __name__ == '__main__':
     dry_run = not is_live
     summary = push_classified_to_qbo(results, push_auto=True, push_guess=False, dry_run=dry_run)
 
-    mode = "LIVE" if is_live else "DRY RUN"
-    print(f"\n{'='*50}")
-    print(f"QBO Push ({mode})")
-    print(f"  Expenses: {summary['expenses_pushed']}")
-    print(f"  Income/Deposits: {summary['income_pushed']}")
-    print(f"  Transfers: {summary['transfers_pushed']}")
-    print(f"  Skipped: {summary['skipped']}")
-    if summary['errors']:
-        print(f"  Errors ({len(summary['errors'])}):")
-        for err in summary['errors']:
-            print(f"    - {err}")
+    if output_json:
+        print(json.dumps(summary, default=str))
+    else:
+        mode = "LIVE" if is_live else "DRY RUN"
+        print(f"\n{'='*50}")
+        print(f"QBO Push ({mode})")
+        print(f"  Expenses: {summary['expenses_pushed']}")
+        print(f"  Income/Deposits: {summary['income_pushed']}")
+        print(f"  Transfers: {summary['transfers_pushed']}")
+        print(f"  Skipped: {summary['skipped']}")
+        if summary['errors']:
+            print(f"  Errors ({len(summary['errors'])}):")
+            for err in summary['errors']:
+                print(f"    - {err}")
 
-    if summary['details']:
-        print(f"\n  Transactions:")
-        for d in summary['details']:
-            vendor = d.get('vendor') or 'N/A'
-            rtype = d.get('record_type', 'expense')[0].upper()
-            print(f"    {d['date']} | {rtype} | ${d['amount_usd']:>8.2f} USD | {d['category']:<25} | {vendor:<20} | {d['status']}")
+        if summary['details']:
+            print(f"\n  Transactions:")
+            for d in summary['details']:
+                vendor = d.get('vendor') or 'N/A'
+                rtype = d.get('record_type', 'expense')[0].upper()
+                print(f"    {d['date']} | {rtype} | ${d['amount_usd']:>8.2f} USD | {d['category']:<25} | {vendor:<20} | {d['status']}")
+
+    if is_live and summary['errors']:
+        sys.exit(1)

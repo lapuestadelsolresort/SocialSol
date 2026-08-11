@@ -228,14 +228,17 @@ describe('Server-side track.js event processing', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. WHATSAPP ATTRIBUTION (whatsapp.js)
+// 4. WHATSAPP ATTRIBUTION (durable ingress + processing graph)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('WhatsApp attribution (whatsapp.js)', () => {
+describe('WhatsApp attribution (durable ingress + processing graph)', () => {
   let waSource;
 
   before(() => {
-    waSource = fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8');
+    waSource = [
+      fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8'),
+      fs.readFileSync(path.join(ROOT, 'workflows', 'whatsapp-inbound.js'), 'utf-8'),
+    ].join('\n');
   });
 
   it('extracts LPDS ref from message text', () => {
@@ -255,7 +258,7 @@ describe('WhatsApp attribution (whatsapp.js)', () => {
   it('reconstructs UUID from hex ref for prefix matching', () => {
     // The ref is the first 16 hex chars of the UUID, formatted as 8-4-4
     assert.ok(
-      waSource.includes('slice(0,8)') && waSource.includes('slice(8,12)'),
+      /slice\(0,\s*8\)/.test(waSource) && /slice\(8,\s*12\)/.test(waSource),
       'Must reconstruct UUID prefix (8-4-4 format) from hex ref'
     );
   });
@@ -492,8 +495,11 @@ describe('Scale guards for new campaigns', () => {
     assert.ok(script.includes("event_type='whatsapp_lead'"), 'Must query verified inbound leads');
   });
 
-  it('whatsapp.js attribution permits only deterministic methods', () => {
-    const waSource = fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8');
+  it('WhatsApp attribution permits only deterministic methods', () => {
+    const waSource = [
+      fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8'),
+      fs.readFileSync(path.join(ROOT, 'workflows', 'whatsapp-inbound.js'), 'utf-8'),
+    ].join('\n');
     const methods = ['ref', 'session-id-prefix', 'unattributed'];
     for (const method of methods) {
       assert.ok(

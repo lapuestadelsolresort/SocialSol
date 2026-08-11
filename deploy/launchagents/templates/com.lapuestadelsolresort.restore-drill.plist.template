@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lapuestadelsolresort.restore-drill</string>
+  <key>ProgramArguments</key><array><string>__PYTHON_BIN__</string><string>__SOCIALSOL_ROOT__/automation/backup_restore_drill.py</string></array>
+  <key>StartCalendarInterval</key><dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>5</integer><key>Minute</key><integer>30</integer></dict>
+  <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>SOCIALSOL_ROOT</key><string>__SOCIALSOL_ROOT__</string>
+    <key>SOCIALSOL_SECRETS_DIR</key><string>__SOCIALSOL_SECRETS_DIR__</string>
+  </dict>
+  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/restore-drill.log</string>
+  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/restore-drill.error.log</string>
+</dict></plist>

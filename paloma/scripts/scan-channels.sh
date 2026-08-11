@@ -11,17 +11,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PALOMA_DIR="$(dirname "$SCRIPT_DIR")"
 DB="$PALOMA_DIR/data/tasks.db"
+CONFIG="${PALOMA_CONFIG_PATH:-$PALOMA_DIR/config.json}"
 
-# Channels to monitor
-MAINT_CHANNEL="REDACTED_SLACK_CHANNEL"   # #mantenimiento (repairs)
-CLEAN_CHANNEL="REDACTED_SLACK_CHANNEL"   # #limpieza (Daniel's daily tasks)
-TRACKER_CHANNEL="REDACTED_SLACK_CHANNEL" # #paloma-tracker (summaries)
-
-# People
-SERGIO="REDACTED_SLACK_USER"
-DANIEL="REDACTED_SLACK_USER"
-MAYELA="REDACTED_SLACK_USER"
-JASON="REDACTED_SLACK_USER"
+# Stable Slack identities are a runtime authorization/configuration boundary.
+MAINT_CHANNEL="$(jq -er '.channels.maintenance' "$CONFIG")"
+CLEAN_CHANNEL="$(jq -er '.channels.cleaning' "$CONFIG")"
+TRACKER_CHANNEL="$(jq -er '.channels.tracker' "$CONFIG")"
+SERGIO="$(jq -er '.users.sergio' "$CONFIG")"
+DANIEL="$(jq -er '.users.daniel' "$CONFIG")"
+MAYELA="$(jq -er '.users.mayela' "$CONFIG")"
+JASON="$(jq -er '.users.jason' "$CONFIG")"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
@@ -44,15 +43,15 @@ log "Paloma task scan starting..."
 # Send scan trigger to the OpenClaw agent
 openclaw run --prompt "You are Paloma 🕊️, the resort task tracker. Run a task scan now:
 
-1. Read the last 20 messages from channel REDACTED_SLACK_CHANNEL (#mantenimiento)
-2. Read the last 20 messages from channel REDACTED_SLACK_CHANNEL (#limpieza)
+1. Read the last 20 messages from channel $MAINT_CHANNEL (#mantenimiento)
+2. Read the last 20 messages from channel $CLEAN_CHANNEL (#limpieza)
 3. For each message, determine if it's a TASK (something broken, needs repair, cleaning job, or action item)
 4. For genuine tasks: check if source_ts already exists in paloma/data/tasks.db — skip if so
 5. For NEW tasks: insert into the tasks table with description_es (original Spanish), description_en (English translation), source_channel, source_ts, assigned_to (Sergio for maintenance, Daniel for cleaning), reporter info, status
 6. Post a bilingual acknowledgment in the original message thread
-7. Log what you found to #paloma-tracker (REDACTED_SLACK_CHANNEL)
+7. Log what you found to #paloma-tracker ($TRACKER_CHANNEL)
 
-Use sqlite3 ~/paloma/data/tasks.db for database operations.
+Use sqlite3 $DB for database operations. Assign maintenance to $SERGIO and cleaning to $DANIEL; manager=$MAYELA and owner=$JASON.
 All posts must be bilingual (Spanish first, then English).
 Be selective — only log genuine action items, not casual chat." \
   --timeout 120 2>&1 || log "Scan completed (or timed out)"

@@ -1,7 +1,8 @@
 #!/bin/bash
 # QBO Token Keepalive — refreshes the access token weekly so the refresh token never expires (101-day TTL).
 set -euo pipefail
-SECRETS="/opt/socialsol/secrets/quickbooks.json"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SECRETS="${SOCIALSOL_SECRETS_DIR:-$ROOT/secrets}/quickbooks.json"
 CLIENT_ID=$(jq -r '.production.client_id' "$SECRETS")
 CLIENT_SECRET=$(jq -r '.production.client_secret' "$SECRETS")
 REFRESH_TOKEN=$(jq -r '.tokens.refresh_token' "$SECRETS")

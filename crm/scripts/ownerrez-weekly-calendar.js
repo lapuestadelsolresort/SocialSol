@@ -3,7 +3,7 @@
  * ownerrez-weekly-calendar.js — Weekly booking calendar for the ops team
  *
  * Posts a bilingual (English + Spanish) summary of upcoming reservations
- * to #reservations (REDACTED_SLACK_CHANNEL) every Monday morning so the team
+ * to the configured #reservations channel every Monday morning so the team
  * (especially Sergio) can plan maintenance around guest stays.
  *
  * Shows the next 4 weeks of active bookings, blocks, and holds by property.
@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { loadPolicy } = require('../lib/channel-policy');
 const { createApiGet } = require('./lib/ownerrez-api');
 const {
   fetchFullOccupancy,
@@ -27,7 +28,9 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SECRETS_DIR = process.env.SOCIALSOL_SECRETS_DIR || path.join(REPO_ROOT, 'secrets');
 const OPENCLAW = process.env.OPENCLAW_BIN || '/opt/homebrew/bin/openclaw';
 const SLACK_ACCOUNT = process.env.OPENCLAW_SLACK_ACCOUNT || '';
-const CHANNEL = 'REDACTED_SLACK_CHANNEL';
+const CHANNEL = process.env.RESORT_RESERVATIONS_CHANNEL
+  || Object.entries(loadPolicy().channels || {}).find(([, channel]) => channel.name === 'reservations')?.[0]
+  || '';
 
 const SECRETS = JSON.parse(fs.readFileSync(path.join(SECRETS_DIR, 'ownerrez.json'), 'utf8'));
 const TOKEN = SECRETS.access_token;
@@ -161,10 +164,7 @@ async function run() {
 }
 
 function slackSend(message) {
-  if (!SLACK_ACCOUNT) {
-    console.log('[weekly-calendar] No Slack account configured. Message:\n', message);
-    return;
-  }
+  if (!SLACK_ACCOUNT || !CHANNEL) throw new Error('Slack account and RESORT_RESERVATIONS_CHANNEL are required');
   try {
     execFileSync(OPENCLAW, [
       'message', 'send',

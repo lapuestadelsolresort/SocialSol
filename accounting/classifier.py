@@ -27,6 +27,15 @@ class KapitalClassifier:
         self.accounts = self.config['qbo_accounts']['expenses']
         self.vendors = self.config['vendors']
         self.salary_patterns = self.config['salary_patterns']
+        self.receipt_channels = self.config.get('receipt_channels', {})
+
+    def _channel_ids(self, *scopes: str) -> List[str]:
+        """Resolve runtime Slack channel IDs by their non-secret configured scope."""
+        wanted = set(scopes)
+        return [
+            channel_id for channel_id, channel in self.receipt_channels.items()
+            if channel.get('scope') in wanted
+        ]
 
     def classify_all(self, transactions: List[Dict]) -> Dict[str, List[Dict]]:
         """
@@ -383,7 +392,7 @@ class KapitalClassifier:
             result['category_name'] = 'Supplies'
             result['confidence'] = 'guess'
             result['reason'] = 'MercadoLibre purchase — check receipt channels for context'
-            result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL']
+            result['needs_channel_check'] = self._channel_ids('general', 'property')
             return result
 
         # Kapital bank fee
@@ -470,7 +479,7 @@ class KapitalClassifier:
             else:
                 result['note'] = 'Daniel monthly salary — month not specified in concept'
                 result['ask_month_attribution'] = True
-                result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL']
+                result['needs_channel_check'] = self._channel_ids('daniel')
             return result
 
         # Deep cleaning
@@ -506,7 +515,7 @@ class KapitalClassifier:
             result['category_name'] = 'Supplies'
             result['confidence'] = 'guess'
             result['reason'] = f'Daniel reimbursement — ping Mayela in receipt channel: {concept}'
-            result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL']
+            result['needs_channel_check'] = self._channel_ids('daniel', 'groups', 'general')
             result['ping_mayela'] = True
             result['note'] = f'Ask Mayela: what was this Daniel reimbursement for? ${amount:,.0f} MXN, concept: {concept}'
             return result
@@ -516,7 +525,7 @@ class KapitalClassifier:
         result['category_name'] = 'Supplies'
         result['confidence'] = 'guess'
         result['reason'] = f'Daniel transfer with unclear purpose: {concept} — ping Mayela'
-        result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL']
+        result['needs_channel_check'] = self._channel_ids('daniel', 'groups')
         result['ping_mayela'] = True
         result['note'] = f'Ask Mayela: what is this Daniel transfer for? ${amount:,.0f} MXN, concept: {concept}'
         return result
@@ -545,7 +554,7 @@ class KapitalClassifier:
             result['category_name'] = 'Maintenance'
             result['confidence'] = 'auto'
             result['reason'] = f'Sergio petty cash reimbursement (${amount:,.0f}) — maintenance materials'
-            result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL']
+            result['needs_channel_check'] = self._channel_ids('sergio', 'sergio_mayela')
             result['note'] = f'Sergio petty cash ${amount:,.0f} — maintenance materials. If unclear, ping Mayela in receipt channel.'
             return result
 
@@ -563,7 +572,7 @@ class KapitalClassifier:
         result['category_name'] = 'Maintenance'
         result['confidence'] = 'guess'
         result['reason'] = f'Sergio transfer — assumed maintenance: {concept}'
-        result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL']
+        result['needs_channel_check'] = self._channel_ids('sergio', 'temo')
         return result
 
     def _classify_mayela(self, result, concept, amount):
@@ -591,7 +600,7 @@ class KapitalClassifier:
             else:
                 result['note'] = f'Mayela monthly salary — month not specified (concept: {concept})'
                 result['ask_month_attribution'] = True
-                result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL']
+                result['needs_channel_check'] = self._channel_ids('mayela')
             return result
 
         # Other Mayela transfers — likely expenses
@@ -599,7 +608,7 @@ class KapitalClassifier:
         result['category_name'] = 'Supplies'
         result['confidence'] = 'guess'
         result['reason'] = f'Mayela non-salary transfer (${amount:,.0f}) — check receipts: {concept}'
-        result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL']
+        result['needs_channel_check'] = self._channel_ids('mayela', 'sergio_mayela')
         return result
 
     def _classify_susy(self, result, concept, amount):
@@ -630,21 +639,21 @@ class KapitalClassifier:
         result['category_name'] = 'Cleaning Services'
         result['confidence'] = 'guess'
         result['reason'] = f'Susy transfer — assumed cleaning: {concept}'
-        result['needs_channel_check'] = ['REDACTED_SLACK_CHANNEL']
+        result['needs_channel_check'] = self._channel_ids('cleaning')
         return result
 
     def _suggest_channels(self, payee: str, concept: str) -> List[str]:
         """Suggest receipt channels to check for unknown transactions."""
-        channels = ['REDACTED_SLACK_CHANNEL']  # Always include general receipts
+        channels = self._channel_ids('general')
 
         if 'DANIEL' in payee:
-            channels.extend(['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL'])
+            channels.extend(self._channel_ids('daniel', 'groups'))
         elif 'SERGIO' in payee:
-            channels.extend(['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL'])
+            channels.extend(self._channel_ids('sergio', 'temo', 'sergio_mayela'))
         elif 'MAYELA' in payee:
-            channels.extend(['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL'])
+            channels.extend(self._channel_ids('mayela', 'sergio_mayela'))
         else:
-            channels.extend(['REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL', 'REDACTED_SLACK_CHANNEL'])
+            channels.extend(self._channel_ids('property', 'misc', 'new'))
 
         return channels
 

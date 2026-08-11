@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lapuestadelsolresort.telmex-check</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>__SOCIALSOL_ROOT__/scripts/telmex-check.sh</string></array>
+  <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
+  <key>StartCalendarInterval</key><dict><key>Day</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key><string>__OPENCLAW_SLACK_ACCOUNT__</string>
+  </dict>
+  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/telmex-check.log</string>
+  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/telmex-check.err</string>
+</dict></plist>

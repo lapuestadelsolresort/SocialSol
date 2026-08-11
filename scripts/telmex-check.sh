@@ -6,8 +6,10 @@
 set -euo pipefail
 
 TELMEX_URL="https://transactconfig2.telmex.com/OP/iniCM?t=3276882655"
-CHANNEL="REDACTED_SLACK_CHANNEL"  # #utility-payments
-MAYELA_ID="REDACTED_SLACK_USER"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PALOMA_CONFIG="${PALOMA_CONFIG_PATH:-$ROOT/paloma/config.json}"
+CHANNEL="${RESORT_UTILITY_PAYMENTS_CHANNEL:-$(jq -er '.channels.utility_payments' "$PALOMA_CONFIG")}"
+MAYELA_ID="${MAYELA_SLACK_USER_ID:-$(jq -er '.users.mayela' "$PALOMA_CONFIG")}"
 
 # Fetch the payment page
 PAGE=$(curl -sL --max-time 30 "$TELMEX_URL" 2>/dev/null || echo "FETCH_ERROR")
@@ -33,7 +35,7 @@ echo "$(date): Telmex balance detected: \$$BALANCE, due: $DUE_DATE"
 echo "Posting to #utility-payments..."
 
 # Use openclaw CLI to send the notification
-openclaw send --account ig-drafts --channel slack --target "channel:$CHANNEL" \
+openclaw send --account "${OPENCLAW_SLACK_ACCOUNT:?OPENCLAW_SLACK_ACCOUNT is required}" --channel slack --target "channel:$CHANNEL" \
   "☎️ *Telmex Payment Due*
 
 <@$MAYELA_ID> — the monthly Telmex bill is ready:

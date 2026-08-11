@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="${SOCIALSOL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 for directory in \
+  "$ROOT/accounting/inbox" \
   "$ROOT/backups/resort-crm" \
   "$ROOT/crm/data" \
   "$ROOT/crm/logs" \

@@ -1,0 +1,15 @@
+{
+  "channels": {
+    "maintenance": "replace-with-slack-channel-id",
+    "cleaning": "replace-with-slack-channel-id",
+    "tracker": "replace-with-slack-channel-id",
+    "utility_payments": "replace-with-slack-channel-id",
+    "tracking_qc": "replace-with-slack-channel-id"
+  },
+  "users": {
+    "sergio": "replace-with-slack-user-id",
+    "daniel": "replace-with-slack-user-id",
+    "mayela": "replace-with-slack-user-id",
+    "jason": "replace-with-slack-user-id"
+  }
+}

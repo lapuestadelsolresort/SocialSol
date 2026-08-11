@@ -4,6 +4,10 @@
  * http://localhost:3456
  */
 
+// Load the repository runtime environment before any integration paths or
+// control-plane credentials are resolved.
+require('../lib/runtime-paths');
+
 const express = require('express');
 const createDB = require('@databases/sqlite');
 const path = require('path');
@@ -125,6 +129,7 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const { sql } = require('@databases/sqlite');
 const { ensureSchemaAsync: ensureSquarespaceSchema } = require('./lib/squarespace-schema');
+const { ensureSchemaAsync: ensureWorkflowSchema } = require('./lib/workflow-schema');
 
 // ─── Database Setup (async init) ─────────────────────────────────────────────
 let db;
@@ -328,6 +333,9 @@ async function initDB() {
   `);
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_meta_msg_received  ON meta_messages(received_at)`);
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_meta_msg_sender    ON meta_messages(sender_id)`);
+
+  // Durable orchestration state and additive WhatsApp delivery columns.
+  await ensureWorkflowSchema(db, sql);
 
   // ─── Landing-page variant optimizer (WhatsApp-click funnel) ────────────────
   // Ported from GoldRoute, adapted: tenancy is page_slug (weddings|fitness|
@@ -2535,6 +2543,10 @@ app.use('/api/squarespace', buildSquarespaceRouter(() => db));
 const { buildRouter: buildWhatsAppRouter } = require('./routes/whatsapp');
 app.use('/webhook/twilio-whatsapp', buildWhatsAppRouter(() => db));
 app.use('/api/whatsapp', buildWhatsAppRouter(() => db));
+
+// ─── Durable workflow control plane (local-only) ──────────────────────────────
+const { buildRouter: buildWorkflowsRouter } = require('./routes/workflows');
+app.use('/api/workflows', buildWorkflowsRouter(() => db));
 
 // ─── QuickBooks OAuth ──────────────────────────────────────────────────────────
 const { buildRouter: buildQuickBooksRouter } = require('./routes/quickbooks');
