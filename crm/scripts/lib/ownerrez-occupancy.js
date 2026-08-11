@@ -78,6 +78,53 @@ async function fetchFullOccupancy(apiGet, {
   return selectFullOccupancy(allBookings, { start, end });
 }
 
+/**
+ * Download the complete OwnerRez booking/block inventory without applying a
+ * date or contact filter. Financial outlooks need to see unpriced bookings and
+ * guestless holds as exceptions instead of silently dropping them.
+ */
+async function fetchAllBookings(apiGet, {
+  propertyIds = DEFAULT_PROPERTY_IDS,
+  pageSize = 100,
+  pageDelayMs = 300,
+} = {}) {
+  if (typeof apiGet !== 'function') throw new Error('apiGet must be a function');
+  const allBookings = [];
+  let offset = 0;
+
+  while (true) {
+    const result = await apiGet('bookings', {
+      property_ids: propertyIds,
+      limit: String(pageSize),
+      offset: String(offset),
+    });
+    const items = result.items || [];
+    allBookings.push(...items);
+    if (items.length < pageSize) break;
+    offset += pageSize;
+    if (pageDelayMs > 0) await new Promise(resolve => setTimeout(resolve, pageDelayMs));
+  }
+
+  return allBookings;
+}
+
+function selectFutureOccupancy(bookings, { asOf, through = null }) {
+  validateDate(asOf, 'asOf');
+  if (through) {
+    validateDate(through, 'through');
+    if (through < asOf) throw new Error('through must be on or after asOf');
+  }
+  return (bookings || [])
+    .filter(booking => booking?.status === 'active'
+      && typeof booking.arrival === 'string'
+      && typeof booking.departure === 'string'
+      && booking.departure >= asOf
+      && (!through || booking.arrival <= through))
+    .sort((left, right) => left.arrival.localeCompare(right.arrival)
+      || left.departure.localeCompare(right.departure)
+      || String(left.id || '').localeCompare(String(right.id || '')));
+}
+
 function isBlock(booking) {
   if (typeof booking?.is_block === 'boolean') return booking.is_block;
   return Boolean(booking?.type && booking.type !== 'booking');
@@ -107,10 +154,12 @@ function reservationDisplayName(booking, guestNames = {}) {
 
 module.exports = {
   DEFAULT_PROPERTY_IDS,
+  fetchAllBookings,
   fetchFullOccupancy,
   humanizeType,
   isBlock,
   reservationDisplayName,
   selectFullOccupancy,
+  selectFutureOccupancy,
   validateDate,
 };

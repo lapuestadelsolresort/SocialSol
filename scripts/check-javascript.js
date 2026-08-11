@@ -6,7 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
-const roots = ['crm', 'prospector', 'regina', 'sarah-coach', 'scripts'];
+const roots = ['crm', 'prospector', 'regina', 'sarah-coach', 'scripts', 'openclaw-plugins'];
 const ignored = new Set(['node_modules', 'dist', 'cache', 'runs']);
 const failures = [];
 

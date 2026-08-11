@@ -158,11 +158,72 @@ function extractTitleDates(order) {
     };
   }
 
+  // Squarespace payment links sometimes omit the year (for example,
+  // "September 25th-October 3rd"). Infer the next occurrence relative to the
+  // order creation date. This is deterministic and stays conservative: the
+  // inferred date is never before the payment/order date.
+  const reference = new Date(order.createdOn || order.created_on || '');
+  const referenceDate = Number.isNaN(reference.valueOf()) ? null : reference.toISOString().slice(0, 10);
+  const inferredYear = (startMonth, startDay) => {
+    if (!referenceDate) return null;
+    let year = Number(referenceDate.slice(0, 4));
+    const candidate = isoDate(year, startMonth, startDay);
+    if (candidate && candidate < referenceDate) year += 1;
+    return year;
+  };
+
+  const crossMonthNoYear = new RegExp(`${month}\\s+(\\d{1,2})${suffix}\\s*(?:to|through|[-–—])\\s*${month}\\s+(\\d{1,2})${suffix}`, 'i');
+  match = source.match(crossMonthNoYear);
+  if (match) {
+    const startMonth = MONTHS[match[1].toLowerCase()];
+    const endMonth = MONTHS[match[3].toLowerCase()];
+    const startYear = inferredYear(startMonth, Number(match[2]));
+    if (startYear) {
+      return {
+        startDate: isoDate(startYear, startMonth, Number(match[2])),
+        endDate: isoDate(startYear + (endMonth < startMonth ? 1 : 0), endMonth, Number(match[4])),
+      };
+    }
+  }
+
+  const sameMonthNoYear = new RegExp(`${month}\\s+(\\d{1,2})${suffix}\\s*(?:to|through|[-–—])\\s*(\\d{1,2})${suffix}`, 'i');
+  match = source.match(sameMonthNoYear);
+  if (match) {
+    const monthNumber = MONTHS[match[1].toLowerCase()];
+    const year = inferredYear(monthNumber, Number(match[2]));
+    if (year) {
+      return {
+        startDate: isoDate(year, monthNumber, Number(match[2])),
+        endDate: isoDate(year, monthNumber, Number(match[3])),
+      };
+    }
+  }
+
   const complete = new RegExp(`${month}\\s+(\\d{1,2})${suffix}\\s*,?\\s*(20\\d{2})`, 'gi');
   const named = [...source.matchAll(complete)].map(item =>
     isoDate(Number(item[3]), MONTHS[item[1].toLowerCase()], Number(item[2]))
   ).filter(Boolean);
   return { startDate: named[0] || null, endDate: named[1] || null };
+}
+
+function extractTitleProperty(order) {
+  const source = (order.lineItems || [])
+    .map(item => item.title || item.productName || '')
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase();
+  if (!source) return null;
+  const resort = /puesta del sol|full resort|whole resort|resort buyout|buyout of/.test(source);
+  const casa = /casa mirador/.test(source);
+  if (resort && casa) return 'Puesta del Sol Resort + Casa Mirador';
+  if (casa) return 'Casa Mirador';
+  if (/villa (?:crab|cangrejo)/.test(source)) return 'Villa Crab';
+  if (/villa (?:dolphin|delf[ií]n)/.test(source)) return 'Villa Dolphin';
+  if (/villa (?:whale|ballena)/.test(source)) return 'Villa Whale';
+  if (/villa (?:pearl|perla)/.test(source)) return 'Villa Pearl';
+  if (/villa (?:turtle|tortuga)/.test(source)) return 'Villa Turtle';
+  if (/villa (?:seahorse|caballito)/.test(source)) return 'Villa Seahorse';
+  return resort ? 'Puesta del Sol Resort' : null;
 }
 
 function extractBookingFields(order) {
@@ -180,6 +241,7 @@ function extractBookingFields(order) {
   const titleDates = extractTitleDates(order);
   result.startDate ||= titleDates.startDate;
   result.endDate ||= titleDates.endDate;
+  result.propertyHint ||= extractTitleProperty(order);
   return result;
 }
 
@@ -387,16 +449,46 @@ function linkOwnerRez(db, order, contact, config = {}, ownerrezBooking = null) {
       (order_id, ownerrez_booking_id, contact_id, status, match_method, confidence, matched_at)
     VALUES (?, ?, ?, ?, ?, ?, CASE WHEN ?='matched' THEN datetime('now') ELSE NULL END)
     ON CONFLICT(order_id) DO UPDATE SET
-      ownerrez_booking_id=COALESCE(excluded.ownerrez_booking_id, squarespace_order_ownerrez_links.ownerrez_booking_id),
+      ownerrez_booking_id=CASE
+        WHEN squarespace_order_ownerrez_links.status='matched'
+         AND squarespace_order_ownerrez_links.match_method='owner_cash_flow_exact_dates_property_and_name'
+         AND excluded.status!='matched'
+        THEN squarespace_order_ownerrez_links.ownerrez_booking_id
+        ELSE COALESCE(excluded.ownerrez_booking_id, squarespace_order_ownerrez_links.ownerrez_booking_id)
+      END,
       contact_id=excluded.contact_id,
-      status=excluded.status,
-      match_method=excluded.match_method,
-      confidence=excluded.confidence,
-      matched_at=CASE WHEN excluded.status='matched'
+      status=CASE
+        WHEN squarespace_order_ownerrez_links.status='matched'
+         AND squarespace_order_ownerrez_links.match_method='owner_cash_flow_exact_dates_property_and_name'
+         AND excluded.status!='matched'
+        THEN squarespace_order_ownerrez_links.status ELSE excluded.status END,
+      match_method=CASE
+        WHEN squarespace_order_ownerrez_links.status='matched'
+         AND squarespace_order_ownerrez_links.match_method='owner_cash_flow_exact_dates_property_and_name'
+         AND excluded.status!='matched'
+        THEN squarespace_order_ownerrez_links.match_method ELSE excluded.match_method END,
+      confidence=CASE
+        WHEN squarespace_order_ownerrez_links.status='matched'
+         AND squarespace_order_ownerrez_links.match_method='owner_cash_flow_exact_dates_property_and_name'
+         AND excluded.status!='matched'
+        THEN squarespace_order_ownerrez_links.confidence ELSE excluded.confidence END,
+      matched_at=CASE
+                      WHEN squarespace_order_ownerrez_links.status='matched'
+                       AND squarespace_order_ownerrez_links.match_method='owner_cash_flow_exact_dates_property_and_name'
+                       AND excluded.status!='matched'
+                      THEN squarespace_order_ownerrez_links.matched_at
+                      WHEN excluded.status='matched'
                       THEN COALESCE(squarespace_order_ownerrez_links.matched_at, excluded.matched_at)
                       ELSE NULL END
   `).run(order.id, candidateId, contact.id, status, method, confidence, status);
-  return { ownerrezBookingId: candidateId, status, method, confidence };
+  const persisted = db.prepare(`SELECT ownerrez_booking_id, status, match_method, confidence
+    FROM squarespace_order_ownerrez_links WHERE order_id=?`).get(order.id);
+  return {
+    ownerrezBookingId: persisted?.ownerrez_booking_id || null,
+    status: persisted?.status || status,
+    method: persisted?.match_method || method,
+    confidence: persisted?.confidence ?? confidence,
+  };
 }
 
 function upsertOrder(db, order, {
@@ -600,6 +692,7 @@ module.exports = {
   ensureCrmContact,
   extractBookingFields,
   extractTitleDates,
+  extractTitleProperty,
   moneyCurrency,
   moneyValue,
   normalizeEmail,

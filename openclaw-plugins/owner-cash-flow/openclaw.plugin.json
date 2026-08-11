@@ -1,0 +1,33 @@
+{
+  "id": "owner-cash-flow",
+  "name": "Owner Cash Flow",
+  "description": "Returns the canonical OwnerRez and Squarespace cash-flow report without model paraphrasing.",
+  "version": "1.0.0",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "agentIds": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minItems": 1
+      },
+      "scriptRelativePath": {
+        "type": "string",
+        "default": "crm/scripts/owner-cash-flow.js"
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 60000,
+        "default": 30000
+      }
+    }
+  }
+}

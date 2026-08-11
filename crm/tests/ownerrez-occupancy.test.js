@@ -3,10 +3,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  fetchAllBookings,
   fetchFullOccupancy,
   isBlock,
   reservationDisplayName,
   selectFullOccupancy,
+  selectFutureOccupancy,
 } = require('../scripts/lib/ownerrez-occupancy');
 
 const window = { start: '2026-08-10', end: '2026-09-07' };
@@ -79,4 +81,23 @@ test('full occupancy rejects invalid or reversed windows', () => {
     () => selectFullOccupancy([], { start: '2026-09-01', end: '2026-08-01' }),
     /end must be on or after start/
   );
+});
+
+test('future inventory includes active unpriced bookings and blocks but excludes linked history', async () => {
+  const pages = [
+    [
+      { id: 1, type: 'booking', status: 'active', arrival: '2027-01-01', departure: '2027-01-04' },
+      { id: 2, type: 'block', status: 'active', arrival: '2026-09-01', departure: '2026-09-02' },
+    ],
+    [{ id: 3, type: 'booking', status: 'canceled', arrival: '2027-02-01', departure: '2027-02-02' }],
+  ];
+  const calls = [];
+  const apiGet = async (endpoint, params) => {
+    calls.push({ endpoint, params });
+    return { items: pages.shift() };
+  };
+  const all = await fetchAllBookings(apiGet, { propertyIds: '1', pageSize: 2, pageDelayMs: 0 });
+  assert.deepEqual(all.map(item => item.id), [1, 2, 3]);
+  assert.deepEqual(selectFutureOccupancy(all, { asOf: '2026-08-10' }).map(item => item.id), [2, 1]);
+  assert.equal(calls.some(call => Object.hasOwn(call.params, 'since_utc')), false);
 });

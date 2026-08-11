@@ -1,0 +1,12 @@
+{
+  "name": "@lapuestadelsolresort/openclaw-owner-cash-flow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic owner cash-flow replies for the resort OpenClaw agent",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  }
+}
