@@ -339,6 +339,11 @@ class QBOClient:
         )
         return result.get('JournalEntry', result)
 
+    def create_purchase_payload(self, purchase: Dict, request_id: str = None) -> Dict:
+        """Create a fully specified Purchase with a stable provider request id."""
+        result = self._api_call("POST", "purchase", purchase, request_id=request_id)
+        return result.get('Purchase', result)
+
     def read_entity(self, entity_type: str, entity_id: str) -> Dict:
         """Read a just-written entity back from QBO."""
         result = self._api_call("GET", f"{entity_type}/{entity_id}")

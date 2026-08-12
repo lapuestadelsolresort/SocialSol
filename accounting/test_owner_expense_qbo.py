@@ -9,10 +9,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 from owner_expense_qbo import (  # noqa: E402
     amount_in_home_currency,
     build_journal_entry,
+    build_repayment_purchase,
+    matching_repayment_purchases,
     request_id_for_receipt,
     validate_account,
     verify_accounts,
     verify_journal_entry,
+    verify_repayment_purchase,
 )
 
 
@@ -78,6 +81,41 @@ class OwnerExpenseQBOTests(unittest.TestCase):
                 amount_usd=252.69, expense_account_id='5100', liability_account_id='2100',
             )
 
+    def test_repayment_purchase_debits_liability_and_credits_bank(self):
+        purchase = build_repayment_purchase(
+            receipt_id='receipt-2', txn_date=date(2026, 8, 6), amount=4700,
+            currency='MXN', amount_usd=272.78, fx_rate=17.23,
+            liability_account_id='2100', bank_account_id='1100',
+            owner_name='Test Owner', vendor='AC Vendor',
+            description='Indirect repayment for owner work',
+        )
+        self.assertEqual(purchase['AccountRef'], {'value': '1100'})
+        self.assertEqual(purchase['Line'][0]['AccountBasedExpenseLineDetail'], {
+            'AccountRef': {'value': '2100'},
+        })
+        self.assertIn('Reduces amount due to Test Owner', purchase['PrivateNote'])
+        purchase['Id'] = '9002'
+        verified = verify_repayment_purchase(
+            purchase, qbo_id='9002', receipt_id='receipt-2',
+            txn_date=date(2026, 8, 6), amount_usd=272.78,
+            liability_account_id='2100', bank_account_id='1100',
+        )
+        self.assertEqual(verified['qbo_entity_type'], 'Purchase')
+
+    def test_repayment_duplicate_scan_matches_exact_bank_date_and_amount(self):
+        class QueryClient:
+            def query(self, _query):
+                return {'QueryResponse': {'Purchase': [
+                    {'Id': 'match', 'AccountRef': {'value': '1100'}, 'TotalAmt': 272.78},
+                    {'Id': 'other-bank', 'AccountRef': {'value': '9999'}, 'TotalAmt': 272.78},
+                    {'Id': 'other-amount', 'AccountRef': {'value': '1100'}, 'TotalAmt': 300},
+                ]}}
+        matches = matching_repayment_purchases(
+            QueryClient(), txn_date=date(2026, 8, 6), amount_usd=272.78,
+            bank_account_id='1100',
+        )
+        self.assertEqual([item['Id'] for item in matches], ['match'])
+
     def test_preflight_requires_exact_active_other_current_liability(self):
         client = FakeClient({
             '2100': {
@@ -87,13 +125,18 @@ class OwnerExpenseQBOTests(unittest.TestCase):
             '5100': {
                 'Id': '5100', 'Name': 'Maintenance', 'AccountType': 'Expense', 'Active': True,
             },
+            '1100': {
+                'Id': '1100', 'Name': 'Operating Bank', 'AccountType': 'Bank', 'Active': True,
+            },
         })
         accounts = verify_accounts(
             client, liability_account_id='2100',
             liability_account_name='Due to Test Owner (Net)',
             expense_account_id='5100',
+            bank_account_id='1100', bank_account_name='Operating Bank',
         )
         self.assertEqual(accounts['liability']['account_type'], 'Other Current Liability')
+        self.assertEqual(accounts['bank']['account_type'], 'Bank')
         with self.assertRaisesRegex(ValueError, 'name mismatch'):
             validate_account(
                 client.read_account('2100'), expected_id='2100',

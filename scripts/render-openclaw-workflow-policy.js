@@ -41,7 +41,7 @@ function receiptPrompt(name) {
 }
 
 function ownerExpensePrompt(name) {
-  return `This is the scoped ${name} owner-expense channel. Receipt and invoice uploads are captured automatically, acknowledged in-thread, and posted only through the fixed owner-liability workflow after extraction or explicit !receipt confirmation. Do not invoke a generic QBO write or infer that an entry posted without a workflow and QBO readback id.`;
+  return `This is the scoped ${name} owner-ledger channel. The normal case is an owner-paid business expense that increases the configured liability. Rare business-paid reimbursements or payments on the owner's behalf reduce that liability and always require the exact !receipt confirm repayment command emitted in-thread. Uploads are captured automatically and posted only through the fixed workflow after extraction or explicit confirmation. Do not invoke a generic QBO write or infer that an entry posted without a workflow and QBO readback id.`;
 }
 
 function noAuthorityPrompt(name) {

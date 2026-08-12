@@ -16,7 +16,7 @@ function extractionSchema(categoryKeys) {
     additionalProperties: false,
     required: [
       'document_type', 'vendor', 'transaction_date', 'currency', 'amount',
-      'description', 'category_key', 'is_business_expense', 'paid_by_owner',
+      'description', 'transaction_kind', 'category_key', 'is_business_expense', 'paid_by_owner',
       'confidence', 'review_reason',
     ],
     properties: {
@@ -26,6 +26,7 @@ function extractionSchema(categoryKeys) {
       currency: { type: ['string', 'null'], enum: ['MXN', 'USD', null] },
       amount: { type: ['number', 'null'] },
       description: { type: ['string', 'null'] },
+      transaction_kind: { type: 'string', enum: ['owner_paid_expense', 'owner_repayment', 'unclear'] },
       category_key: { type: ['string', 'null'], enum: [...categoryKeys, null] },
       is_business_expense: { type: ['boolean', 'null'] },
       paid_by_owner: { type: ['boolean', 'null'] },
@@ -38,13 +39,16 @@ function extractionSchema(categoryKeys) {
 function buildInstructions({ ownerName, liabilityAccountName, accounts }) {
   const choices = accounts.map(account => `${account.key}: ${account.name}`).join('\n');
   return [
-    'Extract one owner-paid business expense from the Slack text and attached receipt or invoice.',
-    `The dedicated channel normally means ${ownerName} paid a resort business expense personally.`,
-    'Set paid_by_owner=false if the text or document instead says the business paid for the owner, records a reimbursement, or otherwise contradicts that default.',
-    'Set is_business_expense=false for personal purchases. Use null when a fact cannot be determined.',
+    'Classify and extract one owner-ledger transaction from the Slack text and attached receipt, invoice, or payment confirmation.',
+    `The normal case is owner_paid_expense: ${ownerName} paid a resort business expense personally, which increases what the business owes the owner.`,
+    `Use owner_repayment only when the Slack message explicitly says the business paid ${ownerName}, reimbursed ${ownerName}, or paid a third party on ${ownerName}'s personal behalf and the amount should reduce the owner's balance.`,
+    'Use unclear whenever payment direction is not explicit. A bank transfer from a business account alone does not prove an owner repayment.',
+    'For owner_paid_expense, set paid_by_owner=true, is_business_expense=true, and choose an expense category.',
+    'For owner_repayment, set paid_by_owner=false and category_key=null because the debit is the owner liability account, not an expense.',
+    'Set is_business_expense=false only for a personal purchase. Use null when that fact is not relevant or cannot be determined.',
     'The amount must be the transaction total in the original currency, never a bank balance or running total.',
     'Use the transaction/receipt date, not the upload date, and use YYYY-MM-DD.',
-    `The balancing QBO account will be ${liabilityAccountName}; choose only the debit expense category below.`,
+    `The owner ledger account is ${liabilityAccountName}. For owner_paid_expense choose only the debit expense category below.`,
     'Choose the narrowest supported category. If classification is genuinely ambiguous, use null and explain why.',
     'Do not invent missing fields. Lower confidence when the document is unreadable, fields conflict, or payment provenance is unclear.',
     '',
@@ -83,6 +87,12 @@ function validateExtraction(value, categoryKeys) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('receipt extraction was not an object');
   if (!['receipt', 'invoice', 'payment_confirmation', 'other'].includes(value.document_type)) {
     throw new Error('receipt extraction returned an invalid document type');
+  }
+  if (!['owner_paid_expense', 'owner_repayment', 'unclear'].includes(value.transaction_kind)) {
+    throw new Error('receipt extraction returned an invalid transaction kind');
+  }
+  if (value.transaction_kind === 'owner_repayment' && value.category_key !== null) {
+    throw new Error('owner repayment extraction must not select an expense category');
   }
   if (value.category_key !== null && !categoryKeys.includes(value.category_key)) {
     throw new Error('receipt extraction returned an unknown expense category');

@@ -34,7 +34,8 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   assert.equal(patch.plugins.entries['resort-workflows'].config.shadowMode, true);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.receiptChannelIds, ['CRECEIPT1', 'COWNER1']);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.ownerExpenseChannelIds, ['COWNER1']);
-  assert.match(account.channels.COWNER1.systemPrompt, /owner-expense channel/);
+  assert.match(account.channels.COWNER1.systemPrompt, /owner-ledger channel/);
+  assert.match(account.channels.COWNER1.systemPrompt, /confirm repayment/);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.socialChannelIds, ['CSOCIAL1']);
   assert.deepEqual(account.channels.CSOCIAL1.tools.allow, ['resort_workflow']);
   assert.equal(patch.plugins.allow.includes('resort-workflows'), true);

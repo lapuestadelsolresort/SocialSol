@@ -19,11 +19,15 @@ function validateOwnerExpenseProfile(channelId, profile) {
     throw new Error(`owner expense profile is invalid for ${channelId}`);
   }
   const liability = profile.liability_account;
+  const repaymentBank = profile.repayment_bank_account;
   if (
     typeof profile.owner_name !== 'string' || !profile.owner_name.trim()
     || !liability || typeof liability !== 'object'
     || typeof liability.id !== 'string' || !liability.id.trim()
     || typeof liability.name !== 'string' || !liability.name.trim()
+    || !repaymentBank || typeof repaymentBank !== 'object'
+    || typeof repaymentBank.id !== 'string' || !repaymentBank.id.trim()
+    || typeof repaymentBank.name !== 'string' || !repaymentBank.name.trim()
   ) {
     throw new Error(`owner expense profile is incomplete for ${channelId}`);
   }
@@ -38,6 +42,11 @@ function validateOwnerExpenseProfile(channelId, profile) {
       ...liability,
       id: liability.id.trim(),
       name: liability.name.trim(),
+    },
+    repayment_bank_account: {
+      ...repaymentBank,
+      id: repaymentBank.id.trim(),
+      name: repaymentBank.name.trim(),
     },
     auto_post_min_confidence: threshold,
   };

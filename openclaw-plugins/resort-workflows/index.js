@@ -415,16 +415,30 @@ export function parseManualReviewCommand(text) {
 export function parseReceiptConfirmCommand(text) {
   const body = String(text || '').trim();
   if (!/^!receipt(?:\s|$)/i.test(body)) return null;
-  const match = body.match(/^!receipt\s+confirm\s+([0-9a-f-]{36})\s+(\d{4}-\d{2}-\d{2})\s+(MXN|USD)\s+(\d+(?:\.\d+)?)\s+([a-z0-9_]{1,80})\s*\|\s*([^|]{1,300})(?:\s*\|\s*([\s\S]{1,1000}))?\s*$/i);
-  if (!match) return { error: 'invalid_receipt_confirmation' };
+  const expense = body.match(/^!receipt\s+confirm\s+(?:expense\s+)?([0-9a-f-]{36})\s+(\d{4}-\d{2}-\d{2})\s+(MXN|USD)\s+(\d+(?:\.\d+)?)\s+([a-z0-9_]{1,80})\s*\|\s*([^|]{1,300})(?:\s*\|\s*([\s\S]{1,1000}))?\s*$/i);
+  if (expense) {
+    return {
+      transactionKind: 'owner_paid_expense',
+      receiptId: expense[1].toLowerCase(),
+      transactionDate: expense[2],
+      currency: expense[3].toUpperCase(),
+      amount: Number(expense[4]),
+      categoryKey: expense[5].toLowerCase(),
+      vendor: expense[6].trim(),
+      description: String(expense[7] || '').trim(),
+    };
+  }
+  const repayment = body.match(/^!receipt\s+confirm\s+repayment\s+([0-9a-f-]{36})\s+(\d{4}-\d{2}-\d{2})\s+(MXN|USD)\s+(\d+(?:\.\d+)?)\s*\|\s*([^|]{1,300})(?:\s*\|\s*([\s\S]{1,1000}))?\s*$/i);
+  if (!repayment) return { error: 'invalid_receipt_confirmation' };
   return {
-    receiptId: match[1].toLowerCase(),
-    transactionDate: match[2],
-    currency: match[3].toUpperCase(),
-    amount: Number(match[4]),
-    categoryKey: match[5].toLowerCase(),
-    vendor: match[6].trim(),
-    description: String(match[7] || '').trim(),
+    transactionKind: 'owner_repayment',
+    receiptId: repayment[1].toLowerCase(),
+    transactionDate: repayment[2],
+    currency: repayment[3].toUpperCase(),
+    amount: Number(repayment[4]),
+    categoryKey: null,
+    vendor: repayment[5].trim(),
+    description: String(repayment[6] || '').trim(),
   };
 }
 
