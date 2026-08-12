@@ -1,12 +1,18 @@
 import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 
 from workflow_health import (
     alert_configuration_missing,
+    checkout_integrity,
     expected_graph_agents,
     graph_agent_integrity,
     hard_failure_count,
+    incident_alert_active,
     inspect,
+    notify_incident_once,
+    set_incident_alert_active,
 )
 
 
@@ -51,6 +57,62 @@ class WorkflowHealthTests(unittest.TestCase):
     def test_operator_check_suppresses_only_the_missing_alert_config_failure(self):
         self.assertEqual(alert_configuration_missing(False, "", ""), 1)
         self.assertEqual(alert_configuration_missing(True, "", ""), 0)
+
+    def test_serving_checkout_must_remain_clean_main(self):
+        class Result:
+            def __init__(self, stdout):
+                self.stdout = stdout
+
+        def dirty_feature_run(command, **_kwargs):
+            if "--show-current" in command:
+                return Result("codex/unfinished-change\n")
+            return Result(" M automation/workflow_health.py\n")
+
+        metrics = checkout_integrity(run=dirty_feature_run)
+        self.assertEqual(metrics["runtime_git_wrong_branch"], 1)
+        self.assertEqual(metrics["runtime_git_dirty"], 1)
+        self.assertEqual(metrics["runtime_git_check_error"], 0)
+        self.assertGreater(hard_failure_count(metrics), 0)
+
+    def test_clean_main_checkout_is_healthy(self):
+        class Result:
+            def __init__(self, stdout):
+                self.stdout = stdout
+
+        def clean_main_run(command, **_kwargs):
+            return Result("main\n" if "--show-current" in command else "")
+
+        metrics = checkout_integrity(run=clean_main_run)
+        self.assertEqual(metrics, {
+            "runtime_git_wrong_branch": 0,
+            "runtime_git_dirty": 0,
+            "runtime_git_check_error": 0,
+        })
+
+    def test_incident_alert_state_suppresses_repeats_and_resets_after_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "workflow-health-alert-state.json"
+            messages = []
+
+            def capture(message):
+                messages.append(message)
+                return True
+
+            self.assertFalse(incident_alert_active(state_path))
+            self.assertTrue(notify_incident_once(
+                "failure", capture, state_path
+            ))
+            self.assertFalse(notify_incident_once(
+                "same failure", capture, state_path
+            ))
+            self.assertEqual(messages, ["failure"])
+            self.assertTrue(incident_alert_active(state_path))
+            set_incident_alert_active(False, state_path)
+            self.assertFalse(incident_alert_active(state_path))
+            self.assertTrue(notify_incident_once(
+                "future failure", capture, state_path
+            ))
+            self.assertEqual(messages, ["failure", "future failure"])
 
     def test_provider_acceptance_is_terminal_for_meta(self):
         con = self.database()
