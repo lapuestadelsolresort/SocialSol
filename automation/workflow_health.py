@@ -17,6 +17,38 @@ OPENCLAW = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
 SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "")
 ALERT_CHANNEL = os.environ.get("RESORT_OPS_ALERTS_CHANNEL", "")
 JOB_NAME = "resort-workflow-health"
+POLICY_PATH = Path(os.environ.get("RESORT_WORKFLOW_POLICY_PATH", ROOT / "workflow" / "policy.json"))
+
+GRAPH_AGENTS = {
+    "accounting.classify": "com.lapuestadelsolresort.graph-accounting-inbox",
+    "qbo.write": "com.lapuestadelsolresort.graph-accounting-inbox",
+    "receipt.reconcile": "com.lapuestadelsolresort.graph-receipt-reconcile",
+    "paulina.daily": "com.lapuestadelsolresort.graph-paulina",
+    "regina.daily": "com.lapuestadelsolresort.graph-regina",
+    "ownerrez.crm.sync": "com.lapuestadelsolresort.graph-crm-sync",
+    "squarespace.crm.sync": "com.lapuestadelsolresort.graph-squarespace-sync",
+    "social.publish_routine": "com.lapuestadelsolresort.graph-social-routine",
+    "social.publish_due": "com.lapuestadelsolresort.graph-social-publish",
+}
+
+
+def expected_graph_agents(policy):
+    live = set(policy.get("live_workflows") or [])
+    return sorted({label for workflow, label in GRAPH_AGENTS.items() if workflow in live})
+
+
+def graph_agent_integrity(policy, run=subprocess.run):
+    missing = 0
+    domain = f"gui/{os.getuid()}"
+    for label in expected_graph_agents(policy):
+        result = run(
+            ["/bin/launchctl", "print", f"{domain}/{label}"],
+            timeout=10,
+            capture_output=True,
+            text=True,
+        )
+        missing += int(result.returncode != 0)
+    return {"runtime_graph_agents_missing": missing, "runtime_policy_error": 0}
 
 
 def runtime_integrity():
@@ -140,10 +172,13 @@ def hard_failure_count(metrics, alert_config_missing=0):
     return sum([
         metrics.get("runtime_process_missing", 0), metrics.get("runtime_code_drift", 0),
         metrics.get("runtime_process_check_error", 0),
-        metrics["schema_migration_required"], metrics["queued_runs_over_1m"], metrics["stalled_runs"], metrics["overdue_retries"], metrics["dead_outbox"],
-        metrics["stale_outbox_leases"], metrics["stale_step_leases"],
-        metrics["open_manual_reviews"], metrics["failed_24h"], metrics["old_unverified_effects"],
-        int(metrics["oldest_pending_outbox_minutes"] > 5), int(alert_config_missing),
+        metrics.get("runtime_graph_agents_missing", 0), metrics.get("runtime_policy_error", 0),
+        metrics.get("schema_migration_required", 0), metrics.get("queued_runs_over_1m", 0),
+        metrics.get("stalled_runs", 0), metrics.get("overdue_retries", 0), metrics.get("dead_outbox", 0),
+        metrics.get("stale_outbox_leases", 0), metrics.get("stale_step_leases", 0),
+        metrics.get("open_manual_reviews", 0), metrics.get("failed_24h", 0),
+        metrics.get("old_unverified_effects", 0),
+        int(metrics.get("oldest_pending_outbox_minutes", 0) > 5), int(alert_config_missing),
     ])
 
 
@@ -157,6 +192,11 @@ def main():
         con.close()
     alert_config_missing = int(not ALERT_CHANNEL or not SLACK_ACCOUNT)
     metrics.update(runtime_integrity())
+    try:
+        policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+        metrics.update(graph_agent_integrity(policy))
+    except Exception:
+        metrics.update({"runtime_graph_agents_missing": 0, "runtime_policy_error": 1})
     metrics["alert_config_missing"] = alert_config_missing
     hard_failures = hard_failure_count(metrics, alert_config_missing)
     detail = json.dumps({"observed_at": datetime.now(timezone.utc).isoformat(), **metrics}, sort_keys=True)

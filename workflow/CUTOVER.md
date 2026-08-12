@@ -34,8 +34,8 @@ config with the patch; merge only its Slack channel policy and plugin sections.
 The guarded `npm run apply:openclaw-shadow` command performs that merge,
 validates it, and creates a mode-600 config backup before the atomic write.
 `npm run install:shadow-services` installs only the durable worker, health
-monitor, weekly restore drill, and the repaired legacy GTKU environment; it
-does not install any graph producer.
+monitor, and weekly restore drill; it does not install a legacy or graph
+producer. GTKU is owned by `graph-social-routine` after social cutover.
 
 Before deploying this control-plane version, add the intended explicit
 exceptions to the ignored runtime policy and review them as production
