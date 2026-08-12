@@ -267,16 +267,17 @@ function validateConfirmation(input) {
 
 const confirmDefinition = {
   name: 'ownerrez.mutation.confirm',
-  version: 1,
+  version: 2,
   capability: 'ownerrez.write',
   mutates: true,
+  allowedTriggers: ['slack_ownerrez_command'],
   // OwnerRez does not document mutation idempotency keys. A crash after the
   // request crosses the network boundary must never cause an automatic replay.
   crashRecovery: 'manual',
   validate: validateConfirmation,
   steps: [
     {
-      key: 'accept_proposal', maxAttempts: 1,
+      key: 'accept_proposal', effectClass: 'external_read', maxAttempts: 1,
       async run({ db, run, input, services }) {
         const [proposal] = await db.query(sql`SELECT * FROM ownerrez_mutation_proposals WHERE id=${input.proposalId}`);
         if (!proposal) throw new Error('OwnerRez mutation proposal was not found');
@@ -312,7 +313,7 @@ const confirmDefinition = {
       },
     },
     {
-      key: 'execute_once', maxAttempts: 1,
+      key: 'execute_once', effectClass: 'external_non_idempotent', maxAttempts: 1,
       async run({ db, run, state, services, store, stepKey }) {
         const accepted = state.accept_proposal;
         const validated = validateMutationInput({ operationId: accepted.operationId, ...accepted.request });
@@ -359,7 +360,7 @@ const confirmDefinition = {
       },
     },
     {
-      key: 'verify_readback', maxAttempts: 1,
+      key: 'verify_readback', effectClass: 'external_read', maxAttempts: 1,
       async run({ db, run, state, services, store, stepKey }) {
         const accepted = state.accept_proposal;
         const validated = validateMutationInput({ operationId: accepted.operationId, ...accepted.request });
@@ -387,7 +388,7 @@ const confirmDefinition = {
       },
     },
     {
-      key: 'notify_humans', maxAttempts: 1,
+      key: 'notify_humans', effectClass: 'internal_notification', maxAttempts: 1,
       async run({ db, run, state, store }) {
         const target = notificationTargets(loadPolicy());
         if (!target.channelId) return { queued: false };

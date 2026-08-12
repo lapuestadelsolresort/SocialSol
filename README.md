@@ -91,6 +91,9 @@ business at sale.
 - `#whatsapp` is the sole human WhatsApp console. A send must be an explicit
   `!wa` command by a member of that private channel; plain Slack replies and
   the retired direct HTTP send endpoints cannot send to a guest.
+- Instagram/Facebook DM replies are likewise command-only: `!dm <dm-id>
+  <message>` in `#social-sol`. The retired `/api/meta-dm/reply` endpoint cannot
+  bypass the durable ledger.
 - OwnerRez writes are additionally restricted to configured user IDs. A
   proposal records its exact fixed-catalog operation, request hash, reason,
   preflight snapshot, and 15-minute expiry. The same authorized Slack user must
@@ -102,6 +105,12 @@ business at sale.
 - Completion claims require a workflow, effect, evidence, or provider artifact.
   Accepted, queued, sent, delivered, read, and verified-by-readback are distinct
   states.
+- Ambiguous non-idempotent results pause that workflow for human provider-console
+  review. They are never automatically replayed; configured reviewers resolve
+  them with the exact `!review resolve …` command recorded in the alert.
+- Provider sends and local message projections are separate graph steps. Once
+  provider acceptance is recorded, a local SQLite retry cannot call the
+  provider again, and staff are explicitly told not to resend.
 
 ---
 

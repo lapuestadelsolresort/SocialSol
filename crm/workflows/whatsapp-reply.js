@@ -15,9 +15,11 @@ function validate(input) {
 
 const definition = {
   name: 'whatsapp.reply',
-  version: 1,
+  version: 3,
   capability: 'whatsapp.send',
   mutates: true,
+  serializeMutations: true,
+  allowedTriggers: ['slack_whatsapp_command'],
   // Twilio does not provide a create-message idempotency key. If the process
   // dies after Twilio accepts the request but before the SID is recorded,
   // automatic replay could send the guest a duplicate message.
@@ -26,6 +28,7 @@ const definition = {
   steps: [
     {
       key: 'resolve_conversation',
+      effectClass: 'read',
       maxAttempts: 1,
       async run({ db, input }) {
         const threadTs = typeof input.threadTs === 'string' ? input.threadTs.trim().slice(0, 64) : '';
@@ -55,6 +58,7 @@ const definition = {
     },
     {
       key: 'register_effect',
+      effectClass: 'local_write',
       maxAttempts: 1,
       async run({ db, run, input, state, store, stepKey }) {
         const conversation = state.resolve_conversation;
@@ -73,13 +77,15 @@ const definition = {
             actorUserId: run.actor_user_id,
             actorName: input.actorName || null,
           },
+          verificationMode: 'callback_optional',
         });
         return { effectId: effect.id, status: effect.status };
       },
     },
     {
       key: 'send_via_twilio',
-      maxAttempts: 4,
+      effectClass: 'guest_message',
+      maxAttempts: 1,
       async run({ db, run, input, state, services, store, stepKey }) {
         if (typeof services.sendWhatsApp !== 'function') throw new Error('Twilio WhatsApp service is unavailable');
         const conversation = state.resolve_conversation;
@@ -96,7 +102,7 @@ const definition = {
             message: input.message,
           });
         } catch (error) {
-          if (error.retryable !== true) {
+          if (error.code !== 'ambiguous_external_result') {
             await store.transitionEffect(db, {
               effectId,
               status: 'failed',
@@ -109,36 +115,68 @@ const definition = {
         }
 
         const status = normalizeTwilioEffectState(result.status);
-        await store.transitionEffect(db, {
-          effectId,
-          providerRef: result.sid,
-          status,
-          providerStatus: result.status || 'accepted',
-          response: {
-            sid: result.sid,
-            status: result.status || null,
-            errorCode: result.error_code || null,
-            dateCreated: result.date_created || null,
-          },
-        });
-        const now = new Date().toISOString();
-        await db.query(sql`INSERT OR IGNORE INTO meta_messages (
-            platform, sender_id, sender_name, message_id, message_text, received_at,
-            slack_thread_ts, raw_payload, direction, delivery_status,
-            provider_status_updated_at, workflow_run_id, workflow_effect_id
-          ) VALUES (
-            'whatsapp', 'outbound', ${input.actorName || 'Staff'}, ${result.sid},
-            ${input.message.trim()}, ${now}, ${conversation.threadTs},
-            ${JSON.stringify({ reply_to_dm_id: conversation.dmId, twilio_sid: result.sid })},
-            'outbound', ${status}, ${now}, ${run.id}, ${effectId}
-          )`);
-        await store.recordEvent(db, {
-          runId: run.id,
-          stepKey,
-          type: 'provider_accepted_request',
-          payload: { effectId, provider: 'twilio', providerRef: result.sid, status },
-        });
+        try {
+          await store.transitionEffect(db, {
+            effectId,
+            providerRef: result.sid,
+            status,
+            providerStatus: result.status || 'accepted',
+            response: {
+              sid: result.sid,
+              status: result.status || null,
+              errorCode: result.error_code || null,
+              dateCreated: result.date_created || null,
+            },
+          });
+        } catch (cause) {
+          const error = new Error(`Twilio accepted ${result.sid}, but provider acceptance could not be committed locally: ${cause.message}`);
+          error.code = 'ambiguous_external_result';
+          error.retryable = false;
+          error.cause = cause;
+          throw error;
+        }
         return { effectId, messageSid: result.sid, status, providerStatus: result.status || null, replayed: false };
+      },
+    },
+    {
+      key: 'persist_outbound_projection', effectClass: 'local_write', maxAttempts: 4,
+      async run({ db, run, input, state, store, stepKey }) {
+        const conversation = state.resolve_conversation;
+        const send = state.send_via_twilio;
+        const now = new Date().toISOString();
+        try {
+          await db.tx(async tx => {
+            await tx.query(sql`INSERT OR IGNORE INTO meta_messages (
+                platform, sender_id, sender_name, message_id, message_text, received_at,
+                slack_thread_ts, raw_payload, direction, delivery_status,
+                provider_status_updated_at, workflow_run_id, workflow_effect_id
+              ) VALUES (
+                'whatsapp', 'outbound', ${input.actorName || 'Staff'}, ${send.messageSid},
+                ${input.message.trim()}, ${now}, ${conversation.threadTs},
+                ${JSON.stringify({ reply_to_dm_id: conversation.dmId, twilio_sid: send.messageSid })},
+                'outbound', ${send.status}, ${now}, ${run.id}, ${send.effectId}
+              )`);
+            await tx.query(sql`UPDATE meta_messages SET
+                workflow_run_id=COALESCE(workflow_run_id, ${run.id}),
+                workflow_effect_id=COALESCE(workflow_effect_id, ${send.effectId}),
+                delivery_status=COALESCE(delivery_status, ${send.status}),
+                provider_status_updated_at=COALESCE(provider_status_updated_at, ${now})
+              WHERE platform='whatsapp' AND message_id=${send.messageSid}`);
+            await store.recordEvent(tx, {
+              runId: run.id,
+              stepKey,
+              type: 'outbound_projection_persisted',
+              payload: { effectId: send.effectId, provider: 'twilio', providerRef: send.messageSid },
+            });
+          });
+        } catch (error) {
+          error.code = 'post_acceptance_persistence_failed';
+          error.retryable = true;
+          error.requiresManualReview = true;
+          error.manualReviewReasonCode = 'post_acceptance_persistence_failed';
+          throw error;
+        }
+        return { messageId: send.messageSid, persisted: true };
       },
     },
   ],

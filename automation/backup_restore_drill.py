@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from job_health import record
@@ -18,6 +19,7 @@ SECRETS_DIR = Path(os.environ.get("SOCIALSOL_SECRETS_DIR", ROOT / "secrets"))
 CONFIG_PATH = Path(os.environ.get("CRM_BACKUP_CONFIG", SECRETS_DIR / "resort-backup.json"))
 OPENSSL = "/opt/homebrew/bin/openssl"
 JOB_NAME = "resort-crm-restore-drill"
+MAX_BACKUP_AGE_HOURS = float(os.environ.get("CRM_BACKUP_MAX_AGE_HOURS", "26"))
 
 
 def main():
@@ -29,6 +31,11 @@ def main():
     if not backups:
         raise RuntimeError("no encrypted CRM backup is available for restore drill")
     latest = backups[0]
+    backup_age_hours = max(0.0, (time.time() - latest.stat().st_mtime) / 3600)
+    if backup_age_hours > MAX_BACKUP_AGE_HOURS:
+        raise RuntimeError(
+            f"latest encrypted CRM backup is stale: {backup_age_hours:.1f}h > {MAX_BACKUP_AGE_HOURS:.1f}h"
+        )
     with tempfile.TemporaryDirectory(prefix="socialsol-restore-drill-") as directory:
         gz_path = Path(directory) / "restore.db.gz"
         db_path = Path(directory) / "restore.db"
@@ -48,14 +55,53 @@ def main():
             if quick != "ok":
                 raise RuntimeError(f"restored database quick_check failed: {quick}")
             tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            required = {"contacts", "leads", "workflow_runs", "workflow_outbox"}
+            required = {
+                "contacts", "leads", "meta_messages", "ownerrez_events",
+                "workflow_runs", "workflow_steps", "workflow_events",
+                "workflow_effects", "workflow_evidence", "workflow_outbox",
+                "workflow_manual_reviews", "ownerrez_mutation_proposals",
+                "accounting_receipts", "accounting_reconciliations",
+                "accounting_bank_transactions", "social_content",
+            }
             missing = sorted(required - tables)
             if missing:
                 raise RuntimeError(f"restored database is missing critical tables: {missing}")
+            required_columns = {
+                "workflow_runs": {"input_hash", "policy_snapshot_hash", "serialization_key"},
+                "workflow_steps": {"lease_token", "lease_version"},
+                "workflow_effects": {
+                    "manual_review_at", "verification_mode", "verification_deadline_at",
+                },
+                "workflow_manual_reviews": {
+                    "resolution_provider_ref", "review_channel_id",
+                },
+                "workflow_outbox": {"lease_token", "lease_version"},
+            }
+            for table, expected_columns in required_columns.items():
+                restored_columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+                missing_columns = sorted(expected_columns - restored_columns)
+                if missing_columns:
+                    raise RuntimeError(
+                        f"restored database table {table} is missing critical columns: {missing_columns}"
+                    )
             counts = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in sorted(required)}
+            foreign_key_failures = list(con.execute("PRAGMA foreign_key_check"))
+            if foreign_key_failures:
+                raise RuntimeError(f"restored database has {len(foreign_key_failures)} foreign-key violation(s)")
+            orphan_effects = con.execute("""SELECT COUNT(*) FROM workflow_effects e
+                LEFT JOIN workflow_runs r ON r.id=e.run_id WHERE r.id IS NULL""").fetchone()[0]
+            orphan_steps = con.execute("""SELECT COUNT(*) FROM workflow_steps s
+                LEFT JOIN workflow_runs r ON r.id=s.run_id WHERE r.id IS NULL""").fetchone()[0]
+            if orphan_effects or orphan_steps:
+                raise RuntimeError(f"restored workflow ledger has orphans: effects={orphan_effects}, steps={orphan_steps}")
         finally:
             con.close()
-    detail = json.dumps({"backup": latest.name, "quick_check": "ok", "counts": counts}, sort_keys=True)
+    detail = json.dumps({
+        "backup": latest.name,
+        "backup_age_hours": round(backup_age_hours, 2),
+        "quick_check": "ok",
+        "counts": counts,
+    }, sort_keys=True)
     record(JOB_NAME, True, detail)
     print(detail)
 

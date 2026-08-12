@@ -12,7 +12,7 @@ function option(args, name) {
   return index >= 0 ? args[index + 1] : null;
 }
 
-function gradeCase(testCase, response = null) {
+function gradeCase(testCase, response = null, { architectureOnly = false } = {}) {
   const missingWorkflows = testCase.expected_workflows.filter(name => !getDefinition(name));
   const result = {
     id: testCase.id,
@@ -28,7 +28,7 @@ function gradeCase(testCase, response = null) {
     const forbiddenPass = testCase.forbidden_patterns.every(pattern => !new RegExp(pattern, 'i').test(text));
     result.response = { toolPass, requiredPass, forbiddenPass, pass: toolPass && requiredPass && forbiddenPass };
   }
-  result.pass = result.architecture && (result.response ? result.response.pass : true);
+  result.pass = result.architecture && (result.response ? result.response.pass : architectureOnly);
   return result;
 }
 
@@ -40,13 +40,19 @@ function loadResponses(file) {
 
 function main(args = process.argv.slice(2)) {
   const cases = JSON.parse(fs.readFileSync(CASES_PATH, 'utf8'));
+  const architectureOnly = args.includes('--architecture-only');
   const responses = loadResponses(option(args, '--responses'));
-  const results = cases.map(testCase => gradeCase(testCase, responses.get(testCase.id)));
+  const results = cases.map(testCase => gradeCase(
+    testCase,
+    responses.get(testCase.id),
+    { architectureOnly },
+  ));
   const summary = {
     total: results.length,
     passed: results.filter(result => result.pass).length,
     failed: results.filter(result => !result.pass).length,
     responseCases: results.filter(result => result.response).length,
+    architectureOnly,
   };
   process.stdout.write(`${JSON.stringify({ summary, results }, null, 2)}\n`);
   if (summary.failed) process.exitCode = 1;

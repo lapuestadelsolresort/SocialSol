@@ -2682,80 +2682,13 @@ app.post('/webhook/meta', async (req, res) => {
   }
 });
 
-// ─── Meta DM Reply API ───────────────────────────────────────────────────────
-// POST /api/meta-dm/reply  { dm_id: 42, message: "Hello!" }
-app.post('/api/meta-dm/reply', express.json(), async (req, res) => {
-  const { dm_id, message } = req.body || {};
-  const dmId = Number.parseInt(dm_id, 10);
-  const replyText = typeof message === 'string' ? message.trim() : '';
-  if (!Number.isSafeInteger(dmId) || dmId <= 0 || !replyText) {
-    return res.status(400).json({ error: 'valid dm_id and message required' });
-  }
-  if (replyText.length > 2000) return res.status(400).json({ error: 'message too long' });
-  if (!db) return res.status(503).json({ error: 'DB not ready' });
-
-  try {
-    const rows = await db.query(sql`SELECT * FROM meta_messages WHERE id = ${dmId} AND platform IN ('instagram', 'page') AND sender_id != 'outbound' LIMIT 1`);
-    if (!rows.length) return res.status(404).json({ error: `No inbound DM found with id ${dmId}` });
-    const dm = rows[0];
-
-    const secrets    = loadMetaSecrets();
-    const sysToken   = secrets.access_token;
-    const pageId     = secrets.page_id;
-    const G          = 'https://graph.facebook.com/v21.0';
-
-    // Get page-scoped token
-    let pageToken = sysToken;
-    try {
-      const pt = await fetch(`${G}/${encodeURIComponent(pageId)}?fields=access_token`, {
-        headers: { Authorization: `Bearer ${sysToken}` },
-        signal: AbortSignal.timeout(8000),
-      });
-      const ptd = await pt.json();
-      if (ptd.access_token) pageToken = ptd.access_token;
-    } catch {}
-
-    // Send via appropriate endpoint
-    let sendUrl, sendBody;
-    if (dm.platform === 'instagram') {
-      const igId = process.env.META_INSTAGRAM_ID || secrets.instagram_id;
-      if (!igId) {
-        return res.status(503).json({ error: 'Meta Instagram account ID is not configured' });
-      }
-      sendUrl  = `${G}/${igId}/messages`;
-      sendBody = JSON.stringify({ recipient: { id: dm.sender_id }, message: { text: replyText } });
-    } else {
-      sendUrl  = `${G}/${pageId}/messages`;
-      sendBody = JSON.stringify({ recipient: { id: dm.sender_id }, message: { text: replyText } });
-    }
-
-    const resp = await fetch(sendUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pageToken}` },
-      body: sendBody,
-      signal: AbortSignal.timeout(12000),
-    });
-    const result = await resp.json();
-
-    if (result.error) {
-      console.error('[meta-dm/reply] Send failed:', result.error);
-      return res.status(502).json({ error: result.error.message, detail: result.error });
-    }
-
-    // Log the outbound reply
-    const now = new Date().toISOString();
-    await db.query(sql`
-      INSERT INTO meta_messages (platform, sender_id, sender_name, message_text, received_at, raw_payload)
-      VALUES (${dm.platform}, ${'outbound'}, ${'Sol (outbound)'}, ${replyText}, ${now}, ${JSON.stringify({ reply_to_dm_id: dmId, meta_result: result })})
-    `);
-
-    console.log(`[meta-dm/reply] Sent to ${dm.sender_name} (${dm.platform}): ${replyText.slice(0, 80)}`);
-    res.json({ ok: true, platform: dm.platform, recipient: dm.sender_name, message_id: result.message_id });
-  } catch (err) {
-    console.error('[meta-dm/reply] Error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+// The former direct Meta DM sender bypassed the durable effect ledger. Meta
+// replies are now accepted only from the explicit !dm Slack command through
+// the command-only meta.dm.reply workflow.
+app.post('/api/meta-dm/reply', express.json(), (_req, res) => res.status(410).json({
+  error: 'direct Meta DM sends are disabled; use an explicit !dm command in #social-sol',
+  code: 'meta_dm_slack_only',
+}));
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 async function seedData() {

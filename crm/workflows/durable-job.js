@@ -36,7 +36,7 @@ function notificationTargets(run, definition) {
 function makeDurableJob(options) {
   const {
     name,
-    version = 1,
+    version = 2,
     capability,
     effectType = 'external_mutation',
     provider,
@@ -61,12 +61,14 @@ function makeDurableJob(options) {
     capability,
     mutates: true,
     autonomous,
+    crashRecovery: 'manual',
     notificationChannelId,
     notificationChannelName,
     validate,
     steps: [
       {
         key: 'register_effect',
+        effectClass: 'local_write',
         maxAttempts: 1,
         async run({ db, run, input, store, stepKey }) {
           const effect = await store.createEffect(db, {
@@ -84,7 +86,8 @@ function makeDurableJob(options) {
       },
       {
         key: 'execute',
-        maxAttempts: 3,
+        effectClass: 'external_non_idempotent',
+        maxAttempts: 1,
         async run({ db, run, input, state, services, store, stepKey }) {
           if (typeof services.runCommand !== 'function') throw new Error('workflow command service is unavailable');
           const effectId = state.register_effect.effectId;
@@ -93,7 +96,14 @@ function makeDurableJob(options) {
             return { effectId, providerRef: effect.provider_ref, status: effect.status, replayed: true };
           }
           const command = buildCommand({ input, run, shadowMode: services.shadowMode === true });
-          const result = await services.runCommand(command);
+          let result;
+          try {
+            result = await services.runCommand(command);
+          } catch (error) {
+            error.code = 'ambiguous_external_result';
+            error.retryable = false;
+            throw error;
+          }
           const providerRef = `job:${run.id}`;
           await store.transitionEffect(db, {
             effectId,
@@ -131,6 +141,7 @@ function makeDurableJob(options) {
       },
       {
         key: 'verify_readback',
+        effectClass: 'external_read',
         maxAttempts: 3,
         async run({ db, run, input, state, services, store, stepKey }) {
           const verification = await verify({ db, run, input, state, services, lastJsonValue });
@@ -164,6 +175,7 @@ function makeDurableJob(options) {
       },
       ...(notifyOnWrite ? [{
         key: 'notify_humans',
+        effectClass: 'internal_notification',
         maxAttempts: 1,
         async run({ db, run, state, store }) {
           const targets = notificationTargets(run, definition);

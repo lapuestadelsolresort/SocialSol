@@ -27,8 +27,20 @@ async function execute(workflow, input, idempotencyKey, fetchImpl = fetch) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `${workflow} returned ${response.status}`);
-  if (payload.run?.status !== 'completed') throw new Error(`${workflow} is ${payload.run?.status || 'unknown'}`);
-  return payload.run;
+  let run = payload.run;
+  const deadline = Date.now() + 30 * 60_000;
+  while (run && ['queued', 'running', 'retry'].includes(run.status) && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    const statusResponse = await fetchImpl(`${base}/api/workflows/runs/${encodeURIComponent(run.id)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const statusPayload = await statusResponse.json().catch(() => ({}));
+    if (!statusResponse.ok) throw new Error(statusPayload.error || `${workflow} status returned ${statusResponse.status}`);
+    run = statusPayload.run;
+  }
+  if (run?.status !== 'completed') throw new Error(`${workflow} is ${run?.status || 'unknown'}`);
+  return run;
 }
 
 async function main(fetchImpl = fetch) {

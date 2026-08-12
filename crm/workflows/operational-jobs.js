@@ -7,6 +7,7 @@ const { sql } = require('@databases/sqlite');
 const { ROOT } = require('../../lib/runtime-paths');
 const { nodeCommand, pythonCommand, resolveRepoFile } = require('../lib/workflow-command');
 const { makeDurableJob } = require('./durable-job');
+const { listPosts } = require('../lib/postiz');
 
 function safeAccountingCsv(input) {
   const supplied = typeof input.csvPath === 'string' ? input.csvPath.trim() : '';
@@ -35,26 +36,44 @@ const paulinaDaily = makeDurableJob({
   autonomous: true,
   notificationChannelName: 'prospector-paulina',
   requestSummary: () => ({ campaignScope: 'configured_active_campaign', autonomous: true }),
-  buildCommand: ({ shadowMode }) => nodeCommand('prospector/orchestrator.js', shadowMode ? ['--dry-run'] : [], {
+  buildCommand: ({ run, shadowMode }) => nodeCommand('prospector/orchestrator.js', shadowMode ? ['--dry-run'] : [], {
     timeoutMs: 15 * 60_000,
+    env: { WORKFLOW_RUN_ID: run.id },
   }),
-  async verify({ services, state }) {
+  async verify({ db, run, services, state }) {
     const reportCommand = await services.runCommand(nodeCommand('prospector/scripts/performance-status.js', ['--json']));
     let report;
     try { report = JSON.parse(reportCommand.stdout); } catch { report = null; }
     if (!report?.generated_at || report?.scope?.owner !== 'paulina') {
       return { verified: false, reason: 'Paulina CRM performance readback was unavailable', retryable: true };
     }
+    const match = String(state.execute?.stdout || '').match(/exit ok:\s*(\{[^\n]+\})/);
+    let runResult = null;
+    try { runResult = match ? JSON.parse(match[1]) : null; } catch {}
+    if (runResult?.paused === true && Number.isInteger(runResult.processed)) {
+      runResult = { ...runResult, sent: 0, failed: 0 };
+    }
+    if (!runResult || !Number.isInteger(runResult.processed) || !Number.isInteger(runResult.sent)) {
+      return { verified: false, reason: 'Paulina command did not emit a run-scoped result', retryable: false };
+    }
+    const [runRows] = await db.query(sql`SELECT COUNT(*) AS processed,
+      SUM(CASE WHEN sent_at IS NOT NULL THEN 1 ELSE 0 END) AS sent,
+      SUM(CASE WHEN status='ambiguous' THEN 1 ELSE 0 END) AS ambiguous,
+      SUM(CASE WHEN status IN ('failed','send_failed','cancelled') THEN 1 ELSE 0 END) AS failed
+      FROM outreach_sends WHERE workflow_run_id=${run.id}`);
+    if (Number(runRows?.sent || 0) !== runResult.sent) {
+      return { verified: false, reason: 'Paulina command output did not match workflow-attributed CRM rows', retryable: false };
+    }
     return {
       verified: true,
       source: 'crm.outreach_sends',
       sourceRef: report.scope.active_campaign_slug || 'paulina',
       providerStatus: 'crm_readback_verified',
-      evidence: report,
+      evidence: { run: runResult, attributedRows: runRows, performanceContext: report },
       summary: {
-        productionSent: report.all_time?.production_sent || 0,
-        delivered: report.all_time?.production_delivered || 0,
-        bounced: report.all_time?.bounced || 0,
+        processed: runResult.processed,
+        sent: runResult.sent,
+        failed: runResult.failed || 0,
         queueReady: report.active_queue?.verified_ready || 0,
         commandHash: state.execute?.providerRef,
       },
@@ -81,7 +100,7 @@ function reginaVerification(campaignSlug) {
       COUNT(*) AS created,
       SUM(CASE WHEN sent_at IS NOT NULL THEN 1 ELSE 0 END) AS sent,
       SUM(CASE WHEN status IN ('failed','send_failed') THEN 1 ELSE 0 END) AS failed
-      FROM outreach_sends WHERE created_at >= ${run.started_at}`);
+      FROM outreach_sends WHERE workflow_run_id=${run.id}`);
     if (state.execute.exitCode !== 0) return { verified: false, reason: 'Regina process did not exit cleanly' };
     return {
       verified: true,
@@ -102,8 +121,9 @@ const reginaDaily = makeDurableJob({
   autonomous: true,
   notificationChannelName: 'reengager-regina',
   requestSummary: () => ({ campaignSlug: 'anniversary', autonomous: true }),
-  buildCommand: ({ shadowMode }) => nodeCommand('regina/scripts/anniversary-cron.js', shadowMode ? ['--dry-run'] : [], {
+  buildCommand: ({ run, shadowMode }) => nodeCommand('regina/scripts/anniversary-cron.js', shadowMode ? ['--dry-run'] : [], {
     timeoutMs: 15 * 60_000,
+    env: { WORKFLOW_RUN_ID: run.id },
   }),
   verify: reginaVerification('anniversary'),
   summarize: ({ verification }) => ({ report: verification.summary }),
@@ -117,11 +137,14 @@ const reginaCampaign = makeDurableJob({
   validate: validateReginaCampaign,
   notificationChannelName: 'reengager-regina',
   requestSummary: input => ({ campaignSlug: input.campaignSlug, count: input.count || null }),
-  buildCommand: ({ input, shadowMode }) => {
+  buildCommand: ({ input, run, shadowMode }) => {
     const args = ['--campaign-slug', input.campaignSlug];
     if (input.count !== undefined) args.push('--n', String(input.count));
     if (shadowMode) args.push('--dry-run');
-    return nodeCommand('regina/scripts/batch.js', args, { timeoutMs: 20 * 60_000 });
+    return nodeCommand('regina/scripts/batch.js', args, {
+      timeoutMs: 20 * 60_000,
+      env: { WORKFLOW_RUN_ID: run.id },
+    });
   },
   verify: async context => reginaVerification(context.input.campaignSlug)(context),
   summarize: ({ verification }) => ({ report: verification.summary }),
@@ -153,12 +176,32 @@ const socialPublishRoutine = makeDurableJob({
     if (!legitimateNoop && (!scheduled || String(seriesState.last_postiz_id || '') !== scheduled)) {
       return { verified: false, reason: 'Postiz schedule was not confirmed in the series state', retryable: true };
     }
+    let providerPost = null;
+    if (scheduled) {
+      const center = new Date(`${seriesState.last_posted_date}T17:00:00.000Z`).getTime();
+      if (!Number.isFinite(center)) {
+        return { verified: false, reason: 'GTKY schedule date was unavailable for Postiz readback', retryable: false };
+      }
+      const posts = await listPosts({
+        startDate: new Date(center - 24 * 60 * 60_000).toISOString(),
+        endDate: new Date(center + 48 * 60 * 60_000).toISOString(),
+      });
+      providerPost = posts.find(post => String(post.id) === String(scheduled)) || null;
+      if (!providerPost) {
+        return { verified: false, reason: 'scheduled post was not visible in Postiz readback', retryable: true };
+      }
+    }
     return {
       verified: true,
-      source: 'postiz.schedule_state',
+      source: scheduled ? 'postiz.posts.list' : 'postiz.schedule_state',
       sourceRef: scheduled,
       providerStatus: scheduled ? 'scheduled_readback_verified' : 'no_op_verified',
-      evidence: { scheduledPostId: scheduled, statePostId: seriesState.last_postiz_id || null, stdout },
+      evidence: {
+        scheduledPostId: scheduled,
+        statePostId: seriesState.last_postiz_id || null,
+        providerPost: providerPost ? { id: providerPost.id, publishDate: providerPost.publishDate } : null,
+        stdout,
+      },
       summary: { scheduledPostId: scheduled, noOp: legitimateNoop },
     };
   },

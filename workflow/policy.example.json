@@ -1,7 +1,8 @@
 {
   "version": 1,
   "shadow_mode": true,
-  "live_workflows": ["whatsapp.reply", "ownerrez.mutation.confirm"],
+  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "ownerrez.mutation.confirm"],
+  "always_on_effects": ["whatsapp.inbound.process:send_conversion"],
   "channels": {
     "REPLACE_WITH_WHATSAPP_CHANNEL_ID": {
       "name": "whatsapp",

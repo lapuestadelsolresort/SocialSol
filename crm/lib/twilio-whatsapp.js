@@ -68,7 +68,10 @@ async function sendWhatsApp({
       signal: AbortSignal.timeout(12_000),
     });
   } catch (error) {
-    error.retryable = true;
+    error.code = 'ambiguous_external_result';
+    error.retryable = false;
+    error.ambiguous = true;
+    error.requestDispatched = true;
     throw error;
   }
 
@@ -76,7 +79,12 @@ async function sendWhatsApp({
   if (!response.ok || result.code || !result.sid) {
     const error = new Error(result.message || `Twilio send failed (${response.status})`);
     error.code = result.code ? `twilio_${result.code}` : `twilio_http_${response.status}`;
-    error.retryable = response.status === 429 || response.status >= 500;
+    error.retryable = false;
+    error.requestDispatched = true;
+    if (response.status === 429 || response.status >= 500 || response.ok) {
+      error.code = 'ambiguous_external_result';
+      error.ambiguous = true;
+    }
     throw error;
   }
   return result;

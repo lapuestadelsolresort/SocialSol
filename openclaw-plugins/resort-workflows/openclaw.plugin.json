@@ -29,6 +29,10 @@
         "type": "array",
         "items": { "type": "string", "minLength": 1 }
       },
+      "socialChannelIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
       "ownerrezChannelIds": {
         "type": "array",
         "items": { "type": "string", "minLength": 1 }

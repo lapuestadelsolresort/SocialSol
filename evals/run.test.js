@@ -22,3 +22,8 @@ test('truth eval accepts exact provider uncertainty', () => {
   });
   assert.equal(result.pass, true);
 });
+
+test('missing behavioral response fails unless architecture-only is explicit', () => {
+  assert.equal(gradeCase(CASE).pass, false);
+  assert.equal(gradeCase(CASE, null, { architectureOnly: true }).pass, true);
+});

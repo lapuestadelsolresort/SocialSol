@@ -4,6 +4,7 @@ const { definition: whatsappReply } = require('./whatsapp-reply');
 const { definition: socialContentPublish } = require('./social-publish');
 const { definition: ownerrezWebhookProcess } = require('./ownerrez-event');
 const { definition: whatsappInboundProcess } = require('./whatsapp-inbound');
+const { definition: metaDmReply } = require('./meta-dm-reply');
 const { definition: socialPublishDue } = require('./social-publish-due');
 const operational = require('./operational-jobs');
 const localRecords = require('./local-records');
@@ -15,6 +16,7 @@ const DEFINITIONS = new Map([
   [socialContentPublish.name, socialContentPublish],
   [ownerrezWebhookProcess.name, ownerrezWebhookProcess],
   [whatsappInboundProcess.name, whatsappInboundProcess],
+  [metaDmReply.name, metaDmReply],
   [socialPublishDue.name, socialPublishDue],
   [ownerrezMutationPropose.name, ownerrezMutationPropose],
   [ownerrezMutationConfirm.name, ownerrezMutationConfirm],
@@ -40,7 +42,8 @@ function listDefinitions() {
     capability: definition.capability,
     mutates: definition.mutates !== false,
     autonomous: definition.autonomous === true,
-    steps: definition.steps.map(step => step.key),
+    allowed_triggers: definition.allowedTriggers || null,
+    steps: definition.steps.map(step => ({ key: step.key, effect_class: step.effectClass || null })),
   }));
 }
 

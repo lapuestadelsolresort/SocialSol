@@ -2,12 +2,11 @@
 
 const crypto = require('node:crypto');
 const express = require('express');
+const { sql } = require('@databases/sqlite');
 const { authorize, loadPolicy } = require('../lib/channel-policy');
-const { startGraph } = require('../lib/workflow-engine');
-const { getRun } = require('../lib/workflow-store');
+const { createRun, getRun, resolveManualReview } = require('../lib/workflow-store');
+const { policySnapshot, submissionDecision } = require('../lib/workflow-execution-policy');
 const { loadControlToken } = require('../lib/workflow-auth');
-const { sendWhatsApp } = require('../lib/twilio-whatsapp');
-const { requestOwnerRez } = require('../lib/ownerrez-api');
 const { getDefinition, listDefinitions } = require('../workflows/registry');
 
 function isLoopback(req) {
@@ -87,6 +86,16 @@ function safeRun(run) {
       completed_at: step.completed_at,
     })),
     effects: run.effects.map(safeEffect),
+    manual_reviews: (run.manualReviews || []).map(review => ({
+      id: review.id,
+      step_key: review.step_key,
+      effect_id: review.effect_id,
+      reason_code: review.reason_code,
+      reason_message: review.reason_message,
+      status: review.status,
+      created_at: review.created_at,
+      resolved_at: review.resolved_at,
+    })),
   };
 }
 
@@ -113,6 +122,51 @@ function buildRouter(getDb, services = {}) {
     return res.json({ run: safeRun(run) });
   });
 
+  router.post('/manual-reviews/:id/resolve', express.json({ limit: '16kb' }), async (req, res) => {
+    const db = getDb();
+    if (!db) return res.status(503).json({ error: 'DB not ready' });
+    const supplied = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
+    const actorUserId = typeof supplied.actor_user_id === 'string' ? supplied.actor_user_id : '';
+    const channelId = typeof supplied.channel_id === 'string' ? supplied.channel_id : '';
+    const policy = loadPolicy({ fresh: true });
+    const reviewers = Array.isArray(policy.write_notifications?.user_ids)
+      ? policy.write_notifications.user_ids : [];
+    const [reviewContext] = await db.query(sql`SELECT mr.id, mr.review_channel_id, r.channel_id
+      FROM workflow_manual_reviews mr JOIN workflow_runs r ON r.id=mr.run_id
+      WHERE mr.id=${String(req.params.id)}`);
+    if (!reviewContext) return res.status(404).json({ error: 'manual review was not found' });
+    const configuredReviewChannels = Array.isArray(policy.write_notifications?.channel_ids)
+      ? policy.write_notifications.channel_ids : [];
+    const permittedChannels = new Set([
+      ...(reviewContext.channel_id ? [reviewContext.channel_id] : []),
+      ...(reviewContext.review_channel_id ? [reviewContext.review_channel_id] : []),
+      ...configuredReviewChannels,
+    ]);
+    if (
+      supplied.entrypoint !== 'slack_manual_review_command'
+      || !reviewers.includes(actorUserId) || !policy.channels?.[channelId]
+      || !permittedChannels.has(channelId)
+    ) {
+      return res.status(403).json({ error: 'manual review resolution requires an authorized human in a controlled channel' });
+    }
+    try {
+      const review = await resolveManualReview(db, {
+        reviewId: String(req.params.id),
+        resolution: String(req.body?.resolution || ''),
+        providerRef: typeof req.body?.provider_ref === 'string' ? req.body.provider_ref.trim().slice(0, 160) : null,
+        resolvedBy: actorUserId,
+      });
+      return res.json({ review: {
+        id: review.id, run_id: review.run_id, effect_id: review.effect_id,
+        status: review.status, resolution: review.resolution,
+        provider_ref: review.resolution_provider_ref, resolved_at: review.resolved_at,
+      } });
+    } catch (error) {
+      const status = Number.isInteger(error.status) ? error.status : 400;
+      return res.status(status).json({ error: error.message, code: error.code || 'manual_review_resolution_failed' });
+    }
+  });
+
   router.post('/execute', express.json({ limit: '64kb' }), async (req, res) => {
     const db = getDb();
     if (!db) return res.status(503).json({ error: 'DB not ready' });
@@ -133,16 +187,20 @@ function buildRouter(getDb, services = {}) {
       channelId: typeof supplied.channel_id === 'string' ? supplied.channel_id : null,
       actorUserId: typeof supplied.actor_user_id === 'string' ? supplied.actor_user_id : null,
     };
+    const entrypoint = context.origin === 'system'
+      ? 'system'
+      : (typeof supplied.entrypoint === 'string' ? supplied.entrypoint : 'model_tool');
 
     try {
       const policy = loadPolicy();
-      const workflowIsLive = Array.isArray(policy.live_workflows)
-        && policy.live_workflows.includes(definition.name);
-      const effectiveShadowMode = policy.shadow_mode === true && !workflowIsLive;
-      if (effectiveShadowMode && definition.mutates !== false) {
-        return res.status(409).json({
-          error: 'workflow is in shadow mode; no production mutation was attempted',
-          code: 'workflow_shadow_mode',
+      const submission = submissionDecision({ policy, definition, triggerType: entrypoint });
+      if (!submission.allowed) {
+        const status = submission.reason === 'workflow_trigger_forbidden' ? 403 : 409;
+        return res.status(status).json({
+          error: submission.reason === 'workflow_trigger_forbidden'
+            ? 'workflow cannot be invoked from this entrypoint'
+            : 'workflow is in shadow mode; no production mutation was queued',
+          code: submission.reason,
         });
       }
       const decision = authorize({
@@ -150,21 +208,26 @@ function buildRouter(getDb, services = {}) {
         workflowName: definition.name,
         context,
       });
-      const run = await startGraph(db, definition, {
+      if (typeof definition.validate === 'function') {
+        definition.validate(body.input && typeof body.input === 'object' ? body.input : {});
+      }
+      const created = await createRun(db, {
+        definition,
         idempotencyKey,
-        triggerType: context.origin,
+        triggerType: entrypoint,
         triggerRef: typeof supplied.message_id === 'string' ? supplied.message_id : null,
         channelId: context.channelId,
         actorUserId: context.actorUserId,
         input: body.input && typeof body.input === 'object' ? body.input : {},
-      }, {
-        shadowMode: effectiveShadowMode,
-        sendWhatsApp: services.sendWhatsApp || (params => sendWhatsApp(params)),
-        ownerRezRequest: services.ownerRezRequest || (params => requestOwnerRez(params)),
-        runCommand: services.runCommand || require('../lib/workflow-command').runCommand,
+        policySnapshot: policySnapshot(policy, definition),
       });
-      const status = run.status === 'completed' ? 200 : (run.status === 'retry' ? 202 : 500);
-      return res.status(status).json({ authorization: decision.reason, run: safeRun(run) });
+      const run = created.run;
+      const status = run.status === 'completed' ? 200 : (run.status === 'failed' ? 500 : 202);
+      return res.status(status).json({
+        authorization: decision.reason,
+        queued: created.created,
+        run: safeRun(run),
+      });
     } catch (error) {
       const status = Number.isInteger(error.status) ? error.status : 400;
       return res.status(status).json({ error: error.message, code: error.code || 'workflow_request_failed' });

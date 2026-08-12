@@ -37,14 +37,15 @@ async function findSession(db, messageText) {
 
 const definition = {
   name: 'whatsapp.inbound.process',
-  version: 1,
+  version: 2,
   capability: 'crm.write',
   mutates: true,
   autonomous: true,
+  allowInShadow: true,
   validate,
   steps: [
     {
-      key: 'load_message', maxAttempts: 1,
+      key: 'load_message', effectClass: 'read', maxAttempts: 1,
       async run({ db, input }) {
         const [row] = await db.query(sql`SELECT id, sender_id, sender_name, message_id,
           message_text, raw_payload, received_at, processing_status, crm_lead_id,
@@ -56,7 +57,7 @@ const definition = {
       },
     },
     {
-      key: 'sync_crm', maxAttempts: 5,
+      key: 'sync_crm', effectClass: 'local_write', maxAttempts: 5,
       async run({ db, run, state, store, stepKey }) {
         const message = state.load_message;
         const effect = await store.createEffect(db, {
@@ -182,7 +183,7 @@ const definition = {
       },
     },
     {
-      key: 'send_conversion', maxAttempts: 8,
+      key: 'send_conversion', effectClass: 'external_idempotent', maxAttempts: 8,
       async run({ db, run, state, store, stepKey }) {
         const lead = state.sync_crm.verifiedLead;
         if (!lead) return { skipped: true, reason: 'not_new_meta_attributed_lead' };
@@ -212,7 +213,7 @@ const definition = {
       },
     },
     {
-      key: 'mark_processed', maxAttempts: 3,
+      key: 'mark_processed', effectClass: 'local_write', maxAttempts: 3,
       async run({ db, run, state, store, stepKey }) {
         const messageId = state.load_message.id;
         await db.query(sql`UPDATE meta_messages SET processing_status='completed',

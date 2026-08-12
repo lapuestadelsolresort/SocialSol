@@ -3,11 +3,15 @@ import assert from 'node:assert/strict';
 import {
   createFinalizeHandler,
   createInboundClaimHandler,
+  createMetaDmClaimHandler,
+  createManualReviewClaimHandler,
   createOwnerRezClaimHandler,
   createReceiptHandler,
   createWorkflowTool,
   formatWorkflowReply,
   parseWhatsAppCommand,
+  parseMetaDmCommand,
+  parseManualReviewCommand,
   parseOwnerRezConfirmCommand,
   pluginConfig,
 } from './index.js';
@@ -26,6 +30,23 @@ test('parses only explicit WhatsApp mutations', () => {
   assert.deepEqual(parseWhatsAppCommand('!wa Welcome to the resort', { hasThread: true }), { message: 'Welcome to the resort' });
   assert.deepEqual(parseWhatsAppCommand('!wa 42 Welcome', { hasThread: false }), { dmId: 42, message: 'Welcome' });
   assert.deepEqual(parseWhatsAppCommand('!wa Welcome', { hasThread: false }), { error: 'dm_id_required' });
+});
+
+test('parses only explicit Meta DM mutations', () => {
+  assert.deepEqual(parseMetaDmCommand('hello'), null);
+  assert.deepEqual(parseMetaDmCommand('!dm 42 Welcome'), { dmId: 42, message: 'Welcome' });
+  assert.deepEqual(parseMetaDmCommand('!dm Welcome'), { error: 'invalid_meta_dm_command' });
+});
+
+test('parses exact manual-review resolutions', () => {
+  const id = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  assert.deepEqual(parseManualReviewCommand(`!review resolve ${id} sent SM123`), {
+    reviewId: id, resolution: 'confirmed_sent', providerRef: 'SM123',
+  });
+  assert.deepEqual(parseManualReviewCommand(`!review resolve ${id} not-sent`), {
+    reviewId: id, resolution: 'confirmed_not_sent', providerRef: null,
+  });
+  assert.deepEqual(parseManualReviewCommand('please resolve it'), null);
 });
 
 test('parses only exact OwnerRez confirmation commands', () => {
@@ -66,6 +87,18 @@ test('reports provider acceptance without claiming delivery', () => {
   assert.match(text, /queued/);
   assert.match(text, /delivery and read are not confirmed/);
   assert.doesNotMatch(text, /was delivered/);
+});
+
+test('a post-acceptance local failure tells staff not to resend', () => {
+  const text = formatWorkflowReply({
+    run: {
+      id: 'run-failed-projection', status: 'failed', error_message: 'projection failed',
+      effects: [{ id: 'effect-1', status: 'queued', provider_ref: 'SM123' }],
+    },
+  });
+  assert.match(text, /provider acceptance SM123 is recorded/);
+  assert.match(text, /Do not resend/);
+  assert.doesNotMatch(text, /delivered/);
 });
 
 test('live inbound claim binds the trusted Slack identity and message id', async () => {
@@ -149,11 +182,9 @@ test('live WhatsApp thread refuses ambiguous plain replies', async () => {
   assert.match(result.reply.text, /Not sent/);
 });
 
-test('tool factory supplies channel, sender, and thread instead of trusting model input', async () => {
+test('model-facing tool cannot invoke command-only WhatsApp sends', async () => {
   const config = pluginConfig({ crmBaseUrl: 'http://example.test' });
   process.env.RESORT_WORKFLOW_CONTROL_TOKEN = 'test-control-token-that-is-at-least-32-characters';
-  let request;
-  let authorization;
   const tool = createWorkflowTool({
     config,
     ctx: {
@@ -162,22 +193,75 @@ test('tool factory supplies channel, sender, and thread instead of trusting mode
       requesterSenderId: 'U-JASON',
       deliveryContext: { to: 'channel:C-WA', threadId: '123.456' },
     },
-    fetchImpl: async (_url, options) => {
-      request = JSON.parse(options.body);
-      authorization = options.headers.Authorization;
-      return { ok: true, status: 200, json: async () => COMPLETED };
-    },
+    fetchImpl: async () => { throw new Error('model tool must not reach the control plane'); },
   });
-  const result = await tool.execute('tool-call-1', {
+  await assert.rejects(() => tool.execute('tool-call-1', {
     workflow: 'whatsapp.reply',
     input: { message: 'Hello', threadTs: 'model-spoof' },
-  });
-  assert.equal(request.context.channel_id, 'C-WA');
-  assert.equal(request.context.actor_user_id, 'U-JASON');
-  assert.equal(request.input.threadTs, '123.456');
-  assert.equal(authorization, `Bearer ${process.env.RESORT_WORKFLOW_CONTROL_TOKEN}`);
-  assert.match(result.content[0].text, /not confirmed/);
+  }), error => error.code === 'workflow_command_required');
+  await assert.rejects(() => tool.execute('tool-call-2', {
+    workflow: 'meta.dm.reply',
+    input: { dmId: 42, message: 'Hello' },
+  }), error => error.code === 'workflow_command_required');
   delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+});
+
+test('guest mutations fail closed when Slack supplies no stable message id', async () => {
+  const config = pluginConfig({
+    whatsappChannelIds: ['C-WA'], shadowMode: false,
+  });
+  const calls = [];
+  const result = await createInboundClaimHandler({
+    config, execute: async (_config, request) => { calls.push(request); return COMPLETED; },
+  })({
+    channel: 'slack', conversationId: 'C-WA', threadId: '123.456',
+    senderId: 'U-JASON', bodyForAgent: '!wa Do not send without an event id',
+  }, {});
+  assert.equal(result.handled, true);
+  assert.match(result.reply.text, /stable message ID/);
+  assert.equal(calls.length, 0);
+});
+
+test('Meta DM command binds trusted Slack identity and remains command-only', async () => {
+  const config = pluginConfig({
+    socialChannelIds: ['C-SOCIAL'], shadowMode: true, liveWorkflowNames: ['meta.dm.reply'],
+  });
+  const calls = [];
+  const payload = {
+    run: {
+      id: 'run-meta', workflow_name: 'meta.dm.reply', status: 'completed',
+      output: { recipient: 'Guest', platform: 'instagram', status: 'accepted_by_provider', effectId: 'effect-meta' },
+    },
+  };
+  const result = await createMetaDmClaimHandler({
+    config, execute: async (_config, request) => { calls.push(request); return payload; },
+  })({
+    channel: 'slack', conversationId: 'C-SOCIAL', messageId: '2000.1', senderId: 'U-JASON',
+    senderName: 'Jason', bodyForAgent: '!dm 42 Welcome',
+  }, {});
+  assert.equal(result.handled, true);
+  assert.equal(calls[0].context.entrypoint, 'slack_meta_dm_command');
+  assert.equal(calls[0].context.actorUserId, 'U-JASON');
+  assert.match(result.reply.text, /Delivery\/read is not confirmed/);
+});
+
+test('manual-review resolution is available only as an exact controlled-channel command', async () => {
+  const reviewId = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  const config = pluginConfig({ controlledChannelIds: ['C-WA'] });
+  const calls = [];
+  const result = await createManualReviewClaimHandler({
+    config,
+    resolve: async (_config, request) => {
+      calls.push(request);
+      return { review: { id: reviewId, resolution: 'confirmed_not_sent' } };
+    },
+  })({
+    channel: 'slack', conversationId: 'C-WA', senderId: 'U-JASON',
+    bodyForAgent: `!review resolve ${reviewId} not-sent`,
+  }, {});
+  assert.equal(result.handled, true);
+  assert.equal(calls[0].actorUserId, 'U-JASON');
+  assert.match(result.reply.text, /confirmed_not_sent/);
 });
 
 test('finalizer rejects unsupported WhatsApp delivery claims', async () => {

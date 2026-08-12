@@ -12,7 +12,6 @@
  */
 
 const { verifyTwilioSignature } = require('../lib/webhook-auth');
-const { postToChannel } = require('../lib/slack-post');
 const { enqueueOutbox, transitionEffect } = require('../lib/workflow-store');
 const {
   MAX_MESSAGE_LENGTH,
@@ -23,26 +22,24 @@ const {
 
 const SOCIAL_SOL_CHANNEL = process.env.RESORT_SOCIAL_CHANNEL || '';
 const WHATSAPP_CHANNEL = process.env.RESORT_WHATSAPP_CHANNEL || SOCIAL_SOL_CHANNEL;
-const SLACK_ACCOUNT = process.env.OPENCLAW_SLACK_ACCOUNT || '';
 const DEFAULT_WEBHOOK_URL = process.env.TWILIO_WEBHOOK_URL
   || 'https://webhook.lapuestadelsolresort.com/webhook/twilio-whatsapp/webhook';
-
-/** Post to Slack and return the message ts (for threading). */
-async function postToSlack(message, threadTs = null) {
-  const result = await postToChannel(WHATSAPP_CHANNEL, message, {
-    threadTs,
-    account: SLACK_ACCOUNT,
-  });
-  if (!result.ok) console.warn('[whatsapp] Slack post failed:', result.error);
-  return result.ok ? result.ts : null;
-}
 
 function buildRouter(getDb, overrides = {}) {
   const express = require('express');
   const router = express.Router();
   const { sql } = require('@databases/sqlite');
   const getSecrets = overrides.loadTwilioSecrets || loadTwilioSecrets;
-  const slackPost = overrides.postToSlack || postToSlack;
+
+  function monotonicStatus(current, next) {
+    const rank = new Map([
+      ['accepted_by_provider', 0], ['queued', 1], ['sent', 2], ['delivered', 3], ['read', 4],
+    ]);
+    if (!current) return next;
+    if (current === 'failed' || current === 'read') return current;
+    if (next === 'failed') return ['delivered', 'read'].includes(current) ? current : 'failed';
+    return (rank.get(next) ?? 0) >= (rank.get(current) ?? 0) ? next : current;
+  }
 
   // ─── Twilio Webhook (incoming WhatsApp messages) ─────────────────────────
   router.post('/webhook', express.urlencoded({ extended: false, limit: '64kb', parameterLimit: 100 }), async (req, res) => {
@@ -185,11 +182,16 @@ function buildRouter(getDb, overrides = {}) {
         errorMessage: status === 'failed' ? (body.ErrorMessage || providerStatus) : null,
       });
       const now = new Date().toISOString();
+      const [currentMessage] = await db.query(sql`SELECT delivery_status FROM meta_messages
+        WHERE platform='whatsapp' AND message_id=${messageSid} LIMIT 1`);
+      const mirrorStatus = monotonicStatus(currentMessage?.delivery_status, status);
+      const mirrorChanged = Boolean(currentMessage) && mirrorStatus !== currentMessage.delivery_status;
       await db.query(sql`UPDATE meta_messages SET
-          delivery_status=${status}, provider_status_updated_at=${now},
-          delivered_at=CASE WHEN ${status} IN ('delivered','read') THEN COALESCE(delivered_at, ${now}) ELSE delivered_at END,
-          read_at=CASE WHEN ${status}='read' THEN COALESCE(read_at, ${now}) ELSE read_at END,
-          failed_at=CASE WHEN ${status}='failed' THEN COALESCE(failed_at, ${now}) ELSE failed_at END
+          delivery_status=${mirrorStatus},
+          provider_status_updated_at=CASE WHEN ${mirrorChanged ? 1 : 0}=1 THEN ${now} ELSE provider_status_updated_at END,
+          delivered_at=CASE WHEN ${mirrorStatus} IN ('delivered','read') THEN COALESCE(delivered_at, ${now}) ELSE delivered_at END,
+          read_at=CASE WHEN ${mirrorStatus}='read' THEN COALESCE(read_at, ${now}) ELSE read_at END,
+          failed_at=CASE WHEN ${mirrorStatus}='failed' THEN COALESCE(failed_at, ${now}) ELSE failed_at END
         WHERE platform='whatsapp' AND message_id=${messageSid}`);
 
       const [messageRow] = await db.query(sql`SELECT id, sender_name, slack_thread_ts, workflow_run_id
@@ -199,31 +201,27 @@ function buildRouter(getDb, overrides = {}) {
         WHERE platform='whatsapp' AND slack_thread_ts=${messageRow.slack_thread_ts} AND sender_id!='outbound'
         ORDER BY id DESC LIMIT 1
       `) : [];
-      res.status(200).type('text/xml').send('<Response></Response>');
-
-      if (transition.changed || (!transition.found && messageRow)) {
+      if (transition.changed || (!transition.found && mirrorChanged)) {
         const target = transition.effect?.target_json ? JSON.parse(transition.effect.target_json) : {};
         const threadTs = target.slackThreadTs || messageRow?.slack_thread_ts || null;
         const recipient = target.senderName || inboundRow?.sender_name || messageRow?.sender_name || 'guest';
-        const notification = status === 'delivered'
+        const notification = mirrorStatus === 'delivered'
           ? `✅ WhatsApp to *${recipient}* was delivered. (Twilio-confirmed)`
-          : status === 'read'
+          : mirrorStatus === 'read'
             ? `👁️ WhatsApp to *${recipient}* was read. (Twilio-confirmed)`
-            : status === 'failed'
+            : mirrorStatus === 'failed'
               ? `❌ WhatsApp to *${recipient}* failed: ${body.ErrorCode || providerStatus}.`
               : null;
         if (notification && threadTs) {
-          const postedTs = await slackPost(notification, threadTs);
-          if (!postedTs) {
-            await enqueueOutbox(db, {
-              runId: transition.effect?.run_id || messageRow?.workflow_run_id || null,
-              topic: 'slack.notification',
-              idempotencyKey: `whatsapp:status:${messageSid}:${status}:slack`,
-              payload: { channelId: WHATSAPP_CHANNEL, threadTs, message: notification },
-            });
-          }
+          await enqueueOutbox(db, {
+            runId: transition.effect?.run_id || messageRow?.workflow_run_id || null,
+            topic: 'slack.notification',
+            idempotencyKey: `whatsapp:status:${messageSid}:${mirrorStatus}:slack`,
+            payload: { channelId: WHATSAPP_CHANNEL, threadTs, message: notification },
+          });
         }
       }
+      res.status(200).type('text/xml').send('<Response></Response>');
     } catch (error) {
       console.error('[whatsapp/status] Processing error:', error.message);
       if (!res.headersSent) res.status(500).type('text/xml').send('<Response></Response>');
@@ -271,9 +269,15 @@ function buildRouter(getDb, overrides = {}) {
     const db = getDb();
     if (!db) return res.status(503).json({ error: 'DB not ready' });
     const sid = String(req.params.sid || '').slice(0, 80);
-    const [row] = await db.query(sql`SELECT message_id, sender_name, delivery_status,
-        provider_status_updated_at, delivered_at, read_at, failed_at, workflow_run_id, workflow_effect_id
-      FROM meta_messages WHERE platform='whatsapp' AND message_id=${sid} LIMIT 1`);
+    const [row] = await db.query(sql`SELECT m.message_id, m.sender_name,
+        COALESCE(e.status, m.delivery_status) AS delivery_status,
+        m.provider_status_updated_at,
+        COALESCE(e.delivered_at, m.delivered_at) AS delivered_at,
+        COALESCE(e.read_at, m.read_at) AS read_at,
+        COALESCE(e.failed_at, m.failed_at) AS failed_at,
+        m.workflow_run_id, m.workflow_effect_id
+      FROM meta_messages m LEFT JOIN workflow_effects e ON e.id=m.workflow_effect_id
+      WHERE m.platform='whatsapp' AND m.message_id=${sid} LIMIT 1`);
     if (!row) return res.status(404).json({ error: 'WhatsApp message not found' });
     const status = row.delivery_status || 'accepted_by_provider';
     return res.json({

@@ -9,7 +9,6 @@ const WORKFLOW_SCHEMA = {
     workflow: {
       type: 'string',
       enum: [
-        'whatsapp.reply',
         'receipt.ingest',
         'receipt.annotate',
         'receipt.reconcile',
@@ -49,6 +48,12 @@ const WORKFLOW_SCHEMA = {
   },
 };
 
+const COMMAND_ONLY_WORKFLOWS = new Set([
+  'whatsapp.reply',
+  'meta.dm.reply',
+  'ownerrez.mutation.confirm',
+]);
+
 function pluginConfig(value = {}) {
   const parsed = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
@@ -56,6 +61,7 @@ function pluginConfig(value = {}) {
     crmBaseUrl: String(parsed.crmBaseUrl || 'http://127.0.0.1:3456').replace(/\/+$/, ''),
     slackAccountId: String(parsed.slackAccountId || ''),
     whatsappChannelIds: new Set(Array.isArray(parsed.whatsappChannelIds) ? parsed.whatsappChannelIds.filter(Boolean) : []),
+    socialChannelIds: new Set(Array.isArray(parsed.socialChannelIds) ? parsed.socialChannelIds.filter(Boolean) : []),
     ownerrezChannelIds: new Set(Array.isArray(parsed.ownerrezChannelIds) ? parsed.ownerrezChannelIds.filter(Boolean) : []),
     receiptChannelIds: new Set(Array.isArray(parsed.receiptChannelIds) ? parsed.receiptChannelIds.filter(Boolean) : []),
     controlledChannelIds: new Set(Array.isArray(parsed.controlledChannelIds) ? parsed.controlledChannelIds.filter(Boolean) : []),
@@ -68,6 +74,11 @@ function pluginConfig(value = {}) {
 
 function workflowIsLive(config, workflowName) {
   return !config.shadowMode || config.liveWorkflowNames.has(workflowName);
+}
+
+function trustedMessageId(event, ctx) {
+  const value = event?.messageId || ctx?.messageId;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function controlPlaneToken(config) {
@@ -141,6 +152,14 @@ export function formatWorkflowReply(payload) {
   const run = payload?.run;
   if (!run) return 'The workflow returned no durable run record.';
   if (run.status !== 'completed') {
+    const acceptedEffect = Array.isArray(run.effects)
+      ? run.effects.find(effect => effect.provider_ref && [
+        'accepted_by_provider', 'queued', 'sent', 'delivered', 'read', 'manual_review',
+      ].includes(effect.status))
+      : null;
+    if (acceptedEffect) {
+      return `Workflow ${run.id} is ${run.status}, but provider acceptance ${acceptedEffect.provider_ref} is recorded in effect ${acceptedEffect.id}. Do not resend. Follow the manual-review alert or inspect provider state before taking any action.`;
+    }
     return `Workflow ${run.id} is ${run.status}. No delivery claim can be made.${run.error_message ? ` Error: ${run.error_message}` : ''}`;
   }
   if (run.workflow_name === 'whatsapp.reply') {
@@ -149,6 +168,14 @@ export function formatWorkflowReply(payload) {
       `WhatsApp request recorded for ${output.recipient || 'the guest'}.`,
       `Provider state: ${output.status || 'accepted_by_provider'}.`,
       statusTruth(output.status),
+      `Workflow: ${run.id}${output.effectId ? ` · Effect: ${output.effectId}` : ''}`,
+    ].join('\n');
+  }
+  if (run.workflow_name === 'meta.dm.reply') {
+    const output = run.output || {};
+    return [
+      `Meta DM request recorded for ${output.recipient || 'the guest'} on ${output.platform || 'Meta'}.`,
+      `Provider state: ${output.status || 'accepted_by_provider'}. Delivery/read is not confirmed.`,
       `Workflow: ${run.id}${output.effectId ? ` · Effect: ${output.effectId}` : ''}`,
     ].join('\n');
   }
@@ -201,6 +228,7 @@ async function callControlPlane(config, { workflow, input, context, idempotencyK
         channel_id: context.channelId,
         actor_user_id: context.actorUserId,
         message_id: context.messageId || null,
+        entrypoint: context.entrypoint || 'model_tool',
       },
       idempotency_key: idempotencyKey,
     }),
@@ -212,7 +240,19 @@ async function callControlPlane(config, { workflow, input, context, idempotencyK
     error.code = payload.code || `workflow_http_${response.status}`;
     throw error;
   }
-  return payload;
+  let latest = payload;
+  const deadline = Date.now() + 55_000;
+  while (latest?.run && ['queued', 'running', 'retry'].includes(latest.run.status) && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const runResponse = await fetchImpl(`${config.crmBaseUrl}/api/workflows/runs/${encodeURIComponent(latest.run.id)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const polled = await runResponse.json().catch(() => ({}));
+    if (!runResponse.ok) break;
+    latest = polled;
+  }
+  return latest;
 }
 
 export function createWorkflowTool({ config, ctx, fetchImpl = fetch }) {
@@ -224,6 +264,11 @@ export function createWorkflowTool({ config, ctx, fetchImpl = fetch }) {
     parameters: WORKFLOW_SCHEMA,
     async execute(toolCallId, rawParams) {
       const workflow = String(rawParams?.workflow || '');
+      if (COMMAND_ONLY_WORKFLOWS.has(workflow)) {
+        const error = new Error(`${workflow} requires its explicit Slack command and cannot be called by the model tool`);
+        error.code = 'workflow_command_required';
+        throw error;
+      }
       const rawInput = rawParams?.input && typeof rawParams.input === 'object' ? rawParams.input : {};
       if (!channelId || !ctx.requesterSenderId) throw new Error('trusted Slack channel/user context is unavailable');
       const input = {
@@ -240,6 +285,7 @@ export function createWorkflowTool({ config, ctx, fetchImpl = fetch }) {
           channelId,
           actorUserId: ctx.requesterSenderId,
           messageId: null,
+          entrypoint: 'model_tool',
         },
         idempotencyKey: `openclaw:${ctx.sessionId || ctx.sessionKey || 'session'}:${digest}`,
       }, fetchImpl);
@@ -257,6 +303,57 @@ export function parseWhatsAppCommand(text, { hasThread = false } = {}) {
   const match = remainder.match(/^(\d+)\s+([\s\S]+)$/);
   if (!match) return { error: 'dm_id_required' };
   return { dmId: Number(match[1]), message: match[2].trim() };
+}
+
+export function parseMetaDmCommand(text) {
+  const body = String(text || '').trim();
+  if (!/^!dm(?:\s|$)/i.test(body)) return null;
+  const match = body.match(/^!dm\s+(\d+)\s+([\s\S]+)$/i);
+  if (!match || !match[2].trim()) return { error: 'invalid_meta_dm_command' };
+  return { dmId: Number(match[1]), message: match[2].trim() };
+}
+
+export function parseManualReviewCommand(text) {
+  const body = String(text || '').trim();
+  if (!/^!review(?:\s|$)/i.test(body)) return null;
+  const sent = body.match(/^!review\s+resolve\s+([0-9a-f-]{36})\s+sent\s+([^\s]{2,160})$/i);
+  if (sent) return { reviewId: sent[1].toLowerCase(), resolution: 'confirmed_sent', providerRef: sent[2] };
+  const terminal = body.match(/^!review\s+resolve\s+([0-9a-f-]{36})\s+(not-sent|abandon)$/i);
+  if (terminal) return {
+    reviewId: terminal[1].toLowerCase(),
+    resolution: terminal[2].toLowerCase() === 'not-sent' ? 'confirmed_not_sent' : 'abandoned',
+    providerRef: null,
+  };
+  return { error: 'invalid_manual_review_command' };
+}
+
+async function resolveManualReview(config, request, fetchImpl = fetch) {
+  const token = controlPlaneToken(config);
+  if (!token || token.length < 32) throw new Error('workflow control-plane token is unavailable');
+  const response = await fetchImpl(
+    `${config.crmBaseUrl}/api/workflows/manual-reviews/${encodeURIComponent(request.reviewId)}/resolve`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        resolution: request.resolution,
+        provider_ref: request.providerRef,
+        context: {
+          channel_id: request.channelId,
+          actor_user_id: request.actorUserId,
+          entrypoint: 'slack_manual_review_command',
+        },
+      }),
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `manual review endpoint returned ${response.status}`);
+    error.code = payload.code || `workflow_http_${response.status}`;
+    throw error;
+  }
+  return payload;
 }
 
 export function parseOwnerRezConfirmCommand(text) {
@@ -292,6 +389,10 @@ export function createInboundClaimHandler({ config, execute = callControlPlane, 
       const usage = event.threadId ? '`!wa your message`' : '`!wa <wa-id> your message`';
       return { handled: true, reply: { text: `Not sent. Usage: ${usage}` } };
     }
+    const messageId = trustedMessageId(event, ctx);
+    if (!messageId) {
+      return { handled: true, reply: { text: 'Not sent. Slack did not provide a stable message ID, so this command cannot be deduplicated safely.' } };
+    }
     try {
       const payload = await execute(config, {
         workflow: 'whatsapp.reply',
@@ -303,9 +404,10 @@ export function createInboundClaimHandler({ config, execute = callControlPlane, 
         context: {
           channelId,
           actorUserId: event.senderId || ctx?.senderId,
-          messageId: event.messageId || ctx?.messageId,
+          messageId,
+          entrypoint: 'slack_whatsapp_command',
         },
-        idempotencyKey: `slack:${channelId}:${event.messageId || crypto.randomUUID()}:whatsapp.reply`,
+        idempotencyKey: `slack:${channelId}:${messageId}:whatsapp.reply`,
       });
       return { handled: true, reply: { text: formatWorkflowReply(payload) } };
     } catch (error) {
@@ -339,6 +441,10 @@ export function createOwnerRezClaimHandler({ config, execute = callControlPlane,
         reply: { text: 'Not changed. Use the exact confirmation command emitted by the proposal workflow.' },
       };
     }
+    const messageId = trustedMessageId(event, ctx);
+    if (!messageId) {
+      return { handled: true, reply: { text: 'Not changed. Slack did not provide a stable message ID, so this confirmation cannot be deduplicated safely.' } };
+    }
     try {
       const payload = await execute(config, {
         workflow: 'ownerrez.mutation.confirm',
@@ -346,9 +452,10 @@ export function createOwnerRezClaimHandler({ config, execute = callControlPlane,
         context: {
           channelId,
           actorUserId: event.senderId || ctx?.senderId,
-          messageId: event.messageId || ctx?.messageId,
+          messageId,
+          entrypoint: 'slack_ownerrez_command',
         },
-        idempotencyKey: `slack:${channelId}:${event.messageId || crypto.randomUUID()}:ownerrez.mutation.confirm`,
+        idempotencyKey: `slack:${channelId}:${messageId}:ownerrez.mutation.confirm`,
       });
       return { handled: true, reply: { text: formatWorkflowReply(payload) } };
     } catch (error) {
@@ -357,6 +464,78 @@ export function createOwnerRezClaimHandler({ config, execute = callControlPlane,
         handled: true,
         reply: { text: `Not changed. The OwnerRez confirmation failed before verified readback (${error.code || 'workflow_error'}).` },
       };
+    }
+  };
+}
+
+export function createMetaDmClaimHandler({ config, execute = callControlPlane, logger = null } = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    if (!config.socialChannelIds.has(channelId)) return undefined;
+    const command = parseMetaDmCommand(event.bodyForAgent || event.body || event.content || '');
+    if (!command) return undefined;
+    if (!workflowIsLive(config, 'meta.dm.reply')) {
+      return { handled: true, reply: { text: 'Not sent. Meta DM replies are still in shadow mode.' } };
+    }
+    if (command.error) {
+      return { handled: true, reply: { text: 'Not sent. Use `!dm <dm-id> your message`.' } };
+    }
+    const messageId = trustedMessageId(event, ctx);
+    if (!messageId) {
+      return { handled: true, reply: { text: 'Not sent. Slack did not provide a stable message ID, so this command cannot be deduplicated safely.' } };
+    }
+    try {
+      const payload = await execute(config, {
+        workflow: 'meta.dm.reply',
+        input: { ...command, actorName: event.senderName || event.senderUsername || 'Staff' },
+        context: {
+          channelId,
+          actorUserId: event.senderId || ctx?.senderId,
+          messageId,
+          entrypoint: 'slack_meta_dm_command',
+        },
+        idempotencyKey: `slack:${channelId}:${messageId}:meta.dm.reply`,
+      });
+      return { handled: true, reply: { text: formatWorkflowReply(payload) } };
+    } catch (error) {
+      logger?.error?.(`resort-workflows Meta DM command failed: ${error.message}`);
+      return {
+        handled: true,
+        reply: { text: `Not sent. The durable Meta DM workflow did not record provider acceptance (${error.code || 'workflow_error'}).` },
+      };
+    }
+  };
+}
+
+export function createManualReviewClaimHandler({ config, resolve = resolveManualReview, logger = null } = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    if (!config.controlledChannelIds.has(channelId)) return undefined;
+    const command = parseManualReviewCommand(event.bodyForAgent || event.body || event.content || '');
+    if (!command) return undefined;
+    if (command.error) {
+      return {
+        handled: true,
+        reply: { text: 'Review not changed. Use `!review resolve <review-id> sent <provider-id>`, `not-sent`, or `abandon`.' },
+      };
+    }
+    try {
+      const payload = await resolve(config, {
+        ...command,
+        channelId,
+        actorUserId: event.senderId || ctx?.senderId,
+      });
+      return {
+        handled: true,
+        reply: { text: `Manual review ${payload.review.id} resolved as ${payload.review.resolution}.` },
+      };
+    } catch (error) {
+      logger?.error?.(`resort-workflows manual review resolution failed: ${error.message}`);
+      return { handled: true, reply: { text: `Review not changed (${error.code || 'workflow_error'}).` } };
     }
   };
 }
@@ -422,7 +601,7 @@ export function createReceiptHandler({ config, execute = callControlPlane, logge
           submittedAt: eventTimestampIso(event.timestamp),
           fileRefs: extractFileRefs(event.metadata || {}),
         },
-        context: { channelId, actorUserId, messageId },
+        context: { channelId, actorUserId, messageId, entrypoint: 'slack_receipt_hook' },
         idempotencyKey: `slack:${channelId}:${messageId}:receipt.ingest`,
       });
     } catch (error) {
@@ -443,6 +622,8 @@ const plugin = {
     }, { name: 'resort_workflow' });
     api.on('inbound_claim', createInboundClaimHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });
     api.on('inbound_claim', createOwnerRezClaimHandler({ config, logger: api.logger }), { priority: 210, timeoutMs: 70_000 });
+    api.on('inbound_claim', createMetaDmClaimHandler({ config, logger: api.logger }), { priority: 205, timeoutMs: 70_000 });
+    api.on('inbound_claim', createManualReviewClaimHandler({ config, logger: api.logger }), { priority: 220, timeoutMs: 35_000 });
     api.on('message_received', createReceiptHandler({ config, logger: api.logger }), { priority: 100, timeoutMs: 70_000 });
     api.on('before_agent_finalize', createFinalizeHandler({ config }), { priority: 100, timeoutMs: 5_000 });
   },

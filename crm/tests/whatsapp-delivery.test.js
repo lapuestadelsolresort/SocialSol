@@ -77,6 +77,18 @@ test('Twilio send request registers the delivery/read callback and returns provi
   assert.equal(form.get('To'), 'whatsapp:+14155550100');
 });
 
+test('Twilio transport ambiguity is marked non-retryable', async () => {
+  await assert.rejects(() => sendWhatsApp({
+    toPhone: '+14155550100',
+    message: 'One attempt',
+    secrets: {
+      account_sid: 'AC-TEST', api_key_sid: 'SK-TEST', api_key_secret: 'secret',
+      whatsapp_number: '+15550001111',
+    },
+    fetchImpl: async () => { throw new Error('connection reset'); },
+  }), error => error.code === 'ambiguous_external_result' && error.retryable === false);
+});
+
 test('legacy HTTP send endpoints cannot bypass the #whatsapp control plane', async () => {
   await withDb(async db => {
     const app = express();
@@ -93,7 +105,7 @@ test('legacy HTTP send endpoints cannot bypass the #whatsapp control plane', asy
   });
 });
 
-test('signed Twilio callbacks persist delivered/read facts and report them in the Slack thread', async () => {
+test('signed Twilio callbacks persist monotonic delivered/read facts and queue durable Slack reports', async () => {
   await withDb(async db => {
     await db.query(sql`INSERT INTO meta_messages
       (received_at, platform, sender_id, sender_name, message_id, message_text, slack_thread_ts, direction)
@@ -129,10 +141,25 @@ test('signed Twilio callbacks persist delivered/read facts and report them in th
     assert.equal(row.delivery_status, 'read');
     assert.ok(row.delivered_at);
     assert.ok(row.read_at);
-    assert.equal(slack.length, 2);
-    assert.match(slack[0].message, /delivered.*Twilio-confirmed/i);
-    assert.match(slack[1].message, /read.*Twilio-confirmed/i);
-    assert.equal(slack[0].threadTs, '123.456');
+    assert.equal(slack.length, 0, 'status notifications must never bypass the outbox');
+    const outbox = await db.query(sql`SELECT idempotency_key, payload_json FROM workflow_outbox
+      WHERE idempotency_key LIKE 'whatsapp:status:SM-OUT:%' ORDER BY idempotency_key`);
+    assert.equal(outbox.length, 2);
+    assert.match(outbox.map(row => row.payload_json).join('\n'), /delivered.*Twilio-confirmed/i);
+    assert.match(outbox.map(row => row.payload_json).join('\n'), /read.*Twilio-confirmed/i);
+
+    const staleParams = { AccountSid: 'AC-TEST', MessageSid: 'SM-OUT', MessageStatus: 'sent' };
+    const staleResponse = await request(app, '/webhook/twilio-whatsapp/status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-Twilio-Signature': signTwilio(callbackUrl, staleParams, secrets.auth_token),
+      },
+      body: new URLSearchParams(staleParams).toString(),
+    });
+    assert.equal(staleResponse.status, 200);
+    const [afterStale] = await db.query(sql`SELECT delivery_status FROM meta_messages WHERE message_id='SM-OUT'`);
+    assert.equal(afterStale.delivery_status, 'read');
     delete process.env.TWILIO_STATUS_CALLBACK_URL;
   });
 });

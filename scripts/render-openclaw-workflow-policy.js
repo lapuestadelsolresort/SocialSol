@@ -65,6 +65,7 @@ function render({ policy, currentConfig, pluginIds = [] }) {
         : hasCapabilities ? 'Use resort_workflow for durable, channel-authorized resort operations.'
           : noAuthorityPrompt(channel.name));
     const hasLiveMutation = (channel.name === 'whatsapp' && liveWorkflows.has('whatsapp.reply'))
+      || (channel.name === 'social-sol' && liveWorkflows.has('meta.dm.reply'))
       || (channel.name === 'reservations' && liveWorkflows.has('ownerrez.mutation.confirm'))
       || (receipt && liveWorkflows.has('receipt.ingest'));
     channels[channelId] = {
@@ -92,6 +93,9 @@ function render({ policy, currentConfig, pluginIds = [] }) {
     .map(([id]) => id);
   const whatsappChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.name === 'whatsapp')
+    .map(([id]) => id);
+  const socialChannelIds = Object.entries(policy.channels || {})
+    .filter(([, channel]) => channel.name === 'social-sol')
     .map(([id]) => id);
   const ownerrezChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.capabilities.includes('ownerrez.write'))
@@ -125,6 +129,7 @@ function render({ policy, currentConfig, pluginIds = [] }) {
             crmBaseUrl: 'http://127.0.0.1:3456',
             slackAccountId: accountId,
             whatsappChannelIds,
+            socialChannelIds,
             ownerrezChannelIds,
             receiptChannelIds,
             controlledChannelIds: Object.keys(policy.channels || {}),

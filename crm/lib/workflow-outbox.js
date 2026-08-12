@@ -11,40 +11,60 @@ function backoffSeconds(attempts) {
 
 async function claimNext(db, { workerId, leaseSeconds = 60 } = {}) {
   const owner = workerId || `worker-${crypto.randomUUID()}`;
+  const leaseToken = crypto.randomUUID();
   const now = new Date().toISOString();
   const leaseExpires = new Date(Date.now() + leaseSeconds * 1000).toISOString();
   return db.tx(async tx => {
     const [candidate] = await tx.query(sql`SELECT * FROM workflow_outbox
-      WHERE status IN ('pending','retry') AND available_at <= ${now}
-        AND (lease_expires_at IS NULL OR lease_expires_at < ${now})
+      WHERE ((status IN ('pending','retry') AND available_at <= ${now})
+        OR (status='leased' AND lease_expires_at < ${now}))
       ORDER BY created_at, id LIMIT 1`);
     if (!candidate) return null;
     await tx.query(sql`UPDATE workflow_outbox SET
         status='leased', lease_owner=${owner}, lease_expires_at=${leaseExpires},
+        lease_token=${leaseToken}, lease_version=lease_version+1,
         attempts=attempts+1, updated_at=${now}
-      WHERE id=${candidate.id} AND status IN ('pending','retry')`);
-    const [claimed] = await tx.query(sql`SELECT * FROM workflow_outbox WHERE id=${candidate.id} AND lease_owner=${owner}`);
+      WHERE id=${candidate.id} AND ((status IN ('pending','retry') AND available_at <= ${now})
+        OR (status='leased' AND lease_expires_at < ${now}))`);
+    const [claimed] = await tx.query(sql`SELECT * FROM workflow_outbox
+      WHERE id=${candidate.id} AND lease_owner=${owner} AND lease_token=${leaseToken}`);
     return claimed || null;
   });
 }
 
 async function completeOutbox(db, row) {
   const now = new Date().toISOString();
-  await db.query(sql`UPDATE workflow_outbox SET
-    status='completed', completed_at=${now}, updated_at=${now},
-    lease_owner=NULL, lease_expires_at=NULL, last_error=NULL
-    WHERE id=${row.id}`);
+  await db.tx(async tx => {
+    const [current] = await tx.query(sql`SELECT status, lease_token FROM workflow_outbox WHERE id=${row.id}`);
+    if (!current || current.status !== 'leased' || current.lease_token !== row.lease_token) {
+      const error = new Error('outbox lease was lost before completion');
+      error.code = 'outbox_lease_lost';
+      throw error;
+    }
+    await tx.query(sql`UPDATE workflow_outbox SET
+      status='completed', completed_at=${now}, updated_at=${now},
+      lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL, last_error=NULL
+      WHERE id=${row.id} AND status='leased' AND lease_token=${row.lease_token}`);
+  });
 }
 
 async function failOutbox(db, row, error) {
   const now = new Date().toISOString();
   const dead = row.attempts >= row.max_attempts;
   const availableAt = new Date(Date.now() + backoffSeconds(row.attempts) * 1000).toISOString();
-  await db.query(sql`UPDATE workflow_outbox SET
-    status=${dead ? 'dead' : 'retry'}, available_at=${availableAt},
-    updated_at=${now}, lease_owner=NULL, lease_expires_at=NULL,
-    last_error=${String(error?.message || error || 'outbox error').slice(0, 1000)}
-    WHERE id=${row.id}`);
+  await db.tx(async tx => {
+    const [current] = await tx.query(sql`SELECT status, lease_token FROM workflow_outbox WHERE id=${row.id}`);
+    if (!current || current.status !== 'leased' || current.lease_token !== row.lease_token) {
+      const lost = new Error('outbox lease was lost before failure could be recorded');
+      lost.code = 'outbox_lease_lost';
+      throw lost;
+    }
+    await tx.query(sql`UPDATE workflow_outbox SET
+      status=${dead ? 'dead' : 'retry'}, available_at=${availableAt},
+      updated_at=${now}, lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL,
+      last_error=${String(error?.message || error || 'outbox error').slice(0, 1000)}
+      WHERE id=${row.id} AND status='leased' AND lease_token=${row.lease_token}`);
+  });
 }
 
 async function deliverSlackNotification(db, row, payload, services = {}) {
@@ -83,8 +103,14 @@ async function drainOutbox(db, { limit = 100, workerId, services = {} } = {}) {
       await processOutboxRow(db, row, services);
       summary.completed += 1;
     } catch (error) {
-      await failOutbox(db, row, error);
-      summary.failed += 1;
+      try {
+        await failOutbox(db, row, error);
+        summary.failed += 1;
+      } catch (leaseError) {
+        if (leaseError.code !== 'outbox_lease_lost') throw leaseError;
+        // Another worker reclaimed the expired lease while this delivery was
+        // in flight. The stale worker must not overwrite the new owner's state.
+      }
     }
   }
   return summary;

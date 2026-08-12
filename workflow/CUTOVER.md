@@ -5,6 +5,12 @@ or loading them and merging the OpenClaw patch are production cutovers.
 
 ## 1. Preflight
 
+The serving checkout is a deployment boundary. Before editing or restarting a
+process, record the reviewed Git commit and ensure every intended change is
+committed. A CRM/worker process started before a source-file edit is stale even
+though its command points at the same path; the health monitor reports this as
+`runtime_code_drift`. Never use an incidental crash or reboot as a deployment.
+
 ```bash
 npm run init:runtime
 npm run setup:workflow-token
@@ -15,6 +21,13 @@ npm run validate:openclaw-shadow
 PYTHONPATH=automation python3 automation/backup_restore_drill.py
 ```
 
+Require `git diff --check` to pass and review every remaining `git status
+--short` entry. Unrelated user work must not be bundled into the deployment.
+Restart CRM first so additive schema migrations complete, then restart the
+worker and health/restore agents from the same reviewed commit. Confirm
+`schema_migration_required=0`, `runtime_code_drift=0`, and
+`runtime_process_missing=0` before any live command.
+
 Confirm `workflow/policy.json` still has `"shadow_mode": true`. Review the
 rendered OpenClaw patch and generated plists. Do not replace the full OpenClaw
 config with the patch; merge only its Slack channel policy and plugin sections.
@@ -23,6 +36,20 @@ validates it, and creates a mode-600 config backup before the atomic write.
 `npm run install:shadow-services` installs only the durable worker, health
 monitor, weekly restore drill, and the repaired legacy GTKU environment; it
 does not install any graph producer.
+
+Before deploying this control-plane version, add the intended explicit
+exceptions to the ignored runtime policy and review them as production
+authority:
+
+```json
+{
+  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "ownerrez.mutation.confirm"],
+  "always_on_effects": ["whatsapp.inbound.process:send_conversion"]
+}
+```
+
+`always_on_effects` is step-specific; it does not make the rest of the inbound
+workflow or any other external mutation live.
 
 ## 2. Shadow observation and narrow live workflows
 
@@ -35,6 +62,15 @@ shadow mode. Existing production jobs remain active. Confirm:
 - read workflows return evidence-backed results in every controlled channel;
 - no final response can retain an unsupported sent/published/delivered claim;
 - the worker, CRM, tunnel, backup, restore drill, and watchdog remain healthy.
+- no queued run executes in the HTTP request process; the fenced worker claims
+  it and renews its lease;
+- an injected provider timeout creates one open manual review and never a
+  second provider POST.
+- an injected post-acceptance local projection failure retries only the local
+  step, records one provider POST, and blocks a concurrent human resend;
+- two conflicting manual-review resolutions produce one winner and one 409;
+- a lease renewal racing stale recovery creates no review and does not stop the
+  worker's other subsystems.
 
 Global `shadow_mode` can remain true while a reviewed workflow is listed in
 `live_workflows`. This is the supported narrow-cutover mechanism: only that
@@ -69,6 +105,11 @@ staff `!wa` accepted → sent callback → delivered callback → read callback 
 available. The same Slack thread must display exactly the states Twilio
 supplied. Never fabricate a guest message for this test. The direct
 `/api/whatsapp/reply` and `/api/whatsapp/thread-reply` paths must remain retired.
+
+For Meta DMs, add `meta.dm.reply` to `live_workflows` in the same deployment
+that retires `/api/meta-dm/reply`. Confirm an explicit `!dm` records a single
+provider message ID and reports only acceptance; ordinary model prose must not
+invoke the workflow.
 
 ## 4. Rollback
 

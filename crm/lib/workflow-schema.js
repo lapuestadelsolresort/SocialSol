@@ -16,6 +16,10 @@ const SCHEMA_STATEMENTS = [
     channel_id TEXT,
     actor_user_id TEXT,
     input_json TEXT NOT NULL,
+    input_hash TEXT,
+    policy_snapshot_json TEXT,
+    policy_snapshot_hash TEXT,
+    serialization_key TEXT,
     state_json TEXT NOT NULL DEFAULT '{}',
     output_json TEXT,
     current_step TEXT,
@@ -36,6 +40,8 @@ const SCHEMA_STATEMENTS = [
     max_attempts INTEGER NOT NULL DEFAULT 3,
     available_at TEXT NOT NULL DEFAULT (datetime('now')),
     lease_owner TEXT,
+    lease_token TEXT,
+    lease_version INTEGER NOT NULL DEFAULT 0,
     lease_expires_at TEXT,
     input_json TEXT,
     output_json TEXT,
@@ -67,6 +73,8 @@ const SCHEMA_STATEMENTS = [
     request_hash TEXT NOT NULL,
     request_json TEXT,
     status TEXT NOT NULL DEFAULT 'requested',
+    verification_mode TEXT NOT NULL DEFAULT 'readback_required',
+    verification_deadline_at TEXT,
     provider_status TEXT,
     response_json TEXT,
     target_json TEXT,
@@ -79,6 +87,7 @@ const SCHEMA_STATEMENTS = [
     read_at TEXT,
     verified_at TEXT,
     failed_at TEXT,
+    manual_review_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
   `CREATE TABLE IF NOT EXISTS workflow_evidence (
@@ -105,11 +114,30 @@ const SCHEMA_STATEMENTS = [
     max_attempts INTEGER NOT NULL DEFAULT 12,
     available_at TEXT NOT NULL DEFAULT (datetime('now')),
     lease_owner TEXT,
+    lease_token TEXT,
+    lease_version INTEGER NOT NULL DEFAULT 0,
     lease_expires_at TEXT,
     last_error TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     completed_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_manual_reviews (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+    step_key TEXT,
+    effect_id TEXT REFERENCES workflow_effects(id) ON DELETE SET NULL,
+    review_channel_id TEXT,
+    reason_code TEXT NOT NULL,
+    reason_message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    resolution TEXT,
+    resolution_provider_ref TEXT,
+    resolved_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    UNIQUE(run_id, step_key, reason_code)
   )`,
   `CREATE TABLE IF NOT EXISTS accounting_receipts (
     id TEXT PRIMARY KEY,
@@ -229,6 +257,8 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status, updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_runs_channel ON workflow_runs(channel_id, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_serialization
+     ON workflow_runs(serialization_key) WHERE serialization_key IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_steps_due ON workflow_steps(status, available_at)`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_events_run ON workflow_events(run_id, id)`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_effects_run ON workflow_effects(run_id, requested_at)`,
@@ -238,6 +268,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_workflow_effects_status ON workflow_effects(provider, status, updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_evidence_run ON workflow_evidence(run_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_outbox_due ON workflow_outbox(status, available_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_workflow_manual_reviews_status
+     ON workflow_manual_reviews(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_accounting_receipts_status ON accounting_receipts(status, submitted_at)`,
   `CREATE INDEX IF NOT EXISTS idx_accounting_reconciliations_status ON accounting_reconciliations(status, updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_accounting_bank_txn_match ON accounting_bank_transactions(transaction_date, amount, currency)`,
@@ -271,8 +303,63 @@ const OWNERREZ_EVENT_COLUMNS = [
   'processing_error TEXT',
 ];
 
+const OUTREACH_SEND_COLUMNS = [
+  'workflow_run_id TEXT',
+];
+
+const WORKFLOW_RUN_COLUMNS = [
+  'input_hash TEXT',
+  'policy_snapshot_json TEXT',
+  'policy_snapshot_hash TEXT',
+  'serialization_key TEXT',
+];
+
+const WORKFLOW_STEP_COLUMNS = [
+  'lease_token TEXT',
+  'lease_version INTEGER NOT NULL DEFAULT 0',
+];
+
+const WORKFLOW_EFFECT_COLUMNS = [
+  'manual_review_at TEXT',
+  "verification_mode TEXT NOT NULL DEFAULT 'readback_required'",
+  'verification_deadline_at TEXT',
+];
+
+const WORKFLOW_MANUAL_REVIEW_COLUMNS = [
+  'resolution_provider_ref TEXT',
+  'review_channel_id TEXT',
+];
+
+const WORKFLOW_OUTBOX_COLUMNS = [
+  'lease_token TEXT',
+  'lease_version INTEGER NOT NULL DEFAULT 0',
+];
+
+function ensureColumnsBetterSqlite(db, table, specs) {
+  const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
+  for (const spec of specs) {
+    const name = spec.split(/\s+/, 1)[0];
+    if (!columns.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${spec}`);
+  }
+}
+
+async function ensureColumnsAsync(db, sql, table, specs) {
+  const columns = new Set((await db.query(sql.__dangerous__rawValue(`PRAGMA table_info(${table})`))).map(row => row.name));
+  for (const spec of specs) {
+    const name = spec.split(/\s+/, 1)[0];
+    if (!columns.has(name)) {
+      await db.query(sql.__dangerous__rawValue(`ALTER TABLE ${table} ADD COLUMN ${spec}`));
+    }
+  }
+}
+
 function ensureSchemaBetterSqlite(db) {
   for (const statement of SCHEMA_STATEMENTS) db.exec(statement);
+  ensureColumnsBetterSqlite(db, 'workflow_runs', WORKFLOW_RUN_COLUMNS);
+  ensureColumnsBetterSqlite(db, 'workflow_steps', WORKFLOW_STEP_COLUMNS);
+  ensureColumnsBetterSqlite(db, 'workflow_effects', WORKFLOW_EFFECT_COLUMNS);
+  ensureColumnsBetterSqlite(db, 'workflow_manual_reviews', WORKFLOW_MANUAL_REVIEW_COLUMNS);
+  ensureColumnsBetterSqlite(db, 'workflow_outbox', WORKFLOW_OUTBOX_COLUMNS);
   const columns = new Set(db.prepare('PRAGMA table_info(meta_messages)').all().map(row => row.name));
   if (columns.size > 0) {
     for (const spec of META_MESSAGE_COLUMNS) {
@@ -290,12 +377,25 @@ function ensureSchemaBetterSqlite(db) {
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_ownerrez_events_payload_hash
     ON ownerrez_events(payload_hash) WHERE payload_hash IS NOT NULL`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_ownerrez_events_processing ON ownerrez_events(processing_status, received_at)');
+  const outreachColumns = new Set(db.prepare('PRAGMA table_info(outreach_sends)').all().map(row => row.name));
+  if (outreachColumns.size > 0) {
+    for (const spec of OUTREACH_SEND_COLUMNS) {
+      const name = spec.split(/\s+/, 1)[0];
+      if (!outreachColumns.has(name)) db.exec(`ALTER TABLE outreach_sends ADD COLUMN ${spec}`);
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_outreach_sends_workflow_run ON outreach_sends(workflow_run_id)');
+  }
 }
 
 async function ensureSchemaAsync(db, sql) {
   for (const statement of SCHEMA_STATEMENTS) {
     await db.query(sql.__dangerous__rawValue(statement));
   }
+  await ensureColumnsAsync(db, sql, 'workflow_runs', WORKFLOW_RUN_COLUMNS);
+  await ensureColumnsAsync(db, sql, 'workflow_steps', WORKFLOW_STEP_COLUMNS);
+  await ensureColumnsAsync(db, sql, 'workflow_effects', WORKFLOW_EFFECT_COLUMNS);
+  await ensureColumnsAsync(db, sql, 'workflow_manual_reviews', WORKFLOW_MANUAL_REVIEW_COLUMNS);
+  await ensureColumnsAsync(db, sql, 'workflow_outbox', WORKFLOW_OUTBOX_COLUMNS);
   const columns = new Set((await db.query(sql`PRAGMA table_info(meta_messages)`)).map(row => row.name));
   if (columns.size > 0) {
     for (const spec of META_MESSAGE_COLUMNS) {
@@ -319,12 +419,29 @@ async function ensureSchemaAsync(db, sql) {
     ON ownerrez_events(payload_hash) WHERE payload_hash IS NOT NULL`);
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_ownerrez_events_processing
     ON ownerrez_events(processing_status, received_at)`);
+  const outreachColumns = new Set((await db.query(sql`PRAGMA table_info(outreach_sends)`)).map(row => row.name));
+  if (outreachColumns.size > 0) {
+    for (const spec of OUTREACH_SEND_COLUMNS) {
+      const name = spec.split(/\s+/, 1)[0];
+      if (!outreachColumns.has(name)) {
+        await db.query(sql.__dangerous__rawValue(`ALTER TABLE outreach_sends ADD COLUMN ${spec}`));
+      }
+    }
+    await db.query(sql`CREATE INDEX IF NOT EXISTS idx_outreach_sends_workflow_run
+      ON outreach_sends(workflow_run_id)`);
+  }
 }
 
 module.exports = {
   META_MESSAGE_COLUMNS,
   OWNERREZ_EVENT_COLUMNS,
+  OUTREACH_SEND_COLUMNS,
   SCHEMA_STATEMENTS,
+  WORKFLOW_EFFECT_COLUMNS,
+  WORKFLOW_MANUAL_REVIEW_COLUMNS,
+  WORKFLOW_RUN_COLUMNS,
+  WORKFLOW_OUTBOX_COLUMNS,
+  WORKFLOW_STEP_COLUMNS,
   ensureSchemaAsync,
   ensureSchemaBetterSqlite,
 };

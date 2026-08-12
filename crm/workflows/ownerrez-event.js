@@ -43,14 +43,15 @@ function eventNotification(eventType, event) {
 
 const definition = {
   name: 'ownerrez.webhook.process',
-  version: 1,
+  version: 2,
   capability: 'crm.write',
   mutates: true,
   autonomous: true,
+  allowInShadow: true,
   validate,
   steps: [
     {
-      key: 'load_event', maxAttempts: 1,
+      key: 'load_event', effectClass: 'read', maxAttempts: 1,
       async run({ db, input }) {
         const [row] = await db.query(sql`SELECT id, event_type, payload, payload_hash,
           received_at, processed, processing_status FROM ownerrez_events WHERE id=${Number(input.eventId)}`);
@@ -61,7 +62,7 @@ const definition = {
       },
     },
     {
-      key: 'register_effect', maxAttempts: 1,
+      key: 'register_effect', effectClass: 'local_write', maxAttempts: 1,
       async run({ db, run, state, store, stepKey }) {
         const effect = await store.createEffect(db, {
           runId: run.id, stepKey, effectType: 'source_sync', provider: 'ownerrez',
@@ -75,7 +76,7 @@ const definition = {
       },
     },
     {
-      key: 'sync_crm', maxAttempts: 3,
+      key: 'sync_crm', effectClass: 'external_read', maxAttempts: 3,
       async run({ db, run, state, services, store, stepKey }) {
         const event = state.load_event;
         const since = new Date(Math.max(0, new Date(event.received_at).getTime() - 60 * 60_000)).toISOString();
@@ -111,7 +112,7 @@ const definition = {
       },
     },
     {
-      key: 'notify_channels', maxAttempts: 1,
+      key: 'notify_channels', effectClass: 'internal_notification', maxAttempts: 1,
       async run({ db, run, state, store }) {
         const notifications = eventNotification(state.load_event.event_type, state.load_event.event);
         let queued = 0;

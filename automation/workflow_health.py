@@ -19,6 +19,54 @@ ALERT_CHANNEL = os.environ.get("RESORT_OPS_ALERTS_CHANNEL", "")
 JOB_NAME = "resort-workflow-health"
 
 
+def runtime_integrity():
+    """Detect a mutable checkout whose loaded Node processes predate source edits."""
+    targets = {
+        "crm": str(ROOT / "crm" / "server.js"),
+        "worker": str(ROOT / "crm" / "scripts" / "workflow-worker.js"),
+    }
+    try:
+        output = subprocess.run(
+            ["ps", "-axo", "pid=,lstart=,command="], check=True, timeout=10,
+            capture_output=True, text=True,
+        ).stdout
+    except Exception:
+        return {"runtime_process_missing": len(targets), "runtime_code_drift": 0, "runtime_process_check_error": 1}
+    starts = {}
+    for line in output.splitlines():
+        for name, script in targets.items():
+            if script not in line:
+                continue
+            fields = line.split(None, 6)
+            if len(fields) < 7:
+                continue
+            try:
+                started = datetime.strptime(
+                    " ".join(fields[1:6]), "%a %b %d %H:%M:%S %Y"
+                ).astimezone().timestamp()
+            except ValueError:
+                continue
+            starts[name] = started
+    watched = {
+        "crm": [ROOT / "crm" / "server.js", ROOT / "crm" / "lib", ROOT / "crm" / "routes", ROOT / "crm" / "workflows"],
+        "worker": [ROOT / "crm" / "scripts" / "workflow-worker.js", ROOT / "crm" / "lib", ROOT / "crm" / "workflows"],
+    }
+    drift = 0
+    for name, started in starts.items():
+        latest = 0.0
+        for item in watched[name]:
+            if item.is_file():
+                latest = max(latest, item.stat().st_mtime)
+            elif item.is_dir():
+                latest = max([latest, *(path.stat().st_mtime for path in item.rglob("*.js"))])
+        drift += int(latest > started)
+    return {
+        "runtime_process_missing": len(targets) - len(starts),
+        "runtime_code_drift": drift,
+        "runtime_process_check_error": 0,
+    }
+
+
 def scalar(con, query):
     return con.execute(query).fetchone()[0]
 
@@ -27,19 +75,54 @@ def inspect(con):
     quick = con.execute("PRAGMA quick_check").fetchone()[0]
     if quick != "ok":
         raise RuntimeError(f"CRM quick_check failed: {quick}")
+    tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    effect_columns = {
+        row[1] for row in con.execute("PRAGMA table_info(workflow_effects)")
+    } if "workflow_effects" in tables else set()
+    reviews_available = "workflow_manual_reviews" in tables
+    verification_modes_available = {"verification_mode", "verification_deadline_at"}.issubset(effect_columns)
     metrics = {
-        "stalled_runs": scalar(con, """SELECT COUNT(*) FROM workflow_runs
-            WHERE status IN ('running','retry')
-              AND julianday(updated_at)<julianday('now','-30 minutes')"""),
+        "schema_migration_required": int(not reviews_available or not verification_modes_available),
+        "queued_runs_over_1m": scalar(con, """SELECT COUNT(*) FROM workflow_runs
+            WHERE status='queued' AND julianday(created_at)<julianday('now','-1 minute')"""),
+        "stalled_runs": scalar(con, """SELECT COUNT(*) FROM workflow_runs r
+            WHERE r.status='running' AND julianday(r.updated_at)<julianday('now','-30 minutes')
+              AND NOT EXISTS (SELECT 1 FROM workflow_steps s WHERE s.run_id=r.id AND s.status='running')"""),
+        "overdue_retries": scalar(con, """SELECT COUNT(*) FROM workflow_steps
+            WHERE status='retry' AND julianday(available_at)<julianday('now','-5 minutes')"""),
         "dead_outbox": scalar(con, "SELECT COUNT(*) FROM workflow_outbox WHERE status='dead'"),
-        "stale_leases": scalar(con, """SELECT COUNT(*) FROM workflow_outbox
+        "stale_outbox_leases": scalar(con, """SELECT COUNT(*) FROM workflow_outbox
             WHERE status='leased' AND julianday(lease_expires_at)<julianday('now')"""),
-        "failed_24h": scalar(con, """SELECT COUNT(*) FROM workflow_runs
-            WHERE status='failed' AND julianday(updated_at)>=julianday('now','-24 hours')"""),
-        "unverified_effects_24h": scalar(con, """SELECT COUNT(*) FROM workflow_effects
-            WHERE julianday(requested_at)>=julianday('now','-24 hours')
-              AND status NOT IN ('verified_by_readback','delivered','read','failed')"""),
+        "stale_step_leases": scalar(con, """SELECT COUNT(*) FROM workflow_steps
+            WHERE status='running' AND julianday(lease_expires_at)<julianday('now')"""),
+        "open_manual_reviews": scalar(con, "SELECT COUNT(*) FROM workflow_manual_reviews WHERE status='open'")
+            if reviews_available else 0,
+        "oldest_pending_outbox_minutes": scalar(con, """SELECT COALESCE(CAST(
+            (julianday('now')-julianday(MIN(created_at)))*1440 AS INTEGER),0)
+            FROM workflow_outbox WHERE status IN ('pending','leased')"""),
     }
+    resolved_review_filter = """AND NOT EXISTS (SELECT 1 FROM workflow_manual_reviews mr
+        WHERE mr.run_id=r.id AND mr.status='resolved')""" if reviews_available else ""
+    metrics["failed_24h"] = scalar(con, f"""SELECT COUNT(*) FROM workflow_runs r
+        WHERE r.status='failed' AND julianday(r.updated_at)>=julianday('now','-24 hours')
+        {resolved_review_filter}""")
+    effect_review_filter = """AND NOT EXISTS (SELECT 1 FROM workflow_manual_reviews mr
+        WHERE mr.effect_id=workflow_effects.id AND mr.status='resolved')""" if reviews_available else ""
+    if verification_modes_available:
+        metrics["old_unverified_effects"] = scalar(con, f"""SELECT COUNT(*) FROM workflow_effects
+            WHERE status NOT IN ('verified_by_readback','delivered','read','failed','manual_review')
+              AND (
+                (status='requested' AND julianday(requested_at)<julianday('now','-15 minutes'))
+                OR (verification_mode='readback_required'
+                  AND julianday(COALESCE(verification_deadline_at, datetime(requested_at,'+15 minutes')))<julianday('now'))
+              )
+              {effect_review_filter}""")
+    else:
+        metrics["old_unverified_effects"] = scalar(con, f"""SELECT COUNT(*) FROM workflow_effects
+            WHERE julianday(requested_at)<julianday('now','-15 minutes')
+              AND status NOT IN ('verified_by_readback','delivered','read','failed','manual_review')
+              AND (status='requested' OR provider NOT IN ('twilio','meta'))
+              {effect_review_filter}""")
     return metrics
 
 
@@ -53,6 +136,17 @@ def notify(message):
     return True
 
 
+def hard_failure_count(metrics, alert_config_missing=0):
+    return sum([
+        metrics.get("runtime_process_missing", 0), metrics.get("runtime_code_drift", 0),
+        metrics.get("runtime_process_check_error", 0),
+        metrics["schema_migration_required"], metrics["queued_runs_over_1m"], metrics["stalled_runs"], metrics["overdue_retries"], metrics["dead_outbox"],
+        metrics["stale_outbox_leases"], metrics["stale_step_leases"],
+        metrics["open_manual_reviews"], metrics["failed_24h"], metrics["old_unverified_effects"],
+        int(metrics["oldest_pending_outbox_minutes"] > 5), int(alert_config_missing),
+    ])
+
+
 def main():
     if not DB_PATH.is_file():
         raise RuntimeError(f"CRM database missing: {DB_PATH}")
@@ -61,7 +155,10 @@ def main():
         metrics = inspect(con)
     finally:
         con.close()
-    hard_failures = metrics["stalled_runs"] + metrics["dead_outbox"] + metrics["stale_leases"]
+    alert_config_missing = int(not ALERT_CHANNEL or not SLACK_ACCOUNT)
+    metrics.update(runtime_integrity())
+    metrics["alert_config_missing"] = alert_config_missing
+    hard_failures = hard_failure_count(metrics, alert_config_missing)
     detail = json.dumps({"observed_at": datetime.now(timezone.utc).isoformat(), **metrics}, sort_keys=True)
     if hard_failures:
         record(JOB_NAME, False, detail)

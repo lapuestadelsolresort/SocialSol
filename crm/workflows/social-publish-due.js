@@ -6,14 +6,14 @@ const { definition: publishDefinition } = require('./social-publish');
 
 const definition = {
   name: 'social.publish_due',
-  version: 1,
+  version: 2,
   capability: 'social.publish',
   mutates: true,
   autonomous: true,
   validate() {},
   steps: [
     {
-      key: 'load_due', maxAttempts: 1,
+      key: 'load_due', effectClass: 'read', maxAttempts: 1,
       async run({ db }) {
         const rows = await db.query(sql`SELECT id, version, scheduled_for FROM social_content
           WHERE status='approved' AND scheduled_for IS NOT NULL
@@ -23,7 +23,7 @@ const definition = {
       },
     },
     {
-      key: 'publish_each', maxAttempts: 3,
+      key: 'publish_each', effectClass: 'external_idempotent', maxAttempts: 3,
       async run({ db, run, state, services }) {
         const results = [];
         for (const content of state.load_due.content) {
@@ -49,7 +49,7 @@ const definition = {
       },
     },
     {
-      key: 'verify_batch', maxAttempts: 1,
+      key: 'verify_batch', effectClass: 'local_write', maxAttempts: 1,
       async run({ db, run, state, store, stepKey }) {
         const ids = state.publish_each.results.map(result => result.contentId);
         const rows = [];

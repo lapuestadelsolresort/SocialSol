@@ -26,7 +26,9 @@
  *                  post Slack thread reply on the original draft message.
  *           - 429: leave row at approved, KEEP send_attempted_at (diagnostic);
  *                  exit early so next tick retries naturally.
- *           - Other 4xx/5xx: status='cancelled', error=<truncated message>.
+ *           - Definitive 4xx: status='cancelled', error=<truncated message>.
+ *           - Network/5xx/id-less 2xx: status='ambiguous'; exit 75 so the
+ *             durable wrapper requires provider-console review.
  *   5. Healthcheck OK ping. Release lock. Exit 0.
  *
  * TODO(2026-05-13): delete prospector/send.sh — orchestrator has been live
@@ -251,7 +253,14 @@ async function processSend(db, config, send, contact, campaign) {
 
   // a. Stamp send_attempted_at on every gate-attempt for diagnostic visibility.
   const attemptedAt = new Date().toISOString();
-  await db.query(sql`UPDATE outreach_sends SET send_attempted_at = ${attemptedAt} WHERE id = ${sendId}`);
+  const workflowRunId = typeof process.env.WORKFLOW_RUN_ID === 'string'
+    ? process.env.WORKFLOW_RUN_ID.trim() : '';
+  if (workflowRunId) {
+    await db.query(sql`UPDATE outreach_sends SET send_attempted_at=${attemptedAt},
+      workflow_run_id=${workflowRunId} WHERE id=${sendId}`);
+  } else {
+    await db.query(sql`UPDATE outreach_sends SET send_attempted_at=${attemptedAt} WHERE id=${sendId}`);
+  }
 
   // b. Edit-override carve-out detection.
   const overrides = await db.query(sql`
@@ -377,17 +386,21 @@ async function processSend(db, config, send, contact, campaign) {
   try {
     resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `socialsol-outreach-${sendId}`,
+      },
       body: JSON.stringify(payload),
     });
   } catch (e) {
     warn(`  #${sendId} Resend network error: ${e.message}`);
     await db.query(sql`
-      UPDATE outreach_sends SET status='cancelled', cancelled_at=datetime('now'),
+      UPDATE outreach_sends SET status='ambiguous',
                                   error=${'resend_network_error:' + e.message.slice(0, 200)}
       WHERE id=${sendId}
     `);
-    return { ok: false, reason: 'resend_network_error' };
+    return { ok: false, reason: 'resend_network_error', ambiguous: true };
   }
 
   const responseBody = await resp.json().catch(() => ({}));
@@ -399,6 +412,14 @@ async function processSend(db, config, send, contact, campaign) {
   if (resp.status === 429) {
     warn(`  #${sendId} Resend 429 rate-limit — leaving row at approved, will retry next tick`);
     return { ok: false, reason: 'resend_rate_limit', retry: true };
+  }
+
+  if (resp.status >= 500 || (resp.ok && !responseBody.id)) {
+    const errMsg = (responseBody.message || responseBody.error || `http_${resp.status}`).toString().slice(0, 200);
+    warn(`  #${sendId} Resend result ambiguous: ${errMsg}`);
+    await db.query(sql`UPDATE outreach_sends SET status='ambiguous',
+      error=${'resend_ambiguous:' + errMsg} WHERE id=${sendId}`);
+    return { ok: false, reason: 'resend_ambiguous', error: errMsg, ambiguous: true };
   }
 
   if (!resp.ok || !responseBody.id) {
@@ -472,7 +493,7 @@ async function main() {
   const tickLimit = config.orchestrator?.tick_limit ?? 5;
 
   const db = createDB(DB_PATH);
-  let processed = 0, sent = 0, failed = 0;
+  let processed = 0, sent = 0, failed = 0, ambiguous = 0;
   try {
     // Fetch due rows (with joined contact + campaign data — single SELECT is cheaper).
     const dueRows = await db.query(sql`
@@ -493,7 +514,7 @@ async function main() {
     log(`paused=false, due_rows=${dueRows.length}`);
     if (dueRows.length === 0) {
       pingHealthcheck('orchestrator-tick');
-      return { processed: 0 };
+      return { processed: 0, sent: 0, failed: 0, ambiguous: 0 };
     }
 
     for (const row of dueRows) {
@@ -502,7 +523,10 @@ async function main() {
       processed++;
       try {
         const r = await processSend(db, config, row, contact, campaign);
-        if (r.ok) sent++; else failed++;
+        if (r.ok) sent++; else {
+          failed++;
+          if (r.ambiguous) ambiguous++;
+        }
         if (r.retry) {
           log(`  exiting tick early to let next tick retry rate-limited row`);
           break;
@@ -513,9 +537,9 @@ async function main() {
       }
     }
 
-    log(`tick complete: processed=${processed} sent=${sent} failed=${failed}`);
+    log(`tick complete: processed=${processed} sent=${sent} failed=${failed} ambiguous=${ambiguous}`);
     pingHealthcheck('orchestrator-tick');
-    return { processed, sent, failed };
+    return { processed, sent, failed, ambiguous };
   } finally {
     await db.dispose();
   }
@@ -523,7 +547,10 @@ async function main() {
 
 if (require.main === module) {
   main()
-    .then((r) => { log(`exit ok: ${JSON.stringify(r)}`); process.exit(0); })
+    .then((r) => {
+      log(`exit ok: ${JSON.stringify(r)}`);
+      process.exit(Number(r?.ambiguous || 0) > 0 ? 75 : 0);
+    })
     .catch((e) => {
       console.error('[orchestrator] FATAL:', e);
       pingHealthcheck('orchestrator-tick', '/fail');

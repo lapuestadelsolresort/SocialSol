@@ -8,7 +8,7 @@ const test = require('node:test');
 const createDBModule = require('@databases/sqlite');
 const createDB = createDBModule.default || createDBModule;
 const { sql } = require('@databases/sqlite');
-const { startGraph } = require('../lib/workflow-engine');
+const { executeGraph, startGraph } = require('../lib/workflow-engine');
 const { ensureSchemaAsync } = require('../lib/workflow-schema');
 const { tokenMatches } = require('../routes/workflows');
 const { getDefinition, listDefinitions } = require('../workflows/registry');
@@ -35,7 +35,7 @@ async function withDb(run) {
 test('registry exposes fixed domain graphs instead of arbitrary command execution', () => {
   const definitions = new Map(listDefinitions().map(item => [item.name, item]));
   for (const expected of [
-    'whatsapp.reply', 'whatsapp.inbound.process', 'receipt.ingest', 'receipt.annotate', 'receipt.reconcile',
+    'whatsapp.reply', 'whatsapp.inbound.process', 'meta.dm.reply', 'receipt.ingest', 'receipt.annotate', 'receipt.reconcile',
     'social.content.upsert', 'social.content.publish', 'social.publish_routine',
     'paulina.daily', 'paulina.performance.read', 'regina.daily', 'regina.campaign',
     'guest.reply.draft', 'crm.sync', 'crm.pipeline.read',
@@ -89,6 +89,66 @@ test('inbound WhatsApp CRM enrichment is resumable and idempotent', async () => 
     assert.equal(processed.crm_lead_id, first.output.leadId);
     assert.equal(processed.lead_created, 1);
     const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM leads WHERE phone='+14155550123'`);
+    assert.equal(count, 1);
+  });
+});
+
+test('Meta DM replies use a command-only durable effect and never claim delivery', async () => {
+  await withDb(async db => {
+    await db.query(sql`INSERT INTO meta_messages
+      (received_at, platform, sender_id, sender_name, message_id, message_text, raw_payload, direction)
+      VALUES ('2026-08-11T17:00:00Z', 'instagram', 'IG-RECIPIENT', 'Guest', 'MID-IN', 'Hello', '{}', 'inbound')`);
+    const [message] = await db.query(sql`SELECT id FROM meta_messages WHERE message_id='MID-IN'`);
+    let sends = 0;
+    const request = {
+      idempotencyKey: 'slack:C-SOCIAL:meta-reply', triggerType: 'slack_meta_dm_command',
+      channelId: 'C-SOCIAL', actorUserId: 'U-JASON',
+      input: { dmId: message.id, message: 'Welcome', actorName: 'Jason' },
+    };
+    const services = {
+      sendMetaDm: async () => { sends += 1; return { message_id: 'MID-OUT' }; },
+    };
+    const first = await startGraph(db, getDefinition('meta.dm.reply'), request, services);
+    const replay = await startGraph(db, getDefinition('meta.dm.reply'), request, services);
+    assert.equal(first.status, 'completed');
+    assert.equal(first.output.status, 'accepted_by_provider');
+    assert.equal(first.output.deliveryConfirmed, undefined);
+    assert.equal(replay.id, first.id);
+    assert.equal(sends, 1);
+  });
+});
+
+test('Meta acceptance survives a local projection failure without a second provider send', async () => {
+  await withDb(async db => {
+    await db.query(sql`INSERT INTO meta_messages
+      (received_at, platform, sender_id, sender_name, message_id, message_text, raw_payload, direction)
+      VALUES ('2026-08-11T17:00:00Z', 'instagram', 'IG-PROJECTION', 'Guest',
+        'MID-IN-PROJECTION', 'Hello', '{}', 'inbound')`);
+    const [message] = await db.query(sql`SELECT id FROM meta_messages WHERE message_id='MID-IN-PROJECTION'`);
+    await db.query(sql`CREATE TRIGGER fail_meta_projection BEFORE INSERT ON meta_messages
+      WHEN NEW.direction='outbound' BEGIN SELECT RAISE(FAIL, 'injected projection failure'); END`);
+    let sends = 0;
+    const definition = getDefinition('meta.dm.reply');
+    const services = {
+      sendMetaDm: async () => { sends += 1; return { message_id: 'MID-OUT-PROJECTION' }; },
+    };
+    const first = await startGraph(db, definition, {
+      idempotencyKey: 'meta-projection-one-send', triggerType: 'slack_meta_dm_command',
+      channelId: 'C-SOCIAL', actorUserId: 'U-JASON',
+      input: { dmId: message.id, message: 'One Meta message', actorName: 'Jason' },
+    }, services);
+    assert.equal(first.status, 'retry');
+    assert.equal(first.effects[0].status, 'accepted_by_provider');
+    assert.equal(first.effects[0].verification_mode, 'provider_acceptance');
+    assert.equal(sends, 1);
+    await db.query(sql`DROP TRIGGER fail_meta_projection`);
+    await db.query(sql`UPDATE workflow_steps SET available_at='1970-01-01T00:00:00.000Z'
+      WHERE run_id=${first.id} AND step_key='persist_outbound_projection'`);
+    const completed = await executeGraph(db, definition, first.id, services);
+    assert.equal(completed.status, 'completed', completed.error_message);
+    assert.equal(sends, 1);
+    const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM meta_messages
+      WHERE message_id='MID-OUT-PROJECTION'`);
     assert.equal(count, 1);
   });
 });
@@ -169,6 +229,134 @@ test('Postiz preflight recovery matches exact provider id or caption/date, not c
   assert.equal(matchingPost(posts, { id: 'p2', caption: 'different', scheduledFor: '2026-08-12T17:00:00.000Z' }).id, 'p2');
   assert.equal(matchingPost(posts, { caption: 'Sunset   view', scheduledFor: '2026-08-12T17:00:30.000Z' }).id, 'p1');
   assert.equal(matchingPost(posts, { caption: 'Sunset view', scheduledFor: '2026-08-13T17:00:00.000Z' }), null);
+});
+
+test('Postiz ambiguity and readback lag never create a second post', async () => {
+  await withDb(async db => {
+    const contentId = '11111111-1111-4111-8111-111111111111';
+    await db.query(sql`INSERT INTO social_content
+      (id, status, caption, media_refs_json, scheduled_for, created_by, updated_by)
+      VALUES (${contentId}, 'approved', 'One post only',
+        ${JSON.stringify([{ id: 'media-1', path: 'https://example.test/media.jpg' }])},
+        '2026-08-20T17:00:00.000Z', 'U-JASON', 'U-JASON')`);
+    let creates = 0;
+    const services = {
+      listPostizPosts: async () => [],
+      createPostizPost: async () => {
+        creates += 1;
+        const error = new Error('provider accepted but connection closed');
+        error.code = 'ambiguous_external_result';
+        error.retryable = false;
+        throw error;
+      },
+    };
+    const definition = getDefinition('social.content.publish');
+    const first = await startGraph(db, definition, {
+      idempotencyKey: 'social-ambiguous-first', triggerType: 'model_tool',
+      input: { contentId, scheduledFor: '2026-08-20T17:00:00.000Z' },
+    }, services);
+    assert.equal(first.status, 'failed');
+    assert.equal(first.manualReviews[0].status, 'open');
+    assert.equal(creates, 1);
+
+    await assert.rejects(() => startGraph(db, definition, {
+      idempotencyKey: 'social-ambiguous-second', triggerType: 'model_tool',
+      input: { contentId, scheduledFor: '2026-08-20T17:00:00.000Z' },
+    }, services), error => error.code === 'workflow_manual_review_open');
+    assert.equal(creates, 1);
+  });
+});
+
+test('a definitive Postiz rejection restores approved content for a corrected retry', async () => {
+  await withDb(async db => {
+    const contentId = '22222222-2222-4222-8222-222222222222';
+    await db.query(sql`INSERT INTO social_content
+      (id, status, caption, media_refs_json, scheduled_for, created_by, updated_by)
+      VALUES (${contentId}, 'approved', 'Correctable post',
+        ${JSON.stringify([{ id: 'media-2', path: 'https://example.test/media.jpg' }])},
+        '2026-08-21T17:00:00.000Z', 'U-JASON', 'U-JASON')`);
+    const error = new Error('Postiz rejected the request');
+    error.code = 'postiz_api_error';
+    error.status = 400;
+    error.retryable = false;
+    const run = await startGraph(db, getDefinition('social.content.publish'), {
+      idempotencyKey: 'social-definitive-rejection', triggerType: 'model_tool',
+      input: { contentId, scheduledFor: '2026-08-21T17:00:00.000Z' },
+    }, {
+      listPostizPosts: async () => [],
+      createPostizPost: async () => { throw error; },
+    });
+    assert.equal(run.status, 'failed');
+    assert.equal(run.manualReviews.length, 0);
+    assert.equal(run.effects[0].status, 'failed');
+    const [content] = await db.query(sql`SELECT status, workflow_run_id FROM social_content WHERE id=${contentId}`);
+    assert.equal(content.status, 'approved');
+    assert.equal(content.workflow_run_id, null);
+  });
+});
+
+test('Paulina verification counts only rows attributed to its workflow run', async () => {
+  await withDb(async db => {
+    await db.query(sql`CREATE TABLE outreach_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, sent_at TEXT, workflow_run_id TEXT
+    )`);
+    let commandCalls = 0;
+    const run = await startGraph(db, getDefinition('paulina.daily'), {
+      idempotencyKey: 'paulina-attribution-test', triggerType: 'system', input: {},
+    }, {
+      runCommand: async command => {
+        commandCalls += 1;
+        if (commandCalls === 1) {
+          assert.match(command.env.WORKFLOW_RUN_ID, /^[0-9a-f-]{36}$/);
+          await db.query(sql`INSERT INTO outreach_sends (status, sent_at, workflow_run_id)
+            VALUES ('sent','2026-08-11T18:00:00Z',${command.env.WORKFLOW_RUN_ID}),
+                   ('sent','2026-08-11T18:00:00Z','another-run')`);
+          return {
+            exitCode: 0,
+            stdout: '[orchestrator] exit ok: {"processed":1,"sent":1,"failed":0,"ambiguous":0}\n',
+            stderr: '',
+          };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            generated_at: '2026-08-11T18:01:00Z',
+            scope: { owner: 'paulina', active_campaign_slug: 'planner' },
+            active_queue: { verified_ready: 2 },
+          }),
+          stderr: '',
+        };
+      },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.report.sent, 1);
+    assert.equal(run.state.verify_readback.evidence.attributedRows.sent, 1);
+    const [evidence] = await db.query(sql`SELECT payload_json FROM workflow_evidence
+      WHERE run_id=${run.id} AND source='crm.outreach_sends'`);
+    assert.equal(JSON.parse(evidence.payload_json).attributedRows.sent, 1);
+  });
+});
+
+test('Regina verification excludes concurrent outreach rows from another producer', async () => {
+  await withDb(async db => {
+    await db.query(sql`CREATE TABLE outreach_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, sent_at TEXT, workflow_run_id TEXT
+    )`);
+    const run = await startGraph(db, getDefinition('regina.daily'), {
+      idempotencyKey: 'regina-attribution-test', triggerType: 'system', input: {},
+    }, {
+      runCommand: async command => {
+        assert.match(command.env.WORKFLOW_RUN_ID, /^[0-9a-f-]{36}$/);
+        await db.query(sql`INSERT INTO outreach_sends (status, sent_at, workflow_run_id)
+          VALUES ('sent','2026-08-11T18:00:00Z',${command.env.WORKFLOW_RUN_ID}),
+                 ('sent','2026-08-11T18:00:00Z','legacy-producer')`);
+        return { exitCode: 0, stdout: '{"ok":true}', stderr: '' };
+      },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.report.created, 1);
+    assert.equal(run.output.report.sent, 1);
+  });
 });
 
 test('workflow control token is length-checked and compared exactly', () => {

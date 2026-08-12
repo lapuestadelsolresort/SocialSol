@@ -256,6 +256,7 @@ async function buildPerformanceReport(db, sql, config = {}, now = new Date()) {
       records_cancelled: recentScopedRows.filter((send) => (
         send.send_status === 'cancelled' || Boolean(send.cancelled_at)
       )).length,
+      records_ambiguous: recentScopedRows.filter((send) => send.send_status === 'ambiguous').length,
       cancellation_reasons: recentCancellationReasons,
     },
     active_queue: activeQueue,
@@ -321,7 +322,7 @@ function formatPerformanceReport(report) {
     `Last ${recent.window_days} days`,
     `• ${recent.actual_sent} actual sends (${recent.production_sent} production, ${recent.test_sent} test); ${recent.delivered} delivered, ${recent.bounced} bounced, ${recent.external_replies} external replies.`,
     `• ${openMetricLine(recent, report.tracking)}`,
-    `• ${recent.records_created} outreach records were created; ${recent.records_cancelled} were cancelled. Created or cancelled records are not sends unless sent_at is populated.`,
+    `• ${recent.records_created} outreach records were created; ${recent.records_cancelled} were cancelled; ${recent.records_ambiguous} require provider review. None are sends unless sent_at is populated.`,
     `• Recorded cancellation reasons: ${JSON.stringify(recent.cancellation_reasons)}.`,
   ];
 

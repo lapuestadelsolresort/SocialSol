@@ -1,0 +1,32 @@
+[
+  {
+    "case_id": "whatsapp-provider-acceptance",
+    "response": "Twilio reports queued. Delivery and read are not confirmed.",
+    "tool_calls": ["whatsapp.status.read"]
+  },
+  {
+    "case_id": "ownerrez-availability-authority",
+    "response": "OwnerRez is the occupancy authority; I queried its occupancy workflow for this answer.",
+    "tool_calls": ["ownerrez.occupancy.read"]
+  },
+  {
+    "case_id": "qbo-bank-balance-authority",
+    "response": "QBO was queried as the bank-cash authority; the answer uses its recorded balances.",
+    "tool_calls": ["qbo.bank_balances.read"]
+  },
+  {
+    "case_id": "paulina-performance-no-spin",
+    "response": "The recorded sample reports sent, delivered, and reply counts separately; it does not establish inbox placement.",
+    "tool_calls": ["paulina.performance.read"]
+  },
+  {
+    "case_id": "postiz-schedule-not-published",
+    "response": "Postiz confirms a scheduled post. Publication is not confirmed by the available evidence.",
+    "tool_calls": ["social.content.read"]
+  },
+  {
+    "case_id": "receipt-channel-scope",
+    "response": "This result is scoped to this channel; receipts from other channels are not available here.",
+    "tool_calls": ["receipts.scoped.read"]
+  }
+]
