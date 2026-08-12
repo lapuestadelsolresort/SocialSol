@@ -52,21 +52,23 @@ where to look for context on ambiguous transactions.
 ### Owner-paid expense channels
 
 An owner-expense channel is also listed under `owner_expense_channels` with
-the owner's name, exact QBO liability account ID/name, and an automatic-post
-confidence threshold. Use the production-safe configurator rather than
+the owner's name, exact QBO liability account ID/name, repayment bank account,
+and an automatic-post confidence threshold. Use the production-safe configurator rather than
 editing both runtime files independently:
 
 ```bash
 npm run configure:owner-expense-channel -- \
   --channel-id C0XXXXX --channel-name receipt-owner \
   --owner-name "Owner Name" \
-  --liability-account-id 123 --liability-account-name "Due to Owner (Net)"
+  --liability-account-id 123 --liability-account-name "Due to Owner (Net)" \
+  --repayment-bank-account-id 456 --repayment-bank-account-name "Operating Bank"
 
 # After inspecting the dry-run output:
 npm run configure:owner-expense-channel -- \
   --channel-id C0XXXXX --channel-name receipt-owner \
   --owner-name "Owner Name" \
   --liability-account-id 123 --liability-account-name "Due to Owner (Net)" \
+  --repayment-bank-account-id 456 --repayment-bank-account-name "Operating Bank" \
   --confirm-production
 ```
 
@@ -75,6 +77,9 @@ business expenses become a balanced QBO JournalEntry: debit the selected
 expense account and credit the configured Other Current Liability account.
 Ambiguous or contradictory documents are saved as `needs_review` and emit an
 exact `!receipt confirm ...` command; they are never posted speculatively.
+Rare owner repayments are also review-gated. Their exact confirmation creates
+a QBO Purchase that debits the owner liability and credits the configured bank,
+with an exact-date/amount/bank duplicate preflight before the write.
 
 ## Adding a New Vendor
 

@@ -10,6 +10,8 @@ const { lastJsonValue } = require('./durable-job');
 
 const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const OWNER_PAID_EXPENSE = 'owner_paid_expense';
+const OWNER_REPAYMENT = 'owner_repayment';
 
 function validIsoDate(value) {
   const text = String(value || '');
@@ -34,7 +36,13 @@ function validateConfirmation(input) {
   if (!validIsoDate(input.transactionDate)) throw new Error('transactionDate must be a valid YYYY-MM-DD date');
   if (!['MXN', 'USD'].includes(String(input.currency || '').toUpperCase())) throw new Error('currency must be MXN or USD');
   if (!Number.isFinite(Number(input.amount)) || Number(input.amount) <= 0) throw new Error('positive amount is required');
-  if (!/^[a-z0-9_]{1,80}$/.test(String(input.categoryKey || ''))) throw new Error('valid categoryKey is required');
+  if (![OWNER_PAID_EXPENSE, OWNER_REPAYMENT].includes(input.transactionKind)) {
+    throw new Error('transactionKind must be owner_paid_expense or owner_repayment');
+  }
+  if (input.transactionKind === OWNER_PAID_EXPENSE
+    && !/^[a-z0-9_]{1,80}$/.test(String(input.categoryKey || ''))) {
+    throw new Error('valid categoryKey is required for an owner-paid expense');
+  }
   if (!String(input.vendor || '').trim()) throw new Error('vendor is required');
 }
 
@@ -75,7 +83,7 @@ function qboArguments(receipt, profile, account, {
     '--date', receipt.transaction_date,
     '--amount', String(receipt.amount),
     '--currency', receipt.currency,
-    '--expense-account-id', account.id,
+    '--transaction-kind', receipt.transaction_kind,
     '--liability-account-id', profile.liability_account.id,
     '--liability-account-name', profile.liability_account.name,
     '--owner-name', profile.owner_name,
@@ -83,6 +91,14 @@ function qboArguments(receipt, profile, account, {
     '--description', receipt.description || '',
     '--json',
   ];
+  if (receipt.transaction_kind === OWNER_PAID_EXPENSE) {
+    args.push('--expense-account-id', account.id);
+  } else {
+    args.push(
+      '--bank-account-id', profile.repayment_bank_account.id,
+      '--bank-account-name', profile.repayment_bank_account.name,
+    );
+  }
   if (verifyOnly) {
     args.push('--verify-only', '--qbo-id', qboId);
     if (Number.isFinite(Number(amountUsd)) && Number(amountUsd) > 0) {
@@ -103,9 +119,16 @@ function reviewReasons(result, profile) {
   if (!['MXN', 'USD'].includes(value.currency)) reasons.push('currency is missing');
   if (!Number.isFinite(Number(value.amount)) || Number(value.amount) <= 0) reasons.push('amount is missing');
   if (!value.description) reasons.push('description is missing');
-  if (!value.category_key) reasons.push('expense category is ambiguous');
-  if (value.is_business_expense !== true) reasons.push('the document does not clearly establish a business expense');
-  if (value.paid_by_owner !== true) reasons.push(`the document does not clearly establish that ${profile.owner_name} paid personally`);
+  if (value.transaction_kind === OWNER_PAID_EXPENSE) {
+    if (!value.category_key) reasons.push('expense category is ambiguous');
+    if (value.is_business_expense !== true) reasons.push('the document does not clearly establish a business expense');
+    if (value.paid_by_owner !== true) reasons.push(`the document does not clearly establish that ${profile.owner_name} paid personally`);
+  } else if (value.transaction_kind === OWNER_REPAYMENT) {
+    if (value.category_key !== null) reasons.push('an owner repayment must not select an expense category');
+    reasons.push('owner repayments reduce the liability and require explicit confirmation');
+  } else {
+    reasons.push('the owner-ledger direction is unclear');
+  }
   if (Number(value.confidence) < profile.auto_post_min_confidence) {
     reasons.push(`extraction confidence ${Number(value.confidence || 0).toFixed(2)} is below ${profile.auto_post_min_confidence.toFixed(2)}`);
   }
@@ -117,15 +140,18 @@ function confirmationCommand(receipt) {
   const date = receipt.transaction_date || '<YYYY-MM-DD>';
   const currency = receipt.currency || '<MXN|USD>';
   const amount = receipt.amount || '<amount>';
-  const category = receipt.category_key || '<category-key>';
   const vendor = receipt.vendor || '<vendor>';
   const description = receipt.description || '<description>';
-  return `!receipt confirm ${receipt.id} ${date} ${currency} ${amount} ${category} | ${vendor} | ${description}`;
+  if (receipt.transaction_kind === OWNER_REPAYMENT) {
+    return `!receipt confirm repayment ${receipt.id} ${date} ${currency} ${amount} | ${vendor} | ${description}`;
+  }
+  const category = receipt.category_key || '<category-key>';
+  return `!receipt confirm expense ${receipt.id} ${date} ${currency} ${amount} ${category} | ${vendor} | ${description}`;
 }
 
 const processDefinition = {
   name: 'receipt.owner_expense.process',
-  version: 1,
+  version: 2,
   capability: 'qbo.owner_expense.write',
   mutates: true,
   allowedTriggers: ['workflow'],
@@ -183,7 +209,10 @@ const processDefinition = {
         let shouldPost;
         let reasons = [];
         if (input.skipExtraction === true) {
-          expenseForKey(current.category_key);
+          if (![OWNER_PAID_EXPENSE, OWNER_REPAYMENT].includes(current.transaction_kind)) {
+            throw new Error('confirmed owner ledger direction is invalid');
+          }
+          if (current.transaction_kind === OWNER_PAID_EXPENSE) expenseForKey(current.category_key);
           if (!validIsoDate(current.transaction_date)
             || !['MXN', 'USD'].includes(current.currency)
             || !Number.isFinite(Number(current.amount)) || Number(current.amount) <= 0
@@ -196,12 +225,14 @@ const processDefinition = {
           const value = result?.ok ? result.extracted : {};
           reasons = reviewReasons(result, state.load_receipt.profile);
           shouldPost = reasons.length === 0;
-          const category = value.category_key ? expenseForKey(value.category_key) : null;
+          const category = value.transaction_kind === OWNER_PAID_EXPENSE && value.category_key
+            ? expenseForKey(value.category_key) : null;
           const reviewReason = reasons.join('; ').slice(0, 1000) || null;
           await db.query(sql`UPDATE accounting_receipts SET
             vendor=${value.vendor || null}, transaction_date=${value.transaction_date || null},
             currency=${value.currency || null}, amount=${value.amount || null},
-            description=${value.description || null}, category_key=${value.category_key || null},
+            transaction_kind=${value.transaction_kind || null}, description=${value.description || null},
+            category_key=${value.transaction_kind === OWNER_PAID_EXPENSE ? value.category_key || null : null},
             category_name=${category?.name || null}, extraction_confidence=${Number(value.confidence || 0)},
             review_reason=${reviewReason}, extraction_json=${JSON.stringify({
               source: 'openai_responses', responseId: result?.responseId || null,
@@ -225,7 +256,8 @@ const processDefinition = {
             receiptId: receipt.id, status: receipt.status, vendor: receipt.vendor,
             transactionDate: receipt.transaction_date, currency: receipt.currency,
             amount: receipt.amount, description: receipt.description,
-            categoryKey: receipt.category_key, reviewReason: receipt.review_reason,
+            transactionKind: receipt.transaction_kind, categoryKey: receipt.category_key,
+            reviewReason: receipt.review_reason,
           },
         });
         return { receipt, shouldPost, reasons, evidenceId: evidence.id };
@@ -237,15 +269,20 @@ const processDefinition = {
         if (!state.persist_extraction.shouldPost) return { skipped: true };
         const receipt = state.persist_extraction.receipt;
         const profile = state.load_receipt.profile;
-        const account = expenseForKey(receipt.category_key);
+        const account = receipt.transaction_kind === OWNER_PAID_EXPENSE
+          ? expenseForKey(receipt.category_key) : null;
+        const isRepayment = receipt.transaction_kind === OWNER_REPAYMENT;
+        const entityType = isRepayment ? 'Purchase' : 'JournalEntry';
         const request = {
           receiptId: receipt.id,
           sourceHash: receipt.source_hash,
           transactionDate: receipt.transaction_date,
           amount: Number(receipt.amount),
           currency: receipt.currency,
+          transactionKind: receipt.transaction_kind,
           expenseAccount: account,
           liabilityAccount: profile.liability_account,
+          repaymentBankAccount: isRepayment ? profile.repayment_bank_account : null,
           ownerName: profile.owner_name,
           vendor: receipt.vendor,
           description: receipt.description,
@@ -253,14 +290,14 @@ const processDefinition = {
         const effect = await store.createEffect(db, {
           runId: run.id,
           stepKey,
-          effectType: 'accounting_journal_entry',
+          effectType: isRepayment ? 'accounting_purchase' : 'accounting_journal_entry',
           provider: 'quickbooks',
-          operation: 'owner_expense.create_journal_entry',
-          idempotencyKey: `receipt:${receipt.id}:qbo-owner-expense`,
+          operation: isRepayment ? 'owner_repayment.create_purchase' : 'owner_expense.create_journal_entry',
+          idempotencyKey: `receipt:${receipt.id}:qbo-${receipt.transaction_kind}`,
           request,
-          target: { entityType: 'JournalEntry', liabilityAccountId: profile.liability_account.id },
+          target: { entityType, liabilityAccountId: profile.liability_account.id },
         });
-        return { effectId: effect.id, effectStatus: effect.status, account };
+        return { effectId: effect.id, effectStatus: effect.status, account, entityType };
       },
     },
     {
@@ -294,7 +331,7 @@ const processDefinition = {
         }
         const parsed = lastJsonValue(result.stdout);
         if (!parsed || parsed.status !== 'PUSHED' || parsed.verified_by_readback !== true || !parsed.qbo_id) {
-          const error = new Error(parsed?.error || 'QBO owner expense command returned no verified JournalEntry');
+          const error = new Error(parsed?.error || 'QBO owner ledger command returned no verified entity');
           error.code = 'qbo_owner_expense_write_unverified';
           error.retryable = true;
           error.requiresManualReview = true;
@@ -304,9 +341,9 @@ const processDefinition = {
           effectId: effect.id,
           providerRef: String(parsed.qbo_id),
           status: 'accepted_by_provider',
-          providerStatus: 'journal_entry_created',
+          providerStatus: `${String(parsed.qbo_entity_type || '').toLowerCase()}_created`,
           response: {
-            qboEntityType: 'JournalEntry', qboId: String(parsed.qbo_id),
+            qboEntityType: parsed.qbo_entity_type, qboId: String(parsed.qbo_id),
             requestId: parsed.request_id, amountUsd: parsed.amount_usd, fxRate: parsed.fx_rate,
           },
         });
@@ -341,7 +378,7 @@ const processDefinition = {
         }
         const parsed = lastJsonValue(result.stdout);
         if (!parsed || parsed.status !== 'VERIFIED' || parsed.verified_by_readback !== true) {
-          const error = new Error(parsed?.error || 'QBO JournalEntry readback was not verified');
+          const error = new Error(parsed?.error || 'QBO owner ledger readback was not verified');
           error.code = 'qbo_owner_expense_readback_failed';
           error.retryable = true;
           error.requiresManualReview = true;
@@ -350,7 +387,7 @@ const processDefinition = {
         const evidence = await store.createEvidence(db, {
           runId: run.id,
           stepKey,
-          source: 'quickbooks.journal_entry.readback',
+          source: `quickbooks.${String(parsed.qbo_entity_type || '').toLowerCase()}.readback`,
           sourceRef: state.write_qbo.qboId,
           payload: parsed,
         });
@@ -358,7 +395,7 @@ const processDefinition = {
           effectId: state.register_qbo_effect.effectId,
           providerRef: state.write_qbo.qboId,
           status: 'verified_by_readback',
-          providerStatus: 'journal_entry_lines_verified',
+          providerStatus: `${String(parsed.qbo_entity_type || '').toLowerCase()}_lines_verified`,
           response: { ...parsed, evidenceId: evidence.id },
         });
         return { ...parsed, evidenceId: evidence.id };
@@ -371,7 +408,7 @@ const processDefinition = {
         const receipt = state.persist_extraction.receipt;
         try {
           await db.query(sql`UPDATE accounting_receipts SET status='posted', amount_usd=${state.verify_qbo.amount_usd},
-            fx_rate=${state.verify_qbo.fx_rate ?? null}, qbo_entity_type='JournalEntry',
+            fx_rate=${state.verify_qbo.fx_rate ?? null}, qbo_entity_type=${state.verify_qbo.qbo_entity_type},
             qbo_entity_id=${state.verify_qbo.qbo_id}, qbo_request_id=${state.verify_qbo.request_id},
             posted_at=datetime('now'), workflow_run_id=${run.id}, updated_at=datetime('now') WHERE id=${receipt.id}`);
           const [readback] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${receipt.id}`);
@@ -397,18 +434,28 @@ const processDefinition = {
         if (state.persist_extraction.shouldPost) {
           const profile = state.load_receipt.profile;
           const original = `${Number(base.amount).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${base.currency}`;
-          message = [
-            `✅ Posted ${profile.owner_name}'s owner-paid business expense to QuickBooks.`,
-            `${base.vendor || 'Unknown vendor'} · ${base.transaction_date} · ${original}`,
-            `Debit: ${base.category_name} · Credit: ${profile.liability_account.name}`,
-            `QBO JournalEntry: ${base.qbo_entity_id} · USD ${Number(base.amount_usd).toFixed(2)}`,
-            `Workflow: ${run.id} · Evidence: ${state.verify_qbo.evidenceId}`,
-          ].join('\n');
+          if (base.transaction_kind === OWNER_REPAYMENT) {
+            message = [
+              `✅ Posted a repayment that reduces the amount owed to ${profile.owner_name}.`,
+              `${base.vendor || profile.owner_name} · ${base.transaction_date} · ${original}`,
+              `Debit: ${profile.liability_account.name} · Credit: ${profile.repayment_bank_account.name}`,
+              `QBO Purchase: ${base.qbo_entity_id} · USD ${Number(base.amount_usd).toFixed(2)}`,
+              `Workflow: ${run.id} · Evidence: ${state.verify_qbo.evidenceId}`,
+            ].join('\n');
+          } else {
+            message = [
+              `✅ Posted ${profile.owner_name}'s owner-paid business expense to QuickBooks.`,
+              `${base.vendor || 'Unknown vendor'} · ${base.transaction_date} · ${original}`,
+              `Debit: ${base.category_name} · Credit: ${profile.liability_account.name}`,
+              `QBO JournalEntry: ${base.qbo_entity_id} · USD ${Number(base.amount_usd).toFixed(2)}`,
+              `Workflow: ${run.id} · Evidence: ${state.verify_qbo.evidenceId}`,
+            ].join('\n');
+          }
           status = 'posted';
         } else {
           message = [
             '⚠️ Receipt saved, but nothing was posted to QuickBooks because review is required.',
-            base.review_reason || 'The owner-paid business expense could not be verified confidently.',
+            base.review_reason || 'The owner-ledger transaction could not be verified confidently.',
             `Receipt: ${base.id}`,
             'Correct any placeholder and paste this command as a new message:',
             `\`${confirmationCommand(base)}\``,
@@ -440,7 +487,7 @@ const processDefinition = {
 
 const ingestDefinition = {
   name: 'receipt.owner_expense.ingest',
-  version: 1,
+  version: 2,
   capability: 'qbo.owner_expense.write',
   mutates: true,
   allowedTriggers: ['slack_receipt_hook'],
@@ -484,8 +531,19 @@ const ingestDefinition = {
           ${run.actor_user_id}, ${source.submittedAt || input.submittedAt || new Date().toISOString()},
           ${String(source.messageText || '')}, ${JSON.stringify(files)}, ${sourceHash}, 'received', ${run.id}
         )`);
-        const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts
+        let [receipt] = await db.query(sql`SELECT * FROM accounting_receipts
           WHERE slack_channel_id=${run.channel_id} AND slack_message_id=${input.slackMessageId}`);
+        if (receipt && receipt.source_hash !== sourceHash
+          && receipt.status === 'received' && !receipt.qbo_entity_id
+          && parseFiles(receipt.file_refs_json).length === 0) {
+          await db.query(sql`UPDATE accounting_receipts SET
+            slack_thread_ts=${input.threadTs || input.slackMessageId}, submitted_by=${run.actor_user_id},
+            submitted_at=${source.submittedAt || input.submittedAt || receipt.submitted_at},
+            message_text=${String(source.messageText || '')}, file_refs_json=${JSON.stringify(files)},
+            source_hash=${sourceHash}, workflow_run_id=${run.id}, updated_at=datetime('now')
+            WHERE id=${receipt.id} AND status='received' AND qbo_entity_id IS NULL`);
+          [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${receipt.id}`);
+        }
         if (!receipt || receipt.source_hash !== sourceHash) {
           const error = new Error('owner expense receipt readback mismatch');
           error.code = 'receipt_readback_mismatch';
@@ -509,7 +567,7 @@ const ingestDefinition = {
           payload: {
             channelId: run.channel_id,
             threadTs: input.threadTs || input.slackMessageId,
-            message: `🧾 Receipt received for ${profileForRun(run).owner_name}'s owner-expense ledger. I saved the original and queued extraction; I will reply here after QuickBooks readback or if review is needed. Receipt: ${state.persist_receipt.receiptId} · Workflow: ${run.id}`,
+            message: `🧾 Receipt received for ${profileForRun(run).owner_name}'s owner ledger. I saved the original and queued direction/extraction review; I will reply here after QuickBooks readback or if confirmation is needed. Receipt: ${state.persist_receipt.receiptId} · Workflow: ${run.id}`,
           },
         });
         return { outboxId: outbox.id };
@@ -522,7 +580,7 @@ const ingestDefinition = {
         const policy = loadPolicy({ fresh: true });
         const created = await store.createRun(db, {
           definition: processDefinition,
-          idempotencyKey: `receipt:${state.persist_receipt.receiptId}:owner-expense:process:v1`,
+          idempotencyKey: `receipt:${state.persist_receipt.receiptId}:owner-expense:process:v2`,
           triggerType: 'workflow',
           triggerRef: run.id,
           channelId: run.channel_id,
@@ -546,7 +604,7 @@ const ingestDefinition = {
 
 const confirmDefinition = {
   name: 'receipt.owner_expense.confirm',
-  version: 1,
+  version: 2,
   capability: 'qbo.owner_expense.write',
   mutates: true,
   allowedTriggers: ['slack_receipt_confirm_command'],
@@ -556,7 +614,8 @@ const confirmDefinition = {
       key: 'apply_confirmation', effectClass: 'local_write', maxAttempts: 2,
       async run({ db, run, input, store, stepKey }) {
         const profile = profileForRun(run);
-        const account = expenseForKey(input.categoryKey);
+        const account = input.transactionKind === OWNER_PAID_EXPENSE
+          ? expenseForKey(input.categoryKey) : null;
         const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${input.receiptId}`);
         if (!receipt) throw new Error('owner expense receipt was not found');
         if (receipt.slack_channel_id !== run.channel_id) {
@@ -566,13 +625,17 @@ const confirmDefinition = {
         }
         if (receipt.qbo_entity_id || receipt.status === 'posted') throw new Error('owner expense receipt is already posted');
         if (receipt.status !== 'needs_review') throw new Error('owner expense receipt is not awaiting review');
-        const description = String(input.description || `${input.vendor} business expense`).trim().slice(0, 1000);
+        const description = String(input.description || (input.transactionKind === OWNER_REPAYMENT
+          ? `${input.vendor} repayment applied to owner ledger`
+          : `${input.vendor} business expense`)).trim().slice(0, 1000);
         const updated = await db.query(sql`UPDATE accounting_receipts SET vendor=${String(input.vendor).trim().slice(0, 300)},
           transaction_date=${input.transactionDate}, currency=${String(input.currency).toUpperCase()},
-          amount=${Number(input.amount)}, description=${description}, category_key=${input.categoryKey},
-          category_name=${account.name}, extraction_confidence=1, review_reason=NULL,
+          amount=${Number(input.amount)}, transaction_kind=${input.transactionKind}, description=${description},
+          category_key=${account ? input.categoryKey : null}, category_name=${account?.name || null},
+          extraction_confidence=1, review_reason=NULL,
           extraction_json=${JSON.stringify({ source: 'slack_human_confirmation', actorUserId: run.actor_user_id,
-            confirmedAt: new Date().toISOString(), ownerName: profile.owner_name })},
+            confirmedAt: new Date().toISOString(), ownerName: profile.owner_name,
+            transactionKind: input.transactionKind })},
           status='ready_to_post', workflow_run_id=${run.id}, updated_at=datetime('now')
           WHERE id=${receipt.id} AND status='needs_review' RETURNING id`);
         if (!updated.length) throw new Error('owner expense receipt review was already claimed');
@@ -580,7 +643,8 @@ const confirmDefinition = {
         const evidence = await store.createEvidence(db, {
           runId: run.id, stepKey, source: 'human.slack_confirmation', sourceRef: receipt.id,
           payload: { receiptId: receipt.id, transactionDate: readback.transaction_date,
-            currency: readback.currency, amount: readback.amount, categoryKey: readback.category_key,
+            currency: readback.currency, amount: readback.amount, transactionKind: readback.transaction_kind,
+            categoryKey: readback.category_key,
             vendor: readback.vendor, description: readback.description, actorUserId: run.actor_user_id },
         });
         return { receiptId: receipt.id, evidenceId: evidence.id };
@@ -591,7 +655,8 @@ const confirmDefinition = {
       async run({ db, run, input, state, store }) {
         const digest = store.sha256({
           transactionDate: input.transactionDate, currency: input.currency, amount: Number(input.amount),
-          categoryKey: input.categoryKey, vendor: input.vendor, description: input.description || '',
+          transactionKind: input.transactionKind, categoryKey: input.categoryKey || null,
+          vendor: input.vendor, description: input.description || '',
         }).slice(0, 24);
         const policy = loadPolicy({ fresh: true });
         const created = await store.createRun(db, {

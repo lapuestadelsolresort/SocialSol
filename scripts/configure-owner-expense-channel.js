@@ -37,6 +37,8 @@ function configuration(args = process.argv.slice(2)) {
     ownerName: required(args, '--owner-name'),
     liabilityAccountId: required(args, '--liability-account-id'),
     liabilityAccountName: required(args, '--liability-account-name'),
+    repaymentBankAccountId: required(args, '--repayment-bank-account-id'),
+    repaymentBankAccountName: required(args, '--repayment-bank-account-name'),
     threshold,
     accountingPath: path.resolve(option(args, '--accounting-config', path.join(ROOT, 'accounting', 'config.json'))),
     policyPath: path.resolve(option(args, '--workflow-policy', path.join(ROOT, 'workflow', 'policy.json'))),
@@ -47,6 +49,7 @@ function configuration(args = process.argv.slice(2)) {
   if (!/^[a-z0-9][a-z0-9_-]{1,79}$/.test(config.channelName)) throw new Error('invalid --channel-name');
   if (!config.ownerName.trim()) throw new Error('invalid --owner-name');
   if (!/^\d+$/.test(config.liabilityAccountId)) throw new Error('invalid --liability-account-id');
+  if (!/^\d+$/.test(config.repaymentBankAccountId)) throw new Error('invalid --repayment-bank-account-id');
   if (!Number.isFinite(threshold) || threshold < 0.5 || threshold > 1) throw new Error('invalid confidence threshold');
   return config;
 }
@@ -67,6 +70,10 @@ function nextConfigs(accounting, policy, config) {
     liability_account: {
       id: config.liabilityAccountId,
       name: config.liabilityAccountName,
+    },
+    repayment_bank_account: {
+      id: config.repaymentBankAccountId,
+      name: config.repaymentBankAccountName,
     },
     auto_post_min_confidence: config.threshold,
   };
@@ -125,6 +132,7 @@ function configure(args = process.argv.slice(2)) {
       channelName: `#${config.channelName}`,
       ownerName: config.ownerName,
       liabilityAccount: { id: config.liabilityAccountId, name: config.liabilityAccountName },
+      repaymentBankAccount: { id: config.repaymentBankAccountId, name: config.repaymentBankAccountName },
       workflows: OWNER_WORKFLOWS,
     };
   }
@@ -146,6 +154,7 @@ function configure(args = process.argv.slice(2)) {
     channelName: `#${config.channelName}`,
     ownerName: config.ownerName,
     liabilityAccount: { id: config.liabilityAccountId, name: config.liabilityAccountName },
+    repaymentBankAccount: { id: config.repaymentBankAccountId, name: config.repaymentBankAccountName },
     workflows: OWNER_WORKFLOWS,
     backups,
   };

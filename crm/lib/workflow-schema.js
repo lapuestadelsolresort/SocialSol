@@ -154,6 +154,7 @@ const SCHEMA_STATEMENTS = [
     transaction_date TEXT,
     currency TEXT,
     amount REAL,
+    transaction_kind TEXT,
     description TEXT,
     category_key TEXT,
     category_name TEXT,
@@ -345,6 +346,7 @@ const WORKFLOW_OUTBOX_COLUMNS = [
 ];
 
 const ACCOUNTING_RECEIPT_COLUMNS = [
+  'transaction_kind TEXT',
   'description TEXT',
   'category_key TEXT',
   'category_name TEXT',

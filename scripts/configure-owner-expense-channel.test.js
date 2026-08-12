@@ -27,6 +27,7 @@ function args(directory, confirm = false) {
     '--channel-id', 'C123OWNER', '--channel-name', 'receipt-owner',
     '--owner-name', 'Test Owner', '--liability-account-id', '2100',
     '--liability-account-name', 'Due to Test Owner (Net)',
+    '--repayment-bank-account-id', '1100', '--repayment-bank-account-name', 'Operating Bank',
     '--accounting-config', accountingPath, '--workflow-policy', policyPath,
     '--backup-dir', path.join(directory, 'backups'),
     ...(confirm ? ['--confirm-production'] : []),
@@ -58,6 +59,7 @@ test('owner expense configurator atomically registers both runtime configs', () 
     assert.equal(result.mode, 'production');
     assert.equal(accounting.owner_expense_channels.C123OWNER.owner_name, 'Test Owner');
     assert.equal(accounting.owner_expense_channels.C123OWNER.liability_account.id, '2100');
+    assert.equal(accounting.owner_expense_channels.C123OWNER.repayment_bank_account.id, '1100');
     assert.ok(policy.channels.C123OWNER.capabilities.includes('qbo.owner_expense.write'));
     assert.ok(policy.live_workflows.includes('receipt.owner_expense.process'));
     assert.equal(fs.readdirSync(path.join(directory, 'backups')).length, 2);

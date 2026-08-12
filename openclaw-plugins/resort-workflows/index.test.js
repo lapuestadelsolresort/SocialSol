@@ -68,6 +68,7 @@ test('parses only exact owner-expense confirmation commands', () => {
   assert.deepEqual(
     parseReceiptConfirmCommand(`!receipt confirm ${id} 2026-08-06 MXN 4700 maintenance | AC Ignacio Rubio | Compressor work`),
     {
+      transactionKind: 'owner_paid_expense',
       receiptId: id,
       transactionDate: '2026-08-06',
       currency: 'MXN',
@@ -75,6 +76,14 @@ test('parses only exact owner-expense confirmation commands', () => {
       categoryKey: 'maintenance',
       vendor: 'AC Ignacio Rubio',
       description: 'Compressor work',
+    },
+  );
+  assert.deepEqual(
+    parseReceiptConfirmCommand(`!receipt confirm repayment ${id} 2026-08-06 MXN 4700 | AC Ignacio Rubio | Paid for owner compressor work`),
+    {
+      transactionKind: 'owner_repayment', receiptId: id, transactionDate: '2026-08-06',
+      currency: 'MXN', amount: 4700, categoryKey: null, vendor: 'AC Ignacio Rubio',
+      description: 'Paid for owner compressor work',
     },
   );
   assert.deepEqual(parseReceiptConfirmCommand('Please post George expense'), null);

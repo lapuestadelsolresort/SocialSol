@@ -35,6 +35,7 @@ async function withOwnerDb(run) {
       [CHANNEL]: {
         name: '#receipt-owner', owner_name: 'Test Owner',
         liability_account: { id: '2100', name: 'Due to Test Owner (Net)' },
+        repayment_bank_account: { id: '1100', name: 'Operating Bank' },
         auto_post_min_confidence: 0.9,
       },
     },
@@ -79,7 +80,8 @@ function extraction(overrides = {}) {
     extracted: {
       document_type: 'receipt', vendor: 'AC Ignacio Rubio', transaction_date: '2026-08-06',
       currency: 'MXN', amount: 4700, description: 'Compressor work', category_key: 'maintenance',
-      is_business_expense: true, paid_by_owner: true, confidence: 0.98, review_reason: null,
+      transaction_kind: 'owner_paid_expense', is_business_expense: true,
+      paid_by_owner: true, confidence: 0.98, review_reason: null,
       ...overrides,
     },
   };
@@ -168,7 +170,7 @@ test('contradictory payment provenance requires review and never calls QBO', asy
     assert.match(receipt.review_reason, /does not clearly establish that Test Owner paid personally/);
     const rows = await db.query(sql`SELECT payload_json FROM workflow_outbox`);
     const message = rows.map(row => JSON.parse(row.payload_json).message).find(value => value.includes('!receipt confirm'));
-    assert.match(message, new RegExp(`!receipt confirm ${receipt.id}`));
+    assert.match(message, new RegExp(`!receipt confirm expense ${receipt.id}`));
     assert.match(message, /nothing was posted to QuickBooks/i);
   });
 });
@@ -186,6 +188,7 @@ test('explicit receipt confirmation updates the same receipt and queues one post
       idempotencyKey: 'slack:confirm:1', triggerType: 'slack_receipt_confirm_command', triggerRef: '1786500001.100',
       channelId: CHANNEL, actorUserId: 'U-JASON',
       input: {
+        transactionKind: 'owner_paid_expense',
         receiptId: ingestRun.output.receiptId, transactionDate: '2026-08-06', currency: 'MXN', amount: 4700,
         categoryKey: 'maintenance', vendor: 'AC Ignacio Rubio', description: 'Compressor work',
       },
@@ -209,6 +212,99 @@ test('explicit receipt confirmation updates the same receipt and queues one post
     const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${ingestRun.output.receiptId}`);
     assert.equal(receipt.status, 'posted');
     assert.equal(receipt.qbo_entity_id, 'JE-9002');
+  });
+});
+
+test('owner repayment requires confirmation then debits liability and credits the configured bank', async () => {
+  await withOwnerDb(async db => {
+    const reviewServices = {
+      fetchSlackReceipt: async () => source({
+        messageText: 'The business paid 4,700 MXN to Mr. Rubio for the owner; apply it against the owner liability.',
+      }),
+      extractOwnerExpense: async () => extraction({
+        transaction_kind: 'owner_repayment', category_key: null,
+        paid_by_owner: false, is_business_expense: null,
+        review_reason: 'Business paid a third party on the owner’s behalf.',
+      }),
+      runCommand: async () => { throw new Error('repayment must not post before confirmation'); },
+    };
+    const ingestRun = await ingest(db, reviewServices, 'repayment');
+    const reviewed = await executeGraph(
+      db, getDefinition('receipt.owner_expense.process'), ingestRun.output.processRunId, reviewServices,
+    );
+    assert.equal(reviewed.output.status, 'needs_review');
+    const [candidate] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${ingestRun.output.receiptId}`);
+    assert.equal(candidate.transaction_kind, 'owner_repayment');
+    assert.equal(candidate.category_key, null);
+    const messages = (await db.query(sql`SELECT payload_json FROM workflow_outbox`))
+      .map(row => JSON.parse(row.payload_json).message).join('\n');
+    assert.match(messages, new RegExp(`!receipt confirm repayment ${candidate.id}`));
+
+    const confirmRun = await startGraph(db, getDefinition('receipt.owner_expense.confirm'), {
+      idempotencyKey: 'slack:confirm:repayment', triggerType: 'slack_receipt_confirm_command',
+      triggerRef: '1786500002.100', channelId: CHANNEL, actorUserId: 'U-JASON',
+      input: {
+        transactionKind: 'owner_repayment', receiptId: candidate.id,
+        transactionDate: '2026-08-06', currency: 'MXN', amount: 4700,
+        categoryKey: null, vendor: 'AC Ignacio Rubio',
+        description: 'Indirect repayment for compressor work on the owner’s behalf',
+      },
+    });
+    assert.equal(confirmRun.output.status, 'queued');
+    const commands = [];
+    const postingServices = {
+      runCommand: async command => {
+        commands.push(command);
+        const status = command.args.includes('--verify-only') ? 'VERIFIED' : 'PUSHED';
+        return { exitCode: 0, stderr: '', stdout: JSON.stringify({
+          status, verified_by_readback: true, qbo_id: 'PUR-9003', qbo_entity_type: 'Purchase',
+          request_id: 'ss-or-confirm', amount_usd: 272.78, fx_rate: 17.23,
+        }) };
+      },
+    };
+    const posted = await executeGraph(
+      db, getDefinition('receipt.owner_expense.process'), confirmRun.output.processRunId, postingServices,
+    );
+    assert.equal(posted.output.status, 'posted');
+    assert.equal(posted.output.qboEntityType, 'Purchase');
+    assert.ok(commands[0].args.includes('--transaction-kind'));
+    assert.ok(commands[0].args.includes('owner_repayment'));
+    assert.ok(commands[0].args.includes('--bank-account-id'));
+    assert.ok(commands[0].args.includes('1100'));
+    assert.equal(commands[0].args.includes('--expense-account-id'), false);
+    const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${candidate.id}`);
+    assert.equal(receipt.qbo_entity_type, 'Purchase');
+    assert.equal(receipt.qbo_entity_id, 'PUR-9003');
+    const finalMessages = (await db.query(sql`SELECT payload_json FROM workflow_outbox`))
+      .map(row => JSON.parse(row.payload_json).message).join('\n');
+    assert.match(finalMessages, /Debit: Due to Test Owner \(Net\) · Credit: Operating Bank/);
+  });
+});
+
+test('owner ingest safely refreshes an unposted legacy receipt stub from exact Slack readback', async () => {
+  await withOwnerDb(async db => {
+    const legacyId = '0d0522a0-9833-4d6f-8a8c-84fd0b49dc5a';
+    await db.query(sql`INSERT INTO accounting_receipts (
+      id, slack_channel_id, slack_message_id, submitted_by, submitted_at,
+      message_text, file_refs_json, source_hash, status
+    ) VALUES (
+      ${legacyId}, ${CHANNEL}, '1786500000.123', ${ACTOR}, '2026-08-06T12:00:00.000Z',
+      'legacy event text', '[]', 'legacy-hash', 'received'
+    )`);
+    const services = {
+      fetchSlackReceipt: async () => source({
+        messageText: 'Business paid 4,700 MXN for the owner; reduce the owner liability.',
+        files: [{ id: 'F1', name: 'payment.pdf', mimetype: 'application/pdf', size: 10,
+          sha256: 'a'.repeat(64), localPath: '/runtime/payment.pdf' }],
+      }),
+    };
+    const run = await ingest(db, services, 'legacy-refresh');
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.receiptId, legacyId);
+    const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${legacyId}`);
+    assert.notEqual(receipt.source_hash, 'legacy-hash');
+    assert.match(receipt.message_text, /reduce the owner liability/);
+    assert.equal(JSON.parse(receipt.file_refs_json)[0].sha256, 'a'.repeat(64));
   });
 });
 
