@@ -30,6 +30,7 @@ async function withDb(run) {
       'RECEIPT-A': { name: 'receipt-a', capabilities: ['receipts.write'] },
       'RECEIPT-B': { name: 'receipt-b', capabilities: ['receipts.write'] },
       'PAULINA': { name: 'prospector-paulina', capabilities: ['paulina.send'] },
+      'REGINA': { name: 'reengager-regina', capabilities: ['regina.send'] },
     },
     restricted_capabilities: {},
     write_notifications: { user_ids: [], channel_ids: [] },
@@ -50,6 +51,23 @@ async function withDb(run) {
     else process.env.RESORT_WORKFLOW_POLICY_PATH = priorPolicyPath;
     fs.rmSync(directory, { recursive: true, force: true });
   }
+}
+
+async function seedWorkflowRun(db, {
+  id,
+  workflowName,
+  status,
+  state = {},
+  startedAt,
+  completedAt,
+}) {
+  await db.query(sql`INSERT INTO workflow_runs (
+      id, workflow_name, workflow_version, idempotency_key, status,
+      trigger_type, input_json, state_json, started_at, completed_at
+    ) VALUES (
+      ${id}, ${workflowName}, 1, ${`seed:${id}`}, ${status},
+      'system', '{}', ${JSON.stringify(state)}, ${startedAt}, ${completedAt}
+    )`);
 }
 
 test('registry exposes fixed domain graphs instead of arbitrary command execution', () => {
@@ -360,7 +378,7 @@ test('a definitive Postiz rejection restores approved content for a corrected re
   });
 });
 
-test('Paulina verification counts only rows attributed to its workflow run', async () => {
+test('Paulina verification counts only attributed rows without posting an individual notification', async () => {
   await withDb(async db => {
     await db.query(sql`CREATE TABLE outreach_sends (
       id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, sent_at TEXT, workflow_run_id TEXT
@@ -399,10 +417,9 @@ test('Paulina verification counts only rows attributed to its workflow run', asy
     const [evidence] = await db.query(sql`SELECT payload_json FROM workflow_evidence
       WHERE run_id=${run.id} AND source='crm.outreach_sends'`);
     assert.equal(JSON.parse(evidence.payload_json).attributedRows.sent, 1);
-    const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+    const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM workflow_outbox
       WHERE run_id=${run.id} AND topic='slack.notification'`);
-    assert.match(JSON.parse(notification.payload_json).message,
-      /processed 1, sent 1, failed 0, verified queue ready 2/);
+    assert.equal(count, 0);
   });
 });
 
@@ -437,8 +454,7 @@ test('Paulina verified no-op runs do not post misleading Resend write notificati
     });
     assert.equal(run.status, 'completed', run.error_message);
     assert.equal(run.output.report.sent, 0);
-    assert.equal(run.state.notify_humans.queued, 0);
-    assert.equal(run.state.notify_humans.reason, 'verified no-op notification suppressed');
+    assert.equal(run.steps.some(step => step.step_key === 'notify_humans'), false);
     const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM workflow_outbox
       WHERE run_id=${run.id} AND topic='slack.notification'`);
     assert.equal(count, 0);
@@ -470,6 +486,28 @@ test('Paulina preparation is a run-scoped graph with verified stage effects', as
       (id, email, email_status, do_not_contact, status, source_query)
       VALUES (1, 'one@example.test', 'verified', 0, 'new', 'run_wedding_planner'),
              (2, 'two@example.test', 'verified', 0, 'new', 'run_wedding_planner')`);
+
+    const now = Date.now();
+    await seedWorkflowRun(db, {
+      id: 'prepare-previous', workflowName: 'paulina.prepare_daily', status: 'completed',
+      startedAt: new Date(now - 26 * 60 * 60_000).toISOString(),
+      completedAt: new Date(now - 25 * 60 * 60_000).toISOString(),
+    });
+    await seedWorkflowRun(db, {
+      id: 'dispatch-one', workflowName: 'paulina.daily', status: 'completed',
+      startedAt: new Date(now - 3 * 60 * 60_000).toISOString(),
+      completedAt: new Date(now - 2 * 60 * 60_000).toISOString(),
+      state: { verify_readback: { summary: { processed: 1, sent: 1, failed: 0, queueReady: 9 } } },
+    });
+    await seedWorkflowRun(db, {
+      id: 'dispatch-two', workflowName: 'paulina.daily', status: 'completed',
+      startedAt: new Date(now - 2 * 60 * 60_000).toISOString(),
+      completedAt: new Date(now - 60 * 60_000).toISOString(),
+      state: { verify_readback: { summary: { processed: 2, sent: 1, failed: 1, queueReady: 11 } } },
+    });
+    const policy = JSON.parse(fs.readFileSync(process.env.RESORT_WORKFLOW_POLICY_PATH, 'utf8'));
+    policy.write_notifications.user_ids = ['SARAH'];
+    fs.writeFileSync(process.env.RESORT_WORKFLOW_POLICY_PATH, JSON.stringify(policy));
 
     let commandCalls = 0;
     const run = await startGraph(db, getDefinition('paulina.prepare_daily'), {
@@ -533,7 +571,11 @@ test('Paulina preparation is a run-scoped graph with verified stage effects', as
     assert.deepEqual(new Set(effects.map(effect => effect.status)), new Set(['verified_by_readback']));
     const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
       WHERE run_id=${run.id} AND topic='slack.notification'`);
-    assert.match(JSON.parse(notification.payload_json).message, /composed 2 new drafts/);
+    const message = JSON.parse(notification.payload_json).message;
+    assert.match(message, /Send digest: processed 3, sent 2, failed 1 across 2 CRM-verified runs; latest verified queue ready 11\./);
+    assert.match(message, /composed 2 new drafts/);
+    assert.doesNotMatch(message, /<@SARAH>|Sarah/);
+    assert.equal(run.output.notification.digest.sent, 2);
   });
 });
 
@@ -556,6 +598,33 @@ test('Paulina preparation records a weekend no-op without external effects', asy
     const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM workflow_outbox
       WHERE run_id=${run.id}`);
     assert.equal(count, 0);
+  });
+});
+
+test('Paulina weekend preparation still posts one digest when the prior interval had sends', async () => {
+  await withDb(async db => {
+    const now = Date.now();
+    await seedWorkflowRun(db, {
+      id: 'weekend-dispatch', workflowName: 'paulina.daily', status: 'completed',
+      startedAt: new Date(now - 2 * 60 * 60_000).toISOString(),
+      completedAt: new Date(now - 60 * 60_000).toISOString(),
+      state: { verify_readback: { summary: { processed: 1, sent: 1, failed: 0, queueReady: 7 } } },
+    });
+    const run = await startGraph(db, getDefinition('paulina.prepare_daily'), {
+      idempotencyKey: 'paulina-prepare-weekend-with-sends', triggerType: 'system', input: {},
+    }, {
+      now: '2026-08-16T15:30:00.000Z',
+      paulinaConfig: { reporting: { active_campaign_slug: 'planner_partner_program_v1' } },
+      paulinaState: { paused: false },
+      runCommand: async () => { throw new Error('must not run'); },
+    });
+
+    assert.equal(run.status, 'completed', run.error_message);
+    const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE run_id=${run.id} AND topic='slack.notification'`);
+    const message = JSON.parse(notification.payload_json).message;
+    assert.match(message, /processed 1, sent 1, failed 0 across 1 CRM-verified run/);
+    assert.match(message, /Preparation skipped \(weekend\)/);
   });
 });
 
@@ -585,16 +654,35 @@ test('Paulina preparation distinguishes safe pre-dispatch retry from post-comman
   }, options), error => error.retryable === false && error.requiresManualReview === true);
 });
 
-test('Regina verification excludes concurrent outreach rows from another producer', async () => {
+test('Regina daily aggregates verified runs without mentioning configured users', async () => {
   await withDb(async db => {
     await db.query(sql`CREATE TABLE outreach_sends (
       id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, sent_at TEXT, workflow_run_id TEXT
     )`);
+    const now = Date.now();
+    await seedWorkflowRun(db, {
+      id: 'regina-daily-previous', workflowName: 'regina.daily', status: 'completed',
+      startedAt: new Date(now - 26 * 60 * 60_000).toISOString(),
+      completedAt: new Date(now - 25 * 60 * 60_000).toISOString(),
+    });
+    await seedWorkflowRun(db, {
+      id: 'regina-campaign-recent', workflowName: 'regina.campaign', status: 'completed',
+      startedAt: new Date(now - 3 * 60 * 60_000).toISOString(),
+      completedAt: new Date(now - 2 * 60 * 60_000).toISOString(),
+      state: { verify_readback: { summary: {
+        campaignSlug: 'vip', created: 2, sent: 1, failed: 1,
+      } } },
+    });
+    const policy = JSON.parse(fs.readFileSync(process.env.RESORT_WORKFLOW_POLICY_PATH, 'utf8'));
+    policy.write_notifications.user_ids = ['SARAH'];
+    fs.writeFileSync(process.env.RESORT_WORKFLOW_POLICY_PATH, JSON.stringify(policy));
+
     const run = await startGraph(db, getDefinition('regina.daily'), {
       idempotencyKey: 'regina-attribution-test', triggerType: 'system', input: {},
     }, {
       runCommand: async command => {
         assert.match(command.env.WORKFLOW_RUN_ID, /^[0-9a-f-]{36}$/);
+        assert.equal(command.env.REGINA_WORKFLOW_NO_SUMMARY, '1');
         await db.query(sql`INSERT INTO outreach_sends (status, sent_at, workflow_run_id)
           VALUES ('sent','2026-08-11T18:00:00Z',${command.env.WORKFLOW_RUN_ID}),
                  ('sent','2026-08-11T18:00:00Z','legacy-producer')`);
@@ -604,6 +692,38 @@ test('Regina verification excludes concurrent outreach rows from another produce
     assert.equal(run.status, 'completed', run.error_message);
     assert.equal(run.output.report.created, 1);
     assert.equal(run.output.report.sent, 1);
+    assert.equal(run.output.digest.created, 3);
+    assert.equal(run.output.digest.sent, 2);
+    assert.equal(run.output.digest.failed, 1);
+    const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE run_id=${run.id} AND topic='slack.notification'`);
+    const message = JSON.parse(notification.payload_json).message;
+    assert.match(message, /created 3, sent 2, failed 1 across 2 CRM-verified runs/);
+    assert.match(message, /Campaign runs: anniversary 1, vip 1/);
+    assert.doesNotMatch(message, /<@SARAH>|Sarah/);
+  });
+});
+
+test('Regina ad-hoc campaigns feed the next digest without posting a run summary', async () => {
+  await withDb(async db => {
+    await db.query(sql`CREATE TABLE outreach_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, sent_at TEXT, workflow_run_id TEXT
+    )`);
+    const run = await startGraph(db, getDefinition('regina.campaign'), {
+      idempotencyKey: 'regina-campaign-no-notification', triggerType: 'model_tool',
+      input: { campaignSlug: 'vip', count: 1 },
+    }, {
+      runCommand: async command => {
+        assert.equal(command.env.REGINA_WORKFLOW_NO_SUMMARY, '1');
+        return { exitCode: 0, stdout: '{"ok":true}', stderr: '' };
+      },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.report.campaignSlug, 'vip');
+    assert.equal(run.steps.some(step => step.step_key === 'notify_humans'), false);
+    const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM workflow_outbox
+      WHERE run_id=${run.id} AND topic='slack.notification'`);
+    assert.equal(count, 0);
   });
 });
 

@@ -51,7 +51,8 @@ business at sale.
 | Daily campaign report | Daily | `#business-intel` |
 | Budget guardrails check | Continuous | `#business-intel` |
 | Sender-domain warmup | Scheduled batches | `#prospector-paulina` |
-| Paulina preparation graph | Weekdays 8:30am PT | `#prospector-paulina` |
+| Paulina preparation + send digest | Daily 8:30am PT (preparation weekdays) | `#prospector-paulina` |
+| Regina reengagement + send digest | Daily 7:30am PT | `#reengager-regina` |
 | Encrypted backups + Healthchecks monitoring | Daily | `#ops-alerts` |
 | Accounting weekly tests (7 checks) | Monday 8am PT | `#accounting` |
 

@@ -89,13 +89,17 @@ node crm/scripts/workflow-trigger.js paulina.prepare_daily --bucket day \
   --input-json '{"dryRun":true,"skipAnalysis":true,"skipResearch":true}'
 ```
 
-The 8:30 a.m. LaunchAgent invokes the first command. The fixed graph records
+The daily 8:30 a.m. LaunchAgent invokes the first command. The fixed graph records
 preflight, truthful engagement analysis, capacity, research, campaign
 attachment, ZeroBounce verification, draft composition, provider readbacks,
-and the Slack summary as separate steps. Weekend and paused runs are durable
-no-ops. A provider-facing step that dies mid-flight opens manual review and is
-not automatically replayed. The dry-run command is the deployment canary; its
-custom idempotency key must never reuse the scheduled daily key.
+and one Slack summary without user `@mentions` as separate steps. That summary aggregates
+all CRM-verified five-minute dispatch runs since the prior completed daily
+summary; dispatch runs never post individual success notifications. Weekend
+and paused runs skip preparation, but still post a digest when the prior
+interval had sends or failures. A provider-facing step that dies mid-flight
+opens manual review and is not automatically replayed. The dry-run command is
+the deployment canary; its custom idempotency key must never reuse the scheduled
+daily key.
 
 ## Supporting maintenance
 
