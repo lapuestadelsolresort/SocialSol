@@ -35,6 +35,14 @@ const paulinaDaily = makeDurableJob({
   operation: 'paulina.orchestrate',
   autonomous: true,
   notificationChannelName: 'prospector-paulina',
+  shouldNotify: ({ state }) => {
+    const summary = state.verify_readback?.summary || {};
+    return Number(summary.sent || 0) > 0 || Number(summary.failed || 0) > 0;
+  },
+  buildNotificationMessage: ({ run, state }) => {
+    const summary = state.verify_readback?.summary || {};
+    return `Paulina run verified by CRM readback: processed ${Number(summary.processed || 0)}, sent ${Number(summary.sent || 0)}, failed ${Number(summary.failed || 0)}, verified queue ready ${Number(summary.queueReady || 0)}. Workflow ${run.id}.`;
+  },
   requestSummary: () => ({ campaignScope: 'configured_active_campaign', autonomous: true }),
   buildCommand: ({ run, shadowMode }) => nodeCommand('prospector/orchestrator.js', shadowMode ? ['--dry-run'] : [], {
     timeoutMs: 15 * 60_000,
