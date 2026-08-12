@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lapuestadelsolresort.paloma-scan</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>__SOCIALSOL_ROOT__/paloma/scripts/scan-channels.sh</string></array>
+  <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
+  <key>StartInterval</key><integer>14400</integer>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/paloma-scan.log</string>
+  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/paloma-scan.err</string>
+</dict></plist>

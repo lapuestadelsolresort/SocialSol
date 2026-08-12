@@ -70,6 +70,22 @@ Preview pending agent reports with:
 npm run report:squarespace -- --all
 ```
 
+Owner/executive future cash-flow questions use the deterministic cross-source
+report below. It reads live OwnerRez inventory plus the synchronized
+Squarespace payments and fees, while treating Kapital deposit confirmation as
+unavailable unless separately reconciled:
+
+```bash
+npm run report:owner-cash-flow
+node crm/scripts/owner-cash-flow.js --as-of YYYY-MM-DD --through YYYY-MM-DD
+node crm/scripts/owner-cash-flow.js --json
+```
+
+The report never treats stay value as future cash, direct deposit labels as
+open invoices, OwnerRez guest payment as a Kapital deposit, or stay dates as
+payout dates. Active unpriced bookings and reconciliation gaps are included as
+exceptions.
+
 Slack delivery requires both `--post` and
 `SQUARESPACE_SLACK_ENABLED=1`. Channel IDs and the OpenClaw Slack account come
 from environment configuration. The audiences are `#business-intel`,

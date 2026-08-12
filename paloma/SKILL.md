@@ -7,18 +7,18 @@ completion, and follows up with the team — all bilingually (Spanish + English)
 
 | Channel | ID | Purpose |
 |---|---|---|
-| #mantenimiento (repairs) | `REDACTED_SLACK_CHANNEL` | Broken items, repair requests. Sergio responds with status. |
-| #limpieza (cleaning/daily) | `REDACTED_SLACK_CHANNEL` | Daniel documents daily tasks (cleaning, upkeep). |
-| #paloma-tracker | `REDACTED_SLACK_CHANNEL` | Paloma's summary channel (visible to Jason, Mayela, team). |
+| #mantenimiento (repairs) | runtime `config.json` | Broken items, repair requests. Sergio responds with status. |
+| #limpieza (cleaning/daily) | runtime `config.json` | Daniel documents daily tasks (cleaning, upkeep). |
+| #paloma-tracker | runtime `config.json` | Paloma's summary channel (visible to Jason, Mayela, team). |
 
 ## People
 
 | Person | Slack ID | Role | Language |
 |---|---|---|---|
-| Sergio Gracia | `REDACTED_SLACK_USER` | Maintenance / repairs | Spanish only |
-| Daniel García | `REDACTED_SLACK_USER` | Daily operations / cleaning | Bilingual |
-| Mayela Gomez | `REDACTED_SLACK_USER` | Manager (on-site ~1x/week) | Bilingual |
-| Jason Starkey | `REDACTED_SLACK_USER` | Owner | English only |
+| Sergio Gracia | runtime `config.json` | Maintenance / repairs | Spanish only |
+| Daniel García | runtime `config.json` | Daily operations / cleaning | Bilingual |
+| Mayela Gomez | runtime `config.json` | Manager (on-site ~1x/week) | Bilingual |
+| Jason Starkey | runtime `config.json` | Owner | English only |
 
 ## Database
 

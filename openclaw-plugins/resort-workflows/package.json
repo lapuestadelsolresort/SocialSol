@@ -1,0 +1,13 @@
+{
+  "name": "@lapuestadelsol/resort-workflows-openclaw-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test index.test.js"
+  },
+  "openclaw": {
+    "extensions": ["./index.js"]
+  }
+}

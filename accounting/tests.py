@@ -449,7 +449,7 @@ def test_mayela_checkmark_reconciliation(token: str, base: str) -> dict:
     config = _load_config()
     mayela_channels = []
     for cid, ch in config.get('receipt_channels', {}).items():
-        if 'REDACTED_SLACK_USER' in ch.get('people', []) or 'mayela' in ch.get('scope', ''):
+        if 'mayela' in ch.get('scope', ''):
             mayela_channels.append({'id': cid, 'name': ch['name']})
 
     return {

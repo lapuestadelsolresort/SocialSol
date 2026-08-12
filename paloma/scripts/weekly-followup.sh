@@ -8,8 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PALOMA_DIR="$(dirname "$SCRIPT_DIR")"
 DB="$PALOMA_DIR/data/tasks.db"
-
-TRACKER_CHANNEL="REDACTED_SLACK_CHANNEL"
+CONFIG="${PALOMA_CONFIG_PATH:-$PALOMA_DIR/config.json}"
+TRACKER_CHANNEL="$(jq -er '.channels.tracker' "$CONFIG")"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
@@ -33,7 +33,7 @@ openclaw run --prompt "You are Paloma 🕊️, the resort task tracker. Run the 
    b. Update last_follow_up_at in the DB
    c. Insert a task_updates row (update_type='follow_up_sent')
 
-3. Post a summary to #paloma-tracker (REDACTED_SLACK_CHANNEL):
+3. Post a summary to #paloma-tracker ($TRACKER_CHANNEL):
    🕊️ *Seguimiento Semanal / Weekly Follow-Up*
    Followed up on N overdue tasks:
    - [list each with task #, description, assigned to, days old]

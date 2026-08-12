@@ -79,12 +79,13 @@ test('classifies operational line items and extracts booking fields', () => {
   assert.equal(classifyLineItem(order.lineItems[1]), 'housekeeping');
   assert.equal(classifyLineItem(order.lineItems[0]), 'direct_booking');
   assert.deepEqual(extractBookingFields(order), {
-    startDate: '2026-09-10', endDate: '2026-09-14', guestCount: 12, propertyHint: null,
+    startDate: '2026-09-10', endDate: '2026-09-14', guestCount: 12,
+    propertyHint: 'Puesta del Sol Resort',
   });
 });
 
 test('extracts booking date ranges embedded in Squarespace product names', () => {
-  const titleOrder = productName => ({ lineItems: [{ productName }] });
+  const titleOrder = (productName, createdOn = null) => ({ createdOn, lineItems: [{ productName }] });
   assert.deepEqual(extractTitleDates(titleOrder('Deposit from 12.21.26 to 1.3.27')), {
     startDate: '2026-12-21', endDate: '2027-01-03',
   });
@@ -97,6 +98,14 @@ test('extracts booking date ranges embedded in Squarespace product names', () =>
   assert.deepEqual(extractTitleDates(titleOrder('March 11th 2027 to March 16th 2027')), {
     startDate: '2027-03-11', endDate: '2027-03-16',
   });
+  assert.deepEqual(extractTitleDates(titleOrder(
+    '50% deposit to reserve Villa Crab September 25th-October 3rd',
+    '2026-08-06T01:39:11Z'
+  )), { startDate: '2026-09-25', endDate: '2026-10-03' });
+  assert.deepEqual(extractTitleDates(titleOrder(
+    'Buyout Nov 25th-29th 50% Deposit',
+    '2026-08-07T17:25:28Z'
+  )), { startDate: '2026-11-25', endDate: '2026-11-29' });
 });
 
 test('upserts direct commerce into CRM and links the existing OwnerRez guest', () => {
@@ -238,6 +247,36 @@ test('an OwnerRez contact without Squarespace date evidence remains review-only'
     });
     assert.equal(result.link.status, 'review');
     assert.equal(result.link.method, 'contact_without_dates');
+  } finally {
+    db.close();
+  }
+});
+
+test('a high-confidence owner cash-flow reconciliation survives an incremental order refresh', () => {
+  const db = setup();
+  try {
+    db.prepare(`INSERT INTO contacts
+      (name, email, dedup_key, source, context_source, status, ownerrez_booking_id)
+      VALUES (?, ?, ?, 'ownerrez_my_website', 'ownerrez_sync', 'booked', ?)`).run(
+      'Direct Guest', customer.primaryEmail.email, customer.primaryEmail.email, 4242
+    );
+    upsertCustomer(db, customer);
+    upsertOrder(db, order, { customer });
+    db.prepare(`UPDATE squarespace_order_ownerrez_links SET
+      ownerrez_booking_id=9999, status='matched',
+      match_method='owner_cash_flow_exact_dates_property_and_name', confidence=0.99,
+      matched_at=datetime('now') WHERE order_id=?`).run(order.id);
+
+    const refreshed = upsertOrder(db, order, { customer });
+    assert.equal(refreshed.link.status, 'matched');
+    const persisted = db.prepare(`SELECT ownerrez_booking_id, status, match_method, confidence
+      FROM squarespace_order_ownerrez_links WHERE order_id=?`).get(order.id);
+    assert.deepEqual(persisted, {
+      ownerrez_booking_id: 9999,
+      status: 'matched',
+      match_method: 'owner_cash_flow_exact_dates_property_and_name',
+      confidence: 0.99,
+    });
   } finally {
     db.close();
   }

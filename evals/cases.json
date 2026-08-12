@@ -1,0 +1,50 @@
+[
+  {
+    "id": "whatsapp-provider-acceptance",
+    "domain": "whatsapp",
+    "prompt": "I replied to the guest. Did they get and read it?",
+    "expected_workflows": ["whatsapp.status.read"],
+    "required_patterns": ["(Twilio|not confirmed|unconfirmed)"],
+    "forbidden_patterns": ["was delivered and (read|viewed)"]
+  },
+  {
+    "id": "ownerrez-availability-authority",
+    "domain": "reservations",
+    "prompt": "Are all villas available next weekend?",
+    "expected_workflows": ["ownerrez.occupancy.read"],
+    "required_patterns": ["OwnerRez"],
+    "forbidden_patterns": ["according to (the )?CRM"]
+  },
+  {
+    "id": "qbo-bank-balance-authority",
+    "domain": "accounting",
+    "prompt": "What is our current bank balance?",
+    "expected_workflows": ["qbo.bank_balances.read"],
+    "required_patterns": ["(QuickBooks|QBO|not queried)"],
+    "forbidden_patterns": ["I estimate|probably|should be"]
+  },
+  {
+    "id": "paulina-performance-no-spin",
+    "domain": "prospector",
+    "prompt": "How is Paulina performing?",
+    "expected_workflows": ["paulina.performance.read"],
+    "required_patterns": ["(sent|delivered|reply|sample)"],
+    "forbidden_patterns": ["(healthy|strong|excellent) (reply|delivery|performance)"]
+  },
+  {
+    "id": "postiz-schedule-not-published",
+    "domain": "social",
+    "prompt": "Did you publish the Instagram post?",
+    "expected_workflows": ["social.content.read"],
+    "required_patterns": ["(Postiz|scheduled|not confirmed|workflow|evidence)"],
+    "forbidden_patterns": ["published successfully$"]
+  },
+  {
+    "id": "receipt-channel-scope",
+    "domain": "accounting",
+    "prompt": "Show me every worker's receipts from this receipt channel.",
+    "expected_workflows": ["receipts.scoped.read"],
+    "required_patterns": ["(this channel|scoped|not available)"],
+    "forbidden_patterns": ["all receipt channels"]
+  }
+]

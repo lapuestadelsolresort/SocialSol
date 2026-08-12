@@ -228,14 +228,17 @@ describe('Server-side track.js event processing', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. WHATSAPP ATTRIBUTION (whatsapp.js)
+// 4. WHATSAPP ATTRIBUTION (durable ingress + processing graph)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('WhatsApp attribution (whatsapp.js)', () => {
+describe('WhatsApp attribution (durable ingress + processing graph)', () => {
   let waSource;
 
   before(() => {
-    waSource = fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8');
+    waSource = [
+      fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8'),
+      fs.readFileSync(path.join(ROOT, 'workflows', 'whatsapp-inbound.js'), 'utf-8'),
+    ].join('\n');
   });
 
   it('extracts LPDS ref from message text', () => {
@@ -255,7 +258,7 @@ describe('WhatsApp attribution (whatsapp.js)', () => {
   it('reconstructs UUID from hex ref for prefix matching', () => {
     // The ref is the first 16 hex chars of the UUID, formatted as 8-4-4
     assert.ok(
-      waSource.includes('slice(0,8)') && waSource.includes('slice(8,12)'),
+      /slice\(0,\s*8\)/.test(waSource) && /slice\(8,\s*12\)/.test(waSource),
       'Must reconstruct UUID prefix (8-4-4 format) from hex ref'
     );
   });
@@ -303,17 +306,18 @@ describe('Campaign lead reporting', () => {
     assert.ok(content.includes('utm_campaign'), 'Must group leads by utm_campaign');
   });
 
-  it('review-checklist.md exists with mandatory rules', () => {
-    const checklistPath = path.join(ROOT, '..', 'memory', 'review-checklist.md');
-    assert.ok(fs.existsSync(checklistPath), 'review-checklist.md must exist');
-    const content = fs.readFileSync(checklistPath, 'utf-8');
-    assert.ok(
-      content.includes('pixel leads') && content.includes('WhatsApp'),
-      'Checklist must mandate checking BOTH pixel and WhatsApp leads'
+  it('committed reporting distinguishes pixel taps from verified WhatsApp leads', () => {
+    const content = fs.readFileSync(
+      path.join(ROOT, '..', 'automation', 'daily_consolidated_report.py'),
+      'utf-8'
     );
     assert.ok(
-      content.includes('tracking failure') || content.includes('TRACKING FAILURE'),
-      'Checklist must warn about tracking failures when reached_cta is 0%'
+      content.includes('WhatsApp taps') && content.includes('verified inbound WhatsApp leads'),
+      'The committed report must show taps and verified WhatsApp leads separately'
+    );
+    assert.ok(
+      content.includes('performance decisions are blocked'),
+      'The committed report must block performance decisions when tracking integrity fails'
     );
   });
 });
@@ -432,11 +436,18 @@ describe('Full funnel regression guards', () => {
     );
   });
 
-  it('MEMORY.md has hard rule about pausing campaigns', () => {
-    const memory = fs.readFileSync(path.join(ROOT, '..', 'MEMORY.md'), 'utf-8');
+  it('campaign guardrails cannot pause Meta from private memory or pixel data', () => {
+    const guardrails = fs.readFileSync(
+      path.join(ROOT, '..', 'automation', 'guardrails.py'),
+      'utf-8'
+    );
     assert.ok(
-      memory.includes('Never recommend pausing a campaign based on pixel leads alone'),
-      'MEMORY.md must contain the hard rule about not pausing based on pixel leads alone'
+      guardrails.toLowerCase().includes('guardrails never edit meta campaign state'),
+      'The committed guardrail must keep Meta mutations out of this optimizer path'
+    );
+    assert.ok(
+      !guardrails.includes('graph.facebook.com') && !guardrails.includes('/campaigns'),
+      'The campaign guardrail must not contain a Meta mutation endpoint'
     );
   });
 });
@@ -492,8 +503,11 @@ describe('Scale guards for new campaigns', () => {
     assert.ok(script.includes("event_type='whatsapp_lead'"), 'Must query verified inbound leads');
   });
 
-  it('whatsapp.js attribution permits only deterministic methods', () => {
-    const waSource = fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8');
+  it('WhatsApp attribution permits only deterministic methods', () => {
+    const waSource = [
+      fs.readFileSync(path.join(ROOT, 'routes', 'whatsapp.js'), 'utf-8'),
+      fs.readFileSync(path.join(ROOT, 'workflows', 'whatsapp-inbound.js'), 'utf-8'),
+    ].join('\n');
     const methods = ['ref', 'session-id-prefix', 'unattributed'];
     for (const method of methods) {
       assert.ok(

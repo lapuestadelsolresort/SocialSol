@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lapuestadelsolresort.ownerrez-weekly-calendar</string>
+  <key>ProgramArguments</key><array><string>__NODE_BIN__</string><string>__SOCIALSOL_ROOT__/crm/scripts/ownerrez-weekly-calendar.js</string></array>
+  <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
+  <key>StartCalendarInterval</key><dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>SOCIALSOL_SECRETS_DIR</key><string>__SOCIALSOL_SECRETS_DIR__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key><string>__OPENCLAW_SLACK_ACCOUNT__</string>
+    <key>RESORT_RESERVATIONS_CHANNEL</key><string>__RESORT_RESERVATIONS_CHANNEL__</string>
+  </dict>
+  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/ownerrez-weekly-calendar.log</string>
+  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/ownerrez-weekly-calendar.err</string>
+</dict></plist>

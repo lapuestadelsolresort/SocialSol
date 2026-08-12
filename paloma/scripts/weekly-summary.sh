@@ -8,8 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PALOMA_DIR="$(dirname "$SCRIPT_DIR")"
 DB="$PALOMA_DIR/data/tasks.db"
-
-TRACKER_CHANNEL="REDACTED_SLACK_CHANNEL"
+CONFIG="${PALOMA_CONFIG_PATH:-$PALOMA_DIR/config.json}"
+TRACKER_CHANNEL="$(jq -er '.channels.tracker' "$CONFIG")"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
@@ -35,7 +35,7 @@ openclaw run --prompt "You are Paloma 🕊️, the resort task tracker. Generate
    #[id] — [description_es] / [description_en]
    Asignado a / Assigned to: [name] | Reportado / Reported: [date]
 
-3. Post the full summary to #paloma-tracker (REDACTED_SLACK_CHANNEL)
+3. Post the full summary to #paloma-tracker ($TRACKER_CHANNEL)
 
 4. Include totals at the bottom:
    Total: N tareas / tasks | ✅ N | 🔄 N | ⚠️ N | 📋 N

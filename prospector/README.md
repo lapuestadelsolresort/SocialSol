@@ -44,6 +44,13 @@ eligible. Generic role addresses, catch-alls, invalid addresses, and verifier
 errors remain blocked. The orchestrator performs the same fail-closed check
 again immediately before Resend delivery.
 
+Each Resend POST uses `socialsol-outreach-<outreach_sends.id>` as its provider
+idempotency key. Resend retains that key for 24 hours; the CRM row's terminal
+or `ambiguous` status is the durable replay guard after that window. Network,
+5xx, or id-less success responses are never changed to cancelled or retried as
+if they were known failures. See Resend's official idempotency-key contract:
+https://resend.com/docs/dashboard/emails/idempotency-keys
+
 Delivery automatically pauses when any configured absolute or rate threshold
 is reached. Production defaults are two bounces in 24 hours, a 4% seven-day
 bounce rate after 20 sends, or any complaint. Resume only after the queue and

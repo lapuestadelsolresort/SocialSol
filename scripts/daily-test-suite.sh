@@ -4,9 +4,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CHANNEL="REDACTED_SLACK_CHANNEL"
-SLACK_ACCOUNT="ig-drafts"
-OPENCLAW="/opt/homebrew/bin/openclaw"
+CHANNEL="${RESORT_ACCOUNTING_CHANNEL:-}"
+if [ -z "$CHANNEL" ]; then
+  CHANNEL="$(node -e "const {loadPolicy}=require('./crm/lib/channel-policy');const row=Object.entries(loadPolicy().channels).find(([,v])=>v.name==='accounting');if(!row)process.exit(1);process.stdout.write(row[0])")"
+fi
+: "${CHANNEL:?accounting channel is not configured}"
+SLACK_ACCOUNT="${OPENCLAW_SLACK_ACCOUNT:?OPENCLAW_SLACK_ACCOUNT is required}"
+OPENCLAW="${OPENCLAW_BIN:-/opt/homebrew/bin/openclaw}"
 LOG="$ROOT/logs/daily-tests.log"
 
 cd "$ROOT/crm"

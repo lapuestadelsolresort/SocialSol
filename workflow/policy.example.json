@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "shadow_mode": true,
+  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "ownerrez.mutation.confirm"],
+  "always_on_effects": ["whatsapp.inbound.process:send_conversion"],
+  "channels": {
+    "REPLACE_WITH_WHATSAPP_CHANNEL_ID": {
+      "name": "whatsapp",
+      "capabilities": ["whatsapp.read", "whatsapp.send", "crm.read", "crm.write"]
+    },
+    "REPLACE_WITH_SOCIAL_CHANNEL_ID": {
+      "name": "social-sol",
+      "capabilities": ["social.read", "social.write", "social.publish", "marketing.read", "crm.read", "crm.write"]
+    },
+    "REPLACE_WITH_BUSINESS_INTEL_CHANNEL_ID": {
+      "name": "business-intel",
+      "capabilities": ["business.read_all"]
+    },
+    "REPLACE_WITH_ACCOUNTING_CHANNEL_ID": {
+      "name": "accounting",
+      "capabilities": ["accounting.read", "accounting.write", "qbo.read", "qbo.write", "squarespace.read", "receipts.read", "receipts.write", "crm.read"]
+    },
+    "REPLACE_WITH_RESERVATIONS_CHANNEL_ID": {
+      "name": "reservations",
+      "capabilities": ["ownerrez.read", "reservations.read", "ownerrez.write"]
+    }
+  },
+  "restricted_capabilities": {
+    "ownerrez.write": {
+      "users": ["REPLACE_WITH_AUTHORIZED_SLACK_USER_ID"]
+    }
+  },
+  "autonomous_workflows": [
+    "whatsapp.inbound.process",
+    "paulina.daily",
+    "regina.daily",
+    "social.publish_routine",
+    "social.publish_due",
+    "crm.sync",
+    "ownerrez.crm.sync",
+    "squarespace.crm.sync",
+    "ownerrez.webhook.process",
+    "accounting.classify",
+    "receipt.reconcile",
+    "qbo.write"
+  ],
+  "write_notifications": {
+    "user_ids": ["REPLACE_WITH_JASON_SLACK_USER_ID", "REPLACE_WITH_SARAH_SLACK_USER_ID"],
+    "channel_ids": []
+  }
+}

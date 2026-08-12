@@ -247,7 +247,10 @@ function detectLanguage(text) {
   return spanishRatio >= 2 ? 'es' : 'en';
 }
 
-run().then(() => process.exit(0)).catch(e => {
+run().then(stats => {
+  console.log(JSON.stringify(stats));
+  process.exit(0);
+}).catch(e => {
   console.error('[message-ingest] Fatal:', e);
   process.exit(1);
 });

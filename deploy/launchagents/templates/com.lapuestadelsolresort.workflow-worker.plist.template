@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lapuestadelsolresort.workflow-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BIN__</string>
+    <string>__SOCIALSOL_ROOT__/crm/scripts/workflow-worker.js</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>SOCIALSOL_ROOT</key>
+    <string>__SOCIALSOL_ROOT__</string>
+    <key>SOCIALSOL_SECRETS_DIR</key>
+    <string>__SOCIALSOL_SECRETS_DIR__</string>
+    <key>OPENCLAW_SLACK_ACCOUNT</key>
+    <string>__OPENCLAW_SLACK_ACCOUNT__</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__SOCIALSOL_ROOT__/crm/logs/workflow-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>__SOCIALSOL_ROOT__/crm/logs/workflow-worker.log</string>
+  <key>WorkingDirectory</key>
+  <string>__SOCIALSOL_ROOT__</string>
+</dict>
+</plist>

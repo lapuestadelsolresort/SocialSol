@@ -28,3 +28,19 @@ Service command references live in:
 
 The committed LaunchAgents are templates. Rendering them is safe; installing
 or loading them is a separate production cutover.
+
+## Deterministic owner cash-flow answers
+
+When an owner asks about future cash flow, upcoming booking revenue, direct
+balances, Airbnb/Vrbo payouts, or the value of current bookings, run:
+
+```bash
+node crm/scripts/owner-cash-flow.js
+```
+
+For the initial answer, the entire final response MUST be the command's stdout
+verbatim. Do not summarize, shorten, relabel, round differently, add memory or
+Slack context, append recommendations, or invite follow-up. This output
+contract overrides the general preference for brevity. A separate follow-up
+may use `--json` and other explicitly queried sources. If the command fails,
+report the failure instead of constructing a partial financial answer.

@@ -5,8 +5,9 @@ AI operations platform for La Puesta del Sol Resort (Riviera Nayarit, Mexico).
 What began as a marketing stack now runs three domains of the business:
 **marketing & guest conversion**, **property operations**, and **finance &
 admin support**. It runs on a single Mac mini via OpenClaw, with humans
-approving anything outbound. Slack is the human interface; every agent has a
-channel.
+using Slack as the human interface. Stable Slack channel and user IDs are the
+authorization boundary; fixed, durable workflows—not an agent prompt—perform
+and verify business mutations.
 
 Sol is also the resort's **AI business consultant** — continuously optimizing
 for cost efficiencies and revenue growth across all three domains. Every
@@ -55,6 +56,11 @@ business at sale.
 
 ### Shared infrastructure
 
+- **Durable workflow control plane** (`workflow/`, `crm/workflows/`) — fixed
+  versioned graphs backed by SQLite runs, steps, effects, evidence, retries,
+  leases, and a notification outbox. Model context can request a workflow but
+  is never the workflow state or the authority for a completion claim.
+
 - **Voice Service** (`POST /api/voice/draft`) — drafts outbound copy in
   Sarah's authentic voice. Trained on a **1,251-message corpus** (1,204
   original Airbnb messages + 47 OwnerRez thread messages) embedded in Chroma
@@ -75,18 +81,36 @@ business at sale.
 
 ---
 
-## Human gates (load-bearing, not decorative)
+## Authority and mutation rules
 
-- **No outbound email sends without human approval.** Sarah reviews copy;
-  approval happens in Slack. *(Exception: Prospector Paulina runs fully
-  autonomous per standing directive — see `MEMORY.md`.)*
-- **Guests talk to people.** WhatsApp is handled by a live person. AI drafts;
-  humans send.
-- **Ad budgets are capped in code.** Live budget changes require explicit mode
-  and total-budget guardrails. Campaign activation requires Jason's approval.
-- **Completion claims require verification artifacts.** Agent summaries are
-  unverified until confirmed against real terminal output, DB queries, or API
-  responses.
+- Channel membership grants the domain capabilities listed in the ignored
+  runtime `workflow/policy.json`. The committed example contains no real Slack
+  identities.
+- Paulina, Regina, routine social publishing, CRM synchronization, accounting
+  classification, and auto-tier QBO writes have standing autonomous authority.
+- `#whatsapp` is the sole human WhatsApp console. A send must be an explicit
+  `!wa` command by a member of that private channel; plain Slack replies and
+  the retired direct HTTP send endpoints cannot send to a guest.
+- Instagram/Facebook DM replies are likewise command-only: `!dm <dm-id>
+  <message>` in `#social-sol`. The retired `/api/meta-dm/reply` endpoint cannot
+  bypass the durable ledger.
+- OwnerRez writes are additionally restricted to configured user IDs. A
+  proposal records its exact fixed-catalog operation, request hash, reason,
+  preflight snapshot, and 15-minute expiry. The same authorized Slack user must
+  paste the emitted `!ownerrez confirm …` command; the graph then rechecks the
+  precondition, executes once, and requires operation-specific readback. No
+  generic method, URL, API client, or shell escape is exposed to an agent.
+- OwnerRez and QBO writes notify the configured human recipients after provider
+  readback. Ad budget changes retain their separate code-level caps.
+- Completion claims require a workflow, effect, evidence, or provider artifact.
+  Accepted, queued, sent, delivered, read, and verified-by-readback are distinct
+  states.
+- Ambiguous non-idempotent results pause that workflow for human provider-console
+  review. They are never automatically replayed; configured reviewers resolve
+  them with the exact `!review resolve …` command recorded in the alert.
+- Provider sends and local message projections are separate graph steps. Once
+  provider acceptance is recorded, a local SQLite retry cannot call the
+  provider again, and staff are explicitly told not to resend.
 
 ---
 
@@ -100,6 +124,9 @@ crm/                   Express CRM server, SQLite migrations, tests
 ├── lib/               Shared libraries (API auth, Gmail client, voice retrieval,
 │                      Chroma connect, suppressions, webhook verification)
 └── data/              SQLite databases (never committed)
+
+workflow/              Channel policy template, architecture and cutover runbook
+openclaw-plugins/       Trusted Slack identity adapter and claim-verification hooks
 
 landing/apps/          Astro landing pages (weddings, retreats, fitness, planner
                        partners) deployed to Cloudflare Pages
@@ -181,7 +208,7 @@ memory/                Sync state files (not committed)
 | **Healthchecks.io** | Job monitoring → `#ops-alerts` |
 | **OpenAI** | Embeddings (`text-embedding-3-small`) for voice corpus and media search |
 | **ElevenLabs** | Voice catalog for video ad projects |
-| **QuickBooks Online** | Accounting system of record. Full read/write API via OAuth 2.0. Automated expense classification and push from Kapital bank statements. P&L reports, invoices, 30+ vendors, 35+ expense/income categories. Company: "Puesta Del Sol v2" (Realm `9341456092857510`). Refresh-token auth, auto-renewable. |
+| **QuickBooks Online** | Accounting system of record. Read/write API via OAuth 2.0. Automated expense classification and push from Kapital bank statements, with provider idempotency and entity readback. Runtime company identity and tokens remain in the secrets directory. |
 
 ---
 
@@ -198,6 +225,7 @@ cp sarah-coach/config.example.json sarah-coach/config.json
 cp warmup/recipients.example.json warmup/recipients.json
 cp warmup/state.example.json warmup/state.json
 npm install
+npm run setup:workflow-token
 npm run check:stack
 ```
 
@@ -231,13 +259,13 @@ See `SECURITY.md` for reporting and credential-handling guidance.
 
 ## For future agents reading this
 
-1. `MEMORY.md` in the OpenClaw workspace is the tactical source of truth —
-   read it at session start for active leads, campaign state, integration
-   details, and key lessons.
+1. Runtime databases and authoritative provider APIs are the source of truth.
+   Agent memory is context only and cannot prove a mutable business fact.
 2. Inspect schemas and paths at runtime (`sqlite3 .schema`, `ls`) — don't
    assume structure from docs or memory.
 3. Every "complete" claim needs a verification command next to it.
-4. Human approval gates are hard blockers, not suggestions.
+4. Enforce `workflow/policy.json` and each graph's explicit mutation contract;
+   never infer authority from a name supplied by a model.
 5. The former `marketing-stack` repository is a migration source only — nothing
    here depends on it.
 7. The Voice Service corpus is the single most sensitive training asset — do

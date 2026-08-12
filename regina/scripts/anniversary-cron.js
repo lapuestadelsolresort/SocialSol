@@ -172,6 +172,7 @@ async function run() {
     let sentCount = 0;
     let manualCount = 0;
     let failedCount = 0;
+    let ambiguousCount = 0;
     const postedKinds = {};
     for (let i = 0; i < results.length; i++) {
       const { contactId, ctx } = contexts[i];
@@ -195,6 +196,11 @@ async function run() {
            ${draft.voice_drafts_log_id}, ${new Date().toISOString()})
       `);
       const [{ id: sendId }] = await db.query(sql`SELECT last_insert_rowid() AS id`);
+      const workflowRunId = typeof process.env.WORKFLOW_RUN_ID === 'string'
+        ? process.env.WORKFLOW_RUN_ID.trim() : '';
+      if (workflowRunId) {
+        await db.query(sql`UPDATE outreach_sends SET workflow_run_id=${workflowRunId} WHERE id=${sendId}`);
+      }
 
       if (isAutoSend && ctx.contact.email) {
         const sendResult = await autoSend(db, {
@@ -229,6 +235,7 @@ async function run() {
             contact: ctx.contact, reason: sendResult.reason, detail: sendResult.detail || sendResult.reason,
           }));
           failedCount++;
+          if (sendResult.ambiguous) ambiguousCount++;
         }
       } else {
         const { topLevel, bodyOverflow } = slackFmt.buildManualDraftMessage({
@@ -269,6 +276,9 @@ async function run() {
       await deleteCampaignIfEmpty(db, campaignId);
     }
 
+    if (ambiguousCount > 0) {
+      throw new Error(`${ambiguousCount} Resend request(s) have ambiguous provider acceptance and require review`);
+    }
     hc.success(HC_KEY);
   } catch (e) {
     console.error('[regina/anniversary] unexpected error:', e);

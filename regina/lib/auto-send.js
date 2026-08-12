@@ -297,15 +297,19 @@ async function autoSend(db, params) {
   try {
     resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `socialsol-outreach-${sendId}`,
+      },
       body: JSON.stringify(payload),
     });
   } catch (e) {
     warn(`  #${sendId} Resend network error: ${e.message}`);
     await db.query(sql`
-      UPDATE outreach_sends SET status='cancelled', cancelled_at=datetime('now'), error=${'resend_network_error:' + e.message.slice(0, 200)} WHERE id=${sendId}
+      UPDATE outreach_sends SET status='ambiguous', error=${'resend_network_error:' + e.message.slice(0, 200)} WHERE id=${sendId}
     `);
-    return { ok: false, reason: 'resend_network_error' };
+    return { ok: false, reason: 'resend_network_error', ambiguous: true };
   }
 
   const responseBody = await resp.json().catch(() => ({}));
@@ -318,6 +322,14 @@ async function autoSend(db, params) {
       WHERE id=${sendId}
     `);
     return { ok: false, reason: 'resend_rate_limit', retry: true };
+  }
+
+  if (resp.status >= 500 || (resp.ok && !responseBody.id)) {
+    const errMsg = (responseBody.message || responseBody.error || `http_${resp.status}`).toString().slice(0, 200);
+    warn(`  #${sendId} Resend result ambiguous: ${errMsg}`);
+    await db.query(sql`UPDATE outreach_sends SET status='ambiguous',
+      error=${'resend_ambiguous:' + errMsg} WHERE id=${sendId}`);
+    return { ok: false, reason: 'resend_ambiguous', error: errMsg, ambiguous: true };
   }
 
   if (!resp.ok || !responseBody.id) {

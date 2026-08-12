@@ -9,15 +9,16 @@ secrets/
 **/*.key
 **/*service-account*.json
 campaigns/active-campaigns.json
+workflow/policy.json
+workflow/openclaw-policy.patch.json
 
 # OpenClaw's local agent context. These files are copied into a production
 # checkout as a private runtime overlay and must never enter the public repo.
-# Agent identity files — committed for full context on clone
-# /SOUL.md
-# /USER.md
-# /MEMORY.md
-# /TOOLS.md
-# /IDENTITY.md
+/SOUL.md
+/USER.md
+/MEMORY.md
+/TOOLS.md
+/IDENTITY.md
 /HEARTBEAT.md
 /MARKETING_SETUP_GUIDE.md
 /META_SETUP.md
@@ -65,6 +66,11 @@ warmup/state.json
 warmup/sends.jsonl
 warmup/events.jsonl
 deploy/launchagents/generated/
+/launchagents/
+/paloma/launchagents/
+/paloma/config.json
+/paloma/secrets/
+/receipts/
 
 # Dependencies and generated output
 node_modules/
