@@ -17,6 +17,22 @@ const { matchingPost } = require('../workflows/social-publish');
 async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-domains-'));
   const db = createDB(path.join(directory, 'crm.db'));
+  const priorPolicyPath = process.env.RESORT_WORKFLOW_POLICY_PATH;
+  const policyPath = path.join(directory, 'policy.json');
+  fs.writeFileSync(policyPath, JSON.stringify({
+    version: 1,
+    shadow_mode: false,
+    live_workflows: [],
+    autonomous_workflows: [],
+    always_on_effects: [],
+    channels: {
+      'RECEIPT-A': { name: 'receipt-a', capabilities: ['receipts.write'] },
+      'RECEIPT-B': { name: 'receipt-b', capabilities: ['receipts.write'] },
+    },
+    restricted_capabilities: {},
+    write_notifications: { user_ids: [], channel_ids: [] },
+  }));
+  process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
   try {
     await db.query(sql`PRAGMA foreign_keys=ON`);
     await db.query(sql`CREATE TABLE meta_messages (
@@ -28,6 +44,8 @@ async function withDb(run) {
     return await run(db);
   } finally {
     await db.dispose();
+    if (priorPolicyPath === undefined) delete process.env.RESORT_WORKFLOW_POLICY_PATH;
+    else process.env.RESORT_WORKFLOW_POLICY_PATH = priorPolicyPath;
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }
