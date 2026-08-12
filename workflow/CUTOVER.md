@@ -88,6 +88,7 @@ after every domain has completed its independent cutover.
 
 | New graph | Legacy producer to remove at the same cutover |
 |---|---|
+| `graph-paulina-prepare` | `com.lapuestadelsolresort.prospector-daily` |
 | `graph-paulina` | `com.lapuestadelsolresort.orchestrator` |
 | `graph-regina` | `com.lapuestadelsolresort.regina-anniversary` |
 | `graph-social-routine` | `com.lapuestadelsolresort.gtku` |

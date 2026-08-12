@@ -33,6 +33,7 @@
   "autonomous_workflows": [
     "whatsapp.inbound.process",
     "paulina.daily",
+    "paulina.prepare_daily",
     "regina.daily",
     "social.publish_routine",
     "social.publish_due",

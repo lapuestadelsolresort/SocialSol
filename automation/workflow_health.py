@@ -24,6 +24,7 @@ GRAPH_AGENTS = {
     "qbo.write": "com.lapuestadelsolresort.graph-accounting-inbox",
     "receipt.reconcile": "com.lapuestadelsolresort.graph-receipt-reconcile",
     "paulina.daily": "com.lapuestadelsolresort.graph-paulina",
+    "paulina.prepare_daily": "com.lapuestadelsolresort.graph-paulina-prepare",
     "regina.daily": "com.lapuestadelsolresort.graph-regina",
     "ownerrez.crm.sync": "com.lapuestadelsolresort.graph-crm-sync",
     "squarespace.crm.sync": "com.lapuestadelsolresort.graph-squarespace-sync",

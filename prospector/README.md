@@ -11,10 +11,12 @@ Paulina is the resort's outbound lead-discovery and compliant email pipeline.
 4. The durable `paulina.daily` graph invokes `orchestrator.js`, which re-verifies
    approved recipients, adds unsubscribe artifacts, enforces sending limits,
    sends through Resend, and records outcomes attributed to that workflow run.
-5. `scripts/performance-status.js` is the canonical read-only status report.
-   `scripts/engagement-analysis.js` uses engagement data to maintain a private
-   iteration-state file. The weekday preparation job is scheduled for migration
-   into its own durable graph; it is not the Resend sending authority.
+5. The weekday `paulina.prepare_daily` graph records analysis, capacity,
+   research, campaign attachment, verification, composition, readback, and its
+   Slack summary as separate durable steps. `scripts/engagement-analysis.js`
+   uses the canonical report and maintains an idempotent private iteration-state
+   entry for each workflow run. This preparation graph is not the Resend sending
+   authority; `paulina.daily` remains the five-minute dispatch graph.
 
 Copy `config.example.json` to ignored `config.json` and configure `.env` before
 running. Research runs, fetched-page cache, draft state, and recent-send logs

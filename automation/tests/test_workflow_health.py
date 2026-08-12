@@ -63,11 +63,15 @@ class WorkflowHealthTests(unittest.TestCase):
 
     def test_live_workflows_require_their_graph_launchagents(self):
         policy = {
-            "live_workflows": ["paulina.daily", "accounting.classify", "qbo.write", "whatsapp.reply"]
+            "live_workflows": [
+                "paulina.daily", "paulina.prepare_daily",
+                "accounting.classify", "qbo.write", "whatsapp.reply",
+            ]
         }
         self.assertEqual(expected_graph_agents(policy), [
             "com.lapuestadelsolresort.graph-accounting-inbox",
             "com.lapuestadelsolresort.graph-paulina",
+            "com.lapuestadelsolresort.graph-paulina-prepare",
         ])
 
         class Result:

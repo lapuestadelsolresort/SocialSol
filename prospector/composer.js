@@ -334,6 +334,10 @@ function postToSlack(channelId, message) {
 async function compose({ persona_id, contact_id, campaign_id, options = {} } = {}) {
   const dryRun = Boolean(options.dry_run);
   const verbose = Boolean(options.verbose);
+  const workflowRunId = typeof options.workflow_run_id === 'string'
+    && /^[0-9a-f-]{36}$/i.test(options.workflow_run_id)
+    ? options.workflow_run_id
+    : null;
   const config = loadConfig();
   const constraints = loadConstraints();
   const voiceConstraints = loadVoiceConstraintsBlock();
@@ -439,11 +443,12 @@ async function compose({ persona_id, contact_id, campaign_id, options = {} } = {
     await db.query(sql`
       INSERT INTO outreach_sends (contact_id, campaign_id, sequence_step,
                                    subject, body_full, body_preview,
-                                   hook_angle, composer_inputs, status, created_at)
+                                   hook_angle, composer_inputs, status, created_at,
+                                   workflow_run_id)
       VALUES (${contact_id}, ${campaign_id}, 1,
               ${result.parsed.subject}, ${result.parsed.body}, ${bodyPreview},
               ${result.parsed.hook_angle}, ${JSON.stringify(composerInputs)},
-              'pending_approval', ${new Date().toISOString()})
+              'pending_approval', ${new Date().toISOString()}, ${workflowRunId})
     `);
     const [created] = await db.query(sql`SELECT * FROM outreach_sends WHERE contact_id = ${contact_id} AND campaign_id = ${campaign_id} ORDER BY id DESC LIMIT 1`);
     const draftId = created.id;
@@ -526,10 +531,18 @@ async function compose({ persona_id, contact_id, campaign_id, options = {} } = {
 
 // ─── Compose-batch (used by !compose-batch Slack command) ──────────────────
 
-async function composeBatch({ campaign_slug, n }) {
+function remainingBatchSize(requested, alreadyComposed) {
+  return Math.max(0, Number(requested || 0) - Number(alreadyComposed || 0));
+}
+
+async function composeBatch({ campaign_slug, n, options = {} }) {
   const config = loadConfig();
   const maxN = config.composer?.compose_batch_max_n || 5;
   const requested = Math.max(1, Math.min(n || 1, maxN));
+  const workflowRunId = typeof options.workflow_run_id === 'string'
+    && /^[0-9a-f-]{36}$/i.test(options.workflow_run_id)
+    ? options.workflow_run_id
+    : null;
   const db = createDB(DB_PATH);
   try {
     const [campaign] = await db.query(sql`SELECT * FROM outreach_campaigns WHERE slug = ${campaign_slug}`);
@@ -542,6 +555,12 @@ async function composeBatch({ campaign_slug, n }) {
     // hard prerequisite so Claude time and sender reputation are spent only
     // on named, deliverable mailboxes.
     const requireVerified = config.email_verification?.required_before_compose !== false;
+    const [attributed] = workflowRunId
+      ? await db.query(sql`SELECT COUNT(*) AS count FROM outreach_sends
+          WHERE campaign_id=${campaign.id} AND workflow_run_id=${workflowRunId}`)
+      : [{ count: 0 }];
+    const alreadyComposed = Number(attributed?.count || 0);
+    const remainingRequested = remainingBatchSize(requested, alreadyComposed);
     const eligible = await db.query(sql`
       SELECT cc.contact_id
       FROM campaign_contacts cc
@@ -555,7 +574,7 @@ async function composeBatch({ campaign_slug, n }) {
             AND os.status != 'cancelled'
         )
       ORDER BY cc.attached_at ASC, cc.id ASC
-      LIMIT ${requested}
+      LIMIT ${remainingRequested}
     `);
 
     const composed = [];
@@ -565,6 +584,10 @@ async function composeBatch({ campaign_slug, n }) {
         persona_id: personaId,
         contact_id: row.contact_id,
         campaign_id: campaign.id,
+        options: {
+          dry_run: Boolean(options.dry_run),
+          workflow_run_id: workflowRunId,
+        },
       });
       if (r.ok) composed.push({
         contact_id: row.contact_id,
@@ -574,7 +597,15 @@ async function composeBatch({ campaign_slug, n }) {
       });
       else failed.push({ contact_id: row.contact_id, reason: r.reason, details: r.details });
     }
-    return { ok: true, requested, eligible_count: eligible.length, composed, failed };
+    return {
+      ok: true,
+      requested,
+      already_composed: alreadyComposed,
+      remaining_requested: remainingRequested,
+      eligible_count: eligible.length,
+      composed,
+      failed,
+    };
   } finally {
     await db.dispose();
   }
@@ -610,7 +641,14 @@ if (require.main === module) {
       console.error('Usage: composer.js compose-batch <campaign_slug> [N]');
       process.exit(2);
     }
-    composeBatch({ campaign_slug, n })
+    composeBatch({
+      campaign_slug,
+      n,
+      options: {
+        dry_run: has('dry-run'),
+        workflow_run_id: process.env.WORKFLOW_RUN_ID || null,
+      },
+    })
       .then((r) => { console.log(JSON.stringify(r, null, 2)); process.exit(r.ok ? 0 : 1); })
       .catch((e) => { console.error('FATAL:', e); process.exit(3); });
   } else {
@@ -619,4 +657,10 @@ if (require.main === module) {
   }
 }
 
-module.exports = { compose, composeBatch, loadVoiceConstraintsBlock, buildPrompt };
+module.exports = {
+  buildPrompt,
+  compose,
+  composeBatch,
+  loadVoiceConstraintsBlock,
+  remainingBatchSize,
+};
