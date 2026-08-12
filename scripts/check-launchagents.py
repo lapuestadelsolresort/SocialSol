@@ -28,6 +28,10 @@ for template in sorted(TEMPLATES.glob("*.plist.template")):
         raise RuntimeError(f"{template.name}: missing or duplicate Label {label!r}")
     if not isinstance(arguments, list) or len(arguments) < 2:
         raise RuntimeError(f"{template.name}: invalid ProgramArguments")
+    if label == "com.lapuestadelsolresort.workflow-health":
+        runtime_path = data.get("EnvironmentVariables", {}).get("PATH", "")
+        if "/opt/homebrew/bin" not in runtime_path:
+            raise RuntimeError(f"{template.name}: workflow alerts require Homebrew Node on PATH")
     labels.add(label)
     count += 1
 
