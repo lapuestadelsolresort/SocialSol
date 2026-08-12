@@ -134,7 +134,9 @@ async function collectReceipts({ db, input, run }, forceScoped = false) {
   const channelFilter = forceScoped ? run.channel_id : null;
   const rows = await queryIfTable(db, 'accounting_receipts', sql`SELECT
     id, slack_channel_id, slack_message_id, submitted_by, submitted_at,
-    status, vendor, transaction_date, currency, amount
+    status, vendor, transaction_date, currency, amount, description,
+    category_key, category_name, extraction_confidence, review_reason,
+    amount_usd, fx_rate, qbo_entity_type, qbo_entity_id, posted_at
     FROM accounting_receipts
     WHERE (${channelFilter} IS NULL OR slack_channel_id=${channelFilter})
     ORDER BY submitted_at DESC LIMIT ${limit}`, []);

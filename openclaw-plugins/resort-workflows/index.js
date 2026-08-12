@@ -52,6 +52,9 @@ const COMMAND_ONLY_WORKFLOWS = new Set([
   'whatsapp.reply',
   'meta.dm.reply',
   'ownerrez.mutation.confirm',
+  'receipt.owner_expense.ingest',
+  'receipt.owner_expense.process',
+  'receipt.owner_expense.confirm',
 ]);
 
 function pluginConfig(value = {}) {
@@ -64,6 +67,7 @@ function pluginConfig(value = {}) {
     socialChannelIds: new Set(Array.isArray(parsed.socialChannelIds) ? parsed.socialChannelIds.filter(Boolean) : []),
     ownerrezChannelIds: new Set(Array.isArray(parsed.ownerrezChannelIds) ? parsed.ownerrezChannelIds.filter(Boolean) : []),
     receiptChannelIds: new Set(Array.isArray(parsed.receiptChannelIds) ? parsed.receiptChannelIds.filter(Boolean) : []),
+    ownerExpenseChannelIds: new Set(Array.isArray(parsed.ownerExpenseChannelIds) ? parsed.ownerExpenseChannelIds.filter(Boolean) : []),
     controlledChannelIds: new Set(Array.isArray(parsed.controlledChannelIds) ? parsed.controlledChannelIds.filter(Boolean) : []),
     controlPlaneTokenEnv: String(parsed.controlPlaneTokenEnv || 'RESORT_WORKFLOW_CONTROL_TOKEN'),
     controlPlaneTokenFile: String(parsed.controlPlaneTokenFile || ''),
@@ -347,6 +351,22 @@ export function parseManualReviewCommand(text) {
   return { error: 'invalid_manual_review_command' };
 }
 
+export function parseReceiptConfirmCommand(text) {
+  const body = String(text || '').trim();
+  if (!/^!receipt(?:\s|$)/i.test(body)) return null;
+  const match = body.match(/^!receipt\s+confirm\s+([0-9a-f-]{36})\s+(\d{4}-\d{2}-\d{2})\s+(MXN|USD)\s+(\d+(?:\.\d+)?)\s+([a-z0-9_]{1,80})\s*\|\s*([^|]{1,300})(?:\s*\|\s*([\s\S]{1,1000}))?\s*$/i);
+  if (!match) return { error: 'invalid_receipt_confirmation' };
+  return {
+    receiptId: match[1].toLowerCase(),
+    transactionDate: match[2],
+    currency: match[3].toUpperCase(),
+    amount: Number(match[4]),
+    categoryKey: match[5].toLowerCase(),
+    vendor: match[6].trim(),
+    description: String(match[7] || '').trim(),
+  };
+}
+
 async function resolveManualReview(config, request, fetchImpl = fetch) {
   const token = controlPlaneToken(config);
   if (!token || token.length < 32) throw new Error('workflow control-plane token is unavailable');
@@ -560,6 +580,54 @@ export function createManualReviewClaimHandler({ config, resolve = resolveManual
   };
 }
 
+export function createReceiptConfirmClaimHandler({ config, execute = callControlPlane, logger = null } = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    if (!config.ownerExpenseChannelIds.has(channelId)) return undefined;
+    const command = parseReceiptConfirmCommand(event.bodyForAgent || event.body || event.content || '');
+    if (!command) return undefined;
+    if (!workflowIsLive(config, 'receipt.owner_expense.confirm')) {
+      return { handled: true, reply: { text: 'Nothing posted. Owner-expense confirmations are still in shadow mode.' } };
+    }
+    if (command.error) {
+      return {
+        handled: true,
+        reply: { text: 'Nothing posted. Use the exact `!receipt confirm ...` command emitted in the receipt thread.' },
+      };
+    }
+    const messageId = trustedMessageId(event, ctx);
+    if (!messageId) {
+      return { handled: true, reply: { text: 'Nothing posted. Slack did not provide a stable message ID, so this confirmation cannot be deduplicated safely.' } };
+    }
+    try {
+      const payload = await execute(config, {
+        workflow: 'receipt.owner_expense.confirm',
+        input: command,
+        context: {
+          channelId,
+          actorUserId: event.senderId || ctx?.senderId,
+          messageId,
+          entrypoint: 'slack_receipt_confirm_command',
+        },
+        idempotencyKey: `slack:${channelId}:${messageId}:receipt.owner_expense.confirm`,
+      });
+      const run = payload?.run;
+      if (!run || !['completed', 'queued', 'running'].includes(run.status)) {
+        return { handled: true, reply: { text: formatWorkflowReply(payload) } };
+      }
+      return {
+        handled: true,
+        reply: { text: `Correction queued for durable processing and QBO readback. Receipt: ${command.receiptId} · Workflow: ${run.id}` },
+      };
+    } catch (error) {
+      logger?.error?.(`resort-workflows owner expense confirmation failed: ${error.message}`);
+      return { handled: true, reply: { text: `Nothing posted. The owner-expense confirmation failed (${error.code || 'workflow_error'}).` } };
+    }
+  };
+}
+
 export function createFinalizeHandler({ config } = {}) {
   return async (event, ctx) => {
     const channelId = String(ctx?.channelId || event?.channelId || '');
@@ -601,7 +669,10 @@ export function createReceiptHandler({ config, execute = callControlPlane, logge
     if (config.slackAccountId && ctx.accountId && ctx.accountId !== config.slackAccountId) return;
     const channelId = resolveSlackConversationId(event, ctx);
     if (!channelId || !config.receiptChannelIds.has(channelId)) return;
-    if (!workflowIsLive(config, 'receipt.ingest')) {
+    const workflow = config.ownerExpenseChannelIds.has(channelId)
+      ? 'receipt.owner_expense.ingest'
+      : 'receipt.ingest';
+    if (!workflowIsLive(config, workflow)) {
       logger?.info?.(`resort-workflows shadow: would ingest receipt ${ctx.messageId || event.messageId || '<no-id>'}`);
       return;
     }
@@ -613,7 +684,7 @@ export function createReceiptHandler({ config, execute = callControlPlane, logge
     }
     try {
       await execute(config, {
-        workflow: 'receipt.ingest',
+        workflow,
         input: {
           slackMessageId: messageId,
           threadTs: event.threadId ? String(event.threadId) : null,
@@ -622,7 +693,7 @@ export function createReceiptHandler({ config, execute = callControlPlane, logge
           fileRefs: extractFileRefs(event.metadata || {}),
         },
         context: { channelId, actorUserId, messageId, entrypoint: 'slack_receipt_hook' },
-        idempotencyKey: `slack:${channelId}:${messageId}:receipt.ingest`,
+        idempotencyKey: `slack:${channelId}:${messageId}:${workflow}`,
       });
     } catch (error) {
       logger?.error?.(`resort-workflows receipt ingest failed: ${error.code || error.message}`);
@@ -644,6 +715,7 @@ const plugin = {
     api.on('inbound_claim', createOwnerRezClaimHandler({ config, logger: api.logger }), { priority: 210, timeoutMs: 70_000 });
     api.on('inbound_claim', createMetaDmClaimHandler({ config, logger: api.logger }), { priority: 205, timeoutMs: 70_000 });
     api.on('inbound_claim', createManualReviewClaimHandler({ config, logger: api.logger }), { priority: 220, timeoutMs: 35_000 });
+    api.on('inbound_claim', createReceiptConfirmClaimHandler({ config, logger: api.logger }), { priority: 215, timeoutMs: 70_000 });
     api.on('message_received', createReceiptHandler({ config, logger: api.logger }), { priority: 100, timeoutMs: 70_000 });
     api.on('before_agent_finalize', createFinalizeHandler({ config }), { priority: 100, timeoutMs: 5_000 });
   },

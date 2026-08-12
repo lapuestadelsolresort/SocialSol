@@ -71,6 +71,24 @@ class QBOIntegrityTests(unittest.TestCase):
         self.assertEqual(result['Id'], '42')
         self.assertIn('/purchase/42?', seen[0])
 
+    def test_journal_entry_create_and_readback_use_canonical_endpoints(self):
+        seen = []
+
+        def fake_urlopen(request, timeout=0):
+            seen.append((request.method, request.full_url))
+            if request.method == 'POST':
+                return FakeResponse({'JournalEntry': {'Id': '9001'}})
+            return FakeResponse({'JournalEntry': {'Id': '9001', 'Line': []}})
+
+        client = self.client()
+        with patch('urllib.request.urlopen', fake_urlopen):
+            created = client.create_journal_entry({'Line': []}, request_id='owner-expense-1')
+            readback = client.read_entity('journalentry', created['Id'])
+        self.assertEqual(readback['Id'], '9001')
+        self.assertIn('/journalentry?', seen[0][1])
+        self.assertIn('requestid=owner-expense-1', seen[0][1])
+        self.assertIn('/journalentry/9001?', seen[1][1])
+
     def test_legacy_secret_schema_is_loaded_without_migration(self):
         with tempfile.TemporaryDirectory() as directory:
             secret = Path(directory) / 'quickbooks.json'

@@ -35,7 +35,7 @@ business at sale.
 | **Sarah Coach** | Guest comms | Drafts replies to inbound guest messages in Sarah's voice; she edits and sends | `#sarah-coach` |
 | **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |
 | **Corporate Intelligence** | Finance/legal | Analysis of Mexican corporate docs, tax filings, and property trusts (see "Not in this repo") | `#corporate` |
-| **QuickBooks Integration** | Finance | Automated expense tracking via Slack receipt channels → Kapital CSV → QBO pipeline. Full read/write API. | `#accounting` |
+| **QuickBooks Integration** | Finance | Automated expense tracking via Slack receipt channels → Kapital CSV → QBO pipeline, plus guarded owner-paid expense journals to configured liability accounts. Full read/write API. | `#accounting` |
 
 ### Supporting automations
 
@@ -178,7 +178,7 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   (Banxico daily rate) → QuickBooks Online push. Three-tier classifier
   (auto/guess/unknown) maps SPEI transfers, payroll, utilities, and vendor
   payments to QBO categories. Deduplication via Kapital Clave references.
-  11 dedicated Slack receipt channels (`#receipts`, `#mayela-receipts`,
+  Dedicated Slack receipt channels (`#receipts`, `#mayela-receipts`,
   `#property-receipts`, `#cleaning-receipts`, `#sergio-receipts`,
   `#group-expenses`, `#temo-receipts`, `#daniel-invoices`,
   `#sergio-mayela-invoices`, `#misc-receipts`, `#new-receipts`) where the

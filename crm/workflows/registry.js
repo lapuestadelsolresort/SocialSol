@@ -11,6 +11,7 @@ const operational = require('./operational-jobs');
 const localRecords = require('./local-records');
 const readModels = require('./read-models');
 const { proposeDefinition: ownerrezMutationPropose, confirmDefinition: ownerrezMutationConfirm } = require('./ownerrez-mutation');
+const ownerExpense = require('./owner-expense');
 
 const DEFINITIONS = new Map([
   [whatsappReply.name, whatsappReply],
@@ -22,6 +23,9 @@ const DEFINITIONS = new Map([
   [paulinaPrepareDaily.name, paulinaPrepareDaily],
   [ownerrezMutationPropose.name, ownerrezMutationPropose],
   [ownerrezMutationConfirm.name, ownerrezMutationConfirm],
+  ...Object.values(ownerExpense)
+    .filter(value => value && typeof value === 'object' && value.name && Array.isArray(value.steps))
+    .map(definition => [definition.name, definition]),
   ...Object.values(operational)
     .filter(value => value && typeof value === 'object' && value.name && Array.isArray(value.steps))
     .map(definition => [definition.name, definition]),

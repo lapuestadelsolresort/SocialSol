@@ -15,6 +15,8 @@ const { sendWhatsApp } = require('../lib/twilio-whatsapp');
 const { sendMetaDm } = require('../lib/meta-dm');
 const { requestOwnerRez } = require('../lib/ownerrez-api');
 const { runCommand } = require('../lib/workflow-command');
+const { fetchSlackReceiptSource } = require('../lib/slack-receipt-source');
+const { extractOwnerExpense } = require('../lib/receipt-extraction');
 const { authorize, loadPolicy } = require('../lib/channel-policy');
 const { effectClass, policySnapshot, reviewChannelId } = require('../lib/workflow-execution-policy');
 const { getDefinition } = require('../workflows/registry');
@@ -34,6 +36,8 @@ function executionServices() {
     sendMetaDm: params => sendMetaDm(params),
     ownerRezRequest: params => requestOwnerRez(params),
     runCommand,
+    fetchSlackReceipt: params => fetchSlackReceiptSource(params),
+    extractOwnerExpense: params => extractOwnerExpense(params),
   };
 }
 
