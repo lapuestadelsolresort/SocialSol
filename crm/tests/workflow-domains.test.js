@@ -28,6 +28,7 @@ async function withDb(run) {
     channels: {
       'RECEIPT-A': { name: 'receipt-a', capabilities: ['receipts.write'] },
       'RECEIPT-B': { name: 'receipt-b', capabilities: ['receipts.write'] },
+      'PAULINA': { name: 'prospector-paulina', capabilities: ['paulina.send'] },
     },
     restricted_capabilities: {},
     write_notifications: { user_ids: [], channel_ids: [] },
@@ -352,6 +353,49 @@ test('Paulina verification counts only rows attributed to its workflow run', asy
     const [evidence] = await db.query(sql`SELECT payload_json FROM workflow_evidence
       WHERE run_id=${run.id} AND source='crm.outreach_sends'`);
     assert.equal(JSON.parse(evidence.payload_json).attributedRows.sent, 1);
+    const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE run_id=${run.id} AND topic='slack.notification'`);
+    assert.match(JSON.parse(notification.payload_json).message,
+      /processed 1, sent 1, failed 0, verified queue ready 2/);
+  });
+});
+
+test('Paulina verified no-op runs do not post misleading Resend write notifications', async () => {
+  await withDb(async db => {
+    await db.query(sql`CREATE TABLE outreach_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, sent_at TEXT, workflow_run_id TEXT
+    )`);
+    let commandCalls = 0;
+    const run = await startGraph(db, getDefinition('paulina.daily'), {
+      idempotencyKey: 'paulina-noop-notification-test', triggerType: 'system', input: {},
+    }, {
+      runCommand: async () => {
+        commandCalls += 1;
+        if (commandCalls === 1) {
+          return {
+            exitCode: 0,
+            stdout: '[orchestrator] exit ok: {"processed":0,"sent":0,"failed":0,"ambiguous":0}\n',
+            stderr: '',
+          };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            generated_at: '2026-08-12T14:30:00Z',
+            scope: { owner: 'paulina', active_campaign_slug: 'planner' },
+            active_queue: { verified_ready: 11 },
+          }),
+          stderr: '',
+        };
+      },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.report.sent, 0);
+    assert.equal(run.state.notify_humans.queued, 0);
+    assert.equal(run.state.notify_humans.reason, 'verified no-op notification suppressed');
+    const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM workflow_outbox
+      WHERE run_id=${run.id} AND topic='slack.notification'`);
+    assert.equal(count, 0);
   });
 });
 

@@ -50,6 +50,8 @@ function makeDurableJob(options) {
     notifyOnWrite = true,
     notificationChannelId = null,
     notificationChannelName = null,
+    shouldNotify = () => true,
+    buildNotificationMessage = null,
   } = options;
   if (!name || !capability || !provider || typeof buildCommand !== 'function' || typeof verify !== 'function') {
     throw new Error('invalid durable job definition');
@@ -178,10 +180,18 @@ function makeDurableJob(options) {
         effectClass: 'internal_notification',
         maxAttempts: 1,
         async run({ db, run, state, store }) {
+          const notify = await shouldNotify({ run, state, name, provider });
+          if (!notify) return { queued: 0, reason: 'verified no-op notification suppressed' };
           const targets = notificationTargets(run, definition);
           if (!targets.channels.length) return { queued: 0, reason: 'no notification channel configured' };
           const mentions = targets.users.map(userId => `<@${userId}>`).join(' ');
-          const message = `${mentions ? `${mentions} ` : ''}${name} wrote through ${provider} and was verified by readback. Workflow ${run.id}.`;
+          const detail = typeof buildNotificationMessage === 'function'
+            ? await buildNotificationMessage({ run, state, name, provider })
+            : `${name} wrote through ${provider} and was verified by readback. Workflow ${run.id}.`;
+          if (typeof detail !== 'string' || !detail.trim()) {
+            throw new Error(`${name} notification message was empty`);
+          }
+          const message = `${mentions ? `${mentions} ` : ''}${detail.trim()}`;
           for (const channelId of targets.channels) {
             await store.enqueueOutbox(db, {
               runId: run.id,
