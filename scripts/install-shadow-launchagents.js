@@ -9,7 +9,6 @@ const { spawnSync } = require('node:child_process');
 const { ROOT } = require('../lib/runtime-paths');
 
 const NAMES = [
-  'com.lapuestadelsolresort.gtku.plist',
   'com.lapuestadelsolresort.workflow-worker.plist',
   'com.lapuestadelsolresort.workflow-health.plist',
   'com.lapuestadelsolresort.restore-drill.plist',

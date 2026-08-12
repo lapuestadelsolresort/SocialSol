@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from workflow_health import hard_failure_count, inspect
+from workflow_health import expected_graph_agents, graph_agent_integrity, hard_failure_count, inspect
 
 
 SCHEMA = """
@@ -59,6 +59,26 @@ class WorkflowHealthTests(unittest.TestCase):
                     'readback_required',datetime('now','-1 minute'))""")
         metrics = inspect(con)
         self.assertEqual(metrics["old_unverified_effects"], 1)
+        self.assertGreater(hard_failure_count(metrics), 0)
+
+    def test_live_workflows_require_their_graph_launchagents(self):
+        policy = {
+            "live_workflows": ["paulina.daily", "accounting.classify", "qbo.write", "whatsapp.reply"]
+        }
+        self.assertEqual(expected_graph_agents(policy), [
+            "com.lapuestadelsolresort.graph-accounting-inbox",
+            "com.lapuestadelsolresort.graph-paulina",
+        ])
+
+        class Result:
+            def __init__(self, returncode):
+                self.returncode = returncode
+
+        def fake_run(command, **_kwargs):
+            return Result(1 if command[-1].endswith("graph-paulina") else 0)
+
+        metrics = graph_agent_integrity(policy, run=fake_run)
+        self.assertEqual(metrics["runtime_graph_agents_missing"], 1)
         self.assertGreater(hard_failure_count(metrics), 0)
 
 

@@ -10,10 +10,25 @@ const { loadPolicy } = require('../lib/channel-policy');
 const { workflowIsLive } = require('../lib/workflow-execution-policy');
 
 const INBOX = path.join(ROOT, 'accounting', 'inbox');
+const PROCESSED = path.join(INBOX, 'processed');
 
 function accountingWorkflowsLive(policy) {
   return workflowIsLive(policy, 'accounting.classify')
     && workflowIsLive(policy, 'qbo.write');
+}
+
+function archiveProcessedFile(file, hash, processedDirectory = PROCESSED) {
+  fs.mkdirSync(processedDirectory, { recursive: true, mode: 0o700 });
+  const parsed = path.parse(file);
+  const candidates = [
+    path.join(processedDirectory, parsed.base),
+    path.join(processedDirectory, `${parsed.name}.${hash.slice(0, 12)}${parsed.ext}`),
+    path.join(processedDirectory, `${parsed.name}.${hash.slice(0, 12)}.${Date.now()}${parsed.ext}`),
+  ];
+  const destination = candidates.find(candidate => !fs.existsSync(candidate));
+  fs.renameSync(file, destination);
+  fs.chmodSync(destination, 0o600);
+  return destination;
 }
 
 async function execute(workflow, input, idempotencyKey, fetchImpl = fetch) {
@@ -68,7 +83,14 @@ async function main(fetchImpl = fetch) {
       'accounting.classify', { csvPath: relative }, `accounting:${hash}:classify`, fetchImpl,
     );
     const qbo = await execute('qbo.write', { csvPath: relative }, `accounting:${hash}:qbo`, fetchImpl);
-    results.push({ file: path.basename(file), hash, classificationRunId: classification.id, qboRunId: qbo.id });
+    const archived = archiveProcessedFile(file, hash);
+    results.push({
+      file: path.basename(file),
+      archived: path.relative(ROOT, archived),
+      hash,
+      classificationRunId: classification.id,
+      qboRunId: qbo.id,
+    });
   }
   console.log(JSON.stringify({ ok: true, processed: results.length, results }));
 }
@@ -80,4 +102,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = { INBOX, accountingWorkflowsLive, execute, main };
+module.exports = {
+  INBOX,
+  PROCESSED,
+  accountingWorkflowsLive,
+  archiveProcessedFile,
+  execute,
+  main,
+};
