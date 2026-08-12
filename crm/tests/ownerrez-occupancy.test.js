@@ -9,6 +9,7 @@ const {
   reservationDisplayName,
   selectFullOccupancy,
   selectFutureOccupancy,
+  selectPrimaryCalendarEntries,
 } = require('../scripts/lib/ownerrez-occupancy');
 
 const window = { start: '2026-08-10', end: '2026-09-07' };
@@ -100,4 +101,26 @@ test('future inventory includes active unpriced bookings and blocks but excludes
   assert.deepEqual(all.map(item => item.id), [1, 2, 3]);
   assert.deepEqual(selectFutureOccupancy(all, { asOf: '2026-08-10' }).map(item => item.id), [2, 1]);
   assert.equal(calls.some(call => Object.hasOwn(call.params, 'since_utc')), false);
+});
+
+test('next calendar entry keeps titled manual blocks and removes linked availability copies', () => {
+  const bookings = [
+    {
+      id: 101, type: 'block', is_block: true, status: 'active',
+      arrival: '2026-09-03', departure: '2026-09-07',
+      title: 'Sherry bachelor and bachelorette party',
+    },
+    {
+      id: 102, type: 'linked_availability', is_block: true, status: 'active',
+      arrival: '2026-09-03', departure: '2026-09-07',
+    },
+    {
+      id: 103, type: 'booking', is_block: false, status: 'active',
+      arrival: '2026-12-03', departure: '2026-12-07',
+    },
+  ];
+
+  const primary = selectPrimaryCalendarEntries(bookings, { asOf: '2026-08-12' });
+  assert.deepEqual(primary.map(booking => booking.id), [101, 103]);
+  assert.equal(primary[0].title, 'Sherry bachelor and bachelorette party');
 });
