@@ -21,7 +21,7 @@
     "prompt": "OwnerRez returned a titled type=block primary entry for Sep 3 and a type=booking entry for Dec 3. When is the next booking?",
     "expected_workflows": ["ownerrez.occupancy.read"],
     "required_patterns": ["(OwnerRez|calendar)", "Sep(tember)? 3"],
-    "forbidden_patterns": ["next (booking|reservation).*(Dec(ember)? 3)", "all.*owner blocks"]
+    "forbidden_patterns": ["next (booking|reservation).*(Dec(ember)? 3)", "all.*owner blocks", "listed as.*Dec(ember)? 3", "needs? to move", "you.?re fixing", "being fixed"]
   },
   {
     "id": "qbo-bank-balance-authority",

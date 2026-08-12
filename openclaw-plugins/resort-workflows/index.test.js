@@ -7,14 +7,17 @@ import {
   createManualReviewClaimHandler,
   createOwnerRezClaimHandler,
   createReceiptConfirmClaimHandler,
+  createReservationReadClaimHandler,
   createReceiptHandler,
   createWorkflowTool,
+  formatOwnerRezOccupancyReply,
   formatWorkflowReply,
   parseWhatsAppCommand,
   parseMetaDmCommand,
   parseManualReviewCommand,
   parseOwnerRezConfirmCommand,
   parseReceiptConfirmCommand,
+  parseReservationReadRequest,
   pluginConfig,
 } from './index.js';
 
@@ -76,6 +79,26 @@ test('parses only exact owner-expense confirmation commands', () => {
   );
   assert.deepEqual(parseReceiptConfirmCommand('Please post George expense'), null);
   assert.deepEqual(parseReceiptConfirmCommand(`!receipt confirm ${id} tomorrow`), { error: 'invalid_receipt_confirmation' });
+});
+
+test('parses clear next/upcoming reservation reads but excludes other OwnerRez intents', () => {
+  const options = { asOf: '2026-08-12' };
+  assert.deepEqual(parseReservationReadRequest('When is the next booking?', options), {
+    mode: 'next', start: '2026-08-12', end: '2027-08-17',
+  });
+  assert.deepEqual(parseReservationReadRequest('What are our upcoming reservations?', options), {
+    mode: 'upcoming', start: '2026-08-12', end: '2027-08-17',
+  });
+  assert.deepEqual(parseReservationReadRequest('¿Cuándo es la próxima reservación?', options), {
+    mode: 'next', start: '2026-08-12', end: '2027-08-17',
+  });
+  assert.deepEqual(parseReservationReadRequest('Lista las próximas reservas', options), {
+    mode: 'upcoming', start: '2026-08-12', end: '2027-08-17',
+  });
+  assert.equal(parseReservationReadRequest('What is the cash flow from the next booking?', options), null);
+  assert.equal(parseReservationReadRequest('Move the next reservation to Friday', options), null);
+  assert.equal(parseReservationReadRequest('Is the resort available on Sep 3?', options), null);
+  assert.equal(parseReservationReadRequest('Who owns the resort?', options), null);
 });
 
 test('receipt hook binds channel, sender, and Slack file ids from the trusted event', async () => {
@@ -171,10 +194,103 @@ test('OwnerRez occupancy reply reports the earliest primary calendar entry even 
       },
     },
   });
-  assert.match(text, /Next primary calendar entry: 2026-09-03 → 2026-09-07/);
+  assert.match(text, /Next OwnerRez calendar entry/);
+  assert.match(text, /Sep 3 → Sep 7, 2026/);
   assert.match(text, /Sherry bachelor and bachelorette party/);
-  assert.match(text, /does not establish guest-versus-owner use/);
-  assert.doesNotMatch(text, /Next primary calendar entry: 2026-12-03/);
+  assert.match(text, /guest vs owner use is not encoded/);
+  assert.doesNotMatch(text, /Dec 3/);
+});
+
+test('OwnerRez upcoming reply keeps manual events and typed bookings distinct and ordered', () => {
+  const text = formatOwnerRezOccupancyReply({
+    run: {
+      id: 'run-ownerrez-list', workflow_name: 'ownerrez.occupancy.read', status: 'completed',
+      output: {
+        window: { start: '2026-08-12', end: '2027-08-17' },
+        primaryCalendarEntries: [
+          {
+            id: 300, arrival: '2026-12-03', departure: '2026-12-07',
+            calendar_entry_kind: 'typed_booking', display_name: 'Eric Candelario',
+            property: { name: 'Villa Crab (V4)' }, adults: 10, children: 1,
+          },
+          {
+            id: 100, arrival: '2026-09-03', departure: '2026-09-07',
+            calendar_entry_kind: 'manual_calendar_entry',
+            display_name: 'Sherry bachelor and bachelorette party',
+            property: { name: 'Puesta del Sol Resort' },
+          },
+          {
+            id: 200, arrival: '2026-11-05', departure: '2026-11-08',
+            calendar_entry_kind: 'typed_booking', display_name: 'Eric Egan',
+            property: { name: 'Puesta del Sol Resort' }, adults: 1, children: 0,
+          },
+        ],
+        _evidence: { id: 'evidence-ownerrez-list' },
+      },
+    },
+  }, { mode: 'upcoming' });
+  assert.ok(text.indexOf('Sherry bachelor') < text.indexOf('Eric Egan'));
+  assert.ok(text.indexOf('Eric Egan') < text.indexOf('Eric Candelario'));
+  assert.match(text, /Eric Candelario, Villa Crab \(V4\) \(typed booking; 10 adults \+ 1 child\)/);
+  assert.match(text, /Eric Egan.*typed booking; 1 adult/);
+  assert.match(text, /Sherry bachelor.*manual calendar entry/);
+  assert.doesNotMatch(text, /move|fixing|listed as Dec/i);
+});
+
+test('reservation read claim executes the durable live workflow before replying', async () => {
+  const config = pluginConfig({ reservationsChannelIds: ['C-RES'], slackAccountId: 'ig-drafts' });
+  const calls = [];
+  const payload = {
+    run: {
+      id: 'run-live', workflow_name: 'ownerrez.occupancy.read', status: 'completed',
+      output: {
+        window: { start: '2026-08-12', end: '2027-08-17' },
+        primaryCalendarEntries: [{
+          id: 100, arrival: '2026-09-03', departure: '2026-09-07',
+          calendar_entry_kind: 'manual_calendar_entry', display_name: 'Sherry bachelor and bachelorette party',
+          property: { name: 'Puesta del Sol Resort' },
+        }, {
+          id: 300, arrival: '2026-12-03', departure: '2026-12-07',
+          calendar_entry_kind: 'typed_booking', display_name: 'Eric Candelario',
+          property: { name: 'Villa Crab (V4)' }, adults: 10, children: 1,
+        }],
+      },
+    },
+  };
+  const handler = createReservationReadClaimHandler({
+    config,
+    today: () => '2026-08-12',
+    execute: async (_config, request) => { calls.push(request); return payload; },
+  });
+  const result = await handler({
+    channel: 'slack', accountId: 'ig-drafts', conversationId: 'C-RES',
+    messageId: '3000.1', senderId: 'U-JASON', bodyForAgent: 'What are the next reservations?',
+  }, {});
+  assert.equal(result.handled, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workflow, 'ownerrez.occupancy.read');
+  assert.deepEqual(calls[0].input, { start: '2026-08-12', end: '2027-08-17' });
+  assert.deepEqual(calls[0].context, {
+    channelId: 'C-RES', actorUserId: 'U-JASON', messageId: '3000.1', entrypoint: 'slack_reservations_read',
+  });
+  assert.equal(calls[0].idempotencyKey, 'slack:C-RES:3000.1:ownerrez.occupancy.read:upcoming');
+  assert.ok(result.reply.text.indexOf('Sherry bachelor') < result.reply.text.indexOf('Eric Candelario'));
+});
+
+test('reservation read claim fails closed when live OwnerRez is unavailable', async () => {
+  const config = pluginConfig({ reservationsChannelIds: ['C-RES'] });
+  const error = new Error('offline');
+  error.code = 'ownerrez_unavailable';
+  const result = await createReservationReadClaimHandler({
+    config, today: () => '2026-08-12', execute: async () => { throw error; },
+  })({
+    channel: 'slack', conversationId: 'C-RES', messageId: '3000.2', senderId: 'U-JASON',
+    bodyForAgent: 'When is the next booking?',
+  }, {});
+  assert.equal(result.handled, true);
+  assert.match(result.reply.text, /temporarily unavailable/);
+  assert.match(result.reply.text, /No booking answer was generated from CRM data or memory/);
+  assert.doesNotMatch(result.reply.text, /Sep|Dec|Sherry|Eric/);
 });
 
 test('a post-acceptance local failure tells staff not to resend', () => {

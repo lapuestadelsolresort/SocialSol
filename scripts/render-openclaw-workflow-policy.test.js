@@ -89,6 +89,11 @@ test('reservations prompt requires live OwnerRez reads and preserves titled manu
     assert.match(prompt, /use nextCalendarEntry/);
     assert.match(prompt, /not proof of owner use/);
     assert.match(prompt, /Never answer mutable booking facts from CRM rows, memory/);
+    assert.deepEqual(
+      patch.plugins.entries['resort-workflows'].config.reservationsChannelIds,
+      ['CRESERVATIONS'],
+    );
+    assert.deepEqual(patch.plugins.entries['resort-workflows'].config.ownerrezChannelIds, []);
   } finally {
     if (previousAccount === undefined) delete process.env.OPENCLAW_SLACK_ACCOUNT;
     else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;

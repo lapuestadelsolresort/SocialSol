@@ -10,6 +10,7 @@
  *   node crm/scripts/ownerrez-full-occupancy.js
  *   node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2026-09-07
  *   node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2026-09-07 --json
+ *   node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2027-08-15 --enriched-json
  *   node crm/scripts/ownerrez-full-occupancy.js --summary
  */
 
@@ -19,7 +20,9 @@ const fs = require('fs');
 const path = require('path');
 const { createApiGet } = require('./lib/ownerrez-api');
 const {
+  attachGuestNames,
   fetchFullOccupancy,
+  fetchGuestNames,
   humanizeType,
   isBlock,
   reservationDisplayName,
@@ -55,6 +58,7 @@ Options:
   --start YYYY-MM-DD  First date in the occupancy window (default: today)
   --end YYYY-MM-DD    Last date in the occupancy window (default: start + 28 days)
   --json              Print the full matching OwnerRez records as JSON
+  --enriched-json     Print records with guest names resolved live from OwnerRez
   --summary           Print counts only
   --help              Show this help`);
 }
@@ -99,6 +103,12 @@ async function run(args = process.argv.slice(2)) {
 
   if (args.includes('--json')) {
     console.log(JSON.stringify(bookings, null, 2));
+    return;
+  }
+
+  if (args.includes('--enriched-json')) {
+    const guestNames = await fetchGuestNames(apiGet, bookings);
+    console.log(JSON.stringify(attachGuestNames(bookings, guestNames), null, 2));
     return;
   }
 

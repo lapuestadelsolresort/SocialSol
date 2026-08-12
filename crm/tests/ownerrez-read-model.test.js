@@ -21,6 +21,7 @@ test('OwnerRez read model returns the titled primary entry ahead of a later type
     {
       id: 103, type: 'booking', is_block: false, status: 'active',
       arrival: '2026-12-03', departure: '2026-12-07',
+      guest_id: 20, guest_name: 'Eric Candelario', adults: 10, children: 1,
       property: { name: 'Villa Crab | Villa 4' },
     },
   ];
@@ -44,11 +45,14 @@ test('OwnerRez read model returns the titled primary entry ahead of a later type
   });
 
   assert.deepEqual(commands[0].args.slice(-5), [
-    '--start', '2026-08-12', '--end', '2026-12-10', '--json',
+    '--start', '2026-08-12', '--end', '2026-12-10', '--enriched-json',
   ]);
   assert.equal(output.authority, 'OwnerRez');
   assert.equal(output.primaryCalendarEntryCount, 2);
   assert.equal(output.nextCalendarEntry.id, 101);
   assert.equal(output.nextCalendarEntry.title, 'Sherry bachelor and bachelorette party');
+  assert.equal(output.nextCalendarEntry.calendar_entry_kind, 'manual_calendar_entry');
+  assert.equal(output.primaryCalendarEntries[1].display_name, 'Eric Candelario');
+  assert.equal(output.primaryCalendarEntries[1].calendar_entry_kind, 'typed_booking');
   assert.match(output.calendarSemantics.manualBlockRule, /does not prove owner use/);
 });

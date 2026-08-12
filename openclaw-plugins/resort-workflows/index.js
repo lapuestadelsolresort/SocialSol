@@ -66,6 +66,7 @@ function pluginConfig(value = {}) {
     whatsappChannelIds: new Set(Array.isArray(parsed.whatsappChannelIds) ? parsed.whatsappChannelIds.filter(Boolean) : []),
     socialChannelIds: new Set(Array.isArray(parsed.socialChannelIds) ? parsed.socialChannelIds.filter(Boolean) : []),
     ownerrezChannelIds: new Set(Array.isArray(parsed.ownerrezChannelIds) ? parsed.ownerrezChannelIds.filter(Boolean) : []),
+    reservationsChannelIds: new Set(Array.isArray(parsed.reservationsChannelIds) ? parsed.reservationsChannelIds.filter(Boolean) : []),
     receiptChannelIds: new Set(Array.isArray(parsed.receiptChannelIds) ? parsed.receiptChannelIds.filter(Boolean) : []),
     ownerExpenseChannelIds: new Set(Array.isArray(parsed.ownerExpenseChannelIds) ? parsed.ownerExpenseChannelIds.filter(Boolean) : []),
     controlledChannelIds: new Set(Array.isArray(parsed.controlledChannelIds) ? parsed.controlledChannelIds.filter(Boolean) : []),
@@ -152,6 +153,83 @@ function statusTruth(status) {
   return 'Twilio accepted the request; delivery and read are not confirmed.';
 }
 
+function ownerRezDateLabel(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return String(value || 'unknown date');
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  }).format(date);
+}
+
+function ownerRezDateRange(entry) {
+  const arrival = String(entry?.arrival || '');
+  const departure = String(entry?.departure || '');
+  const arrivalYear = arrival.slice(0, 4);
+  const departureYear = departure.slice(0, 4);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(arrival) && arrivalYear === departureYear) {
+    const start = ownerRezDateLabel(arrival).replace(`, ${arrivalYear}`, '');
+    return `${start} → ${ownerRezDateLabel(departure)}`;
+  }
+  return `${ownerRezDateLabel(arrival)} → ${ownerRezDateLabel(departure)}`;
+}
+
+function ownerRezGuestCount(entry) {
+  const adults = entry?.adults === null || entry?.adults === undefined ? 0 : Number(entry.adults);
+  const children = entry?.children === null || entry?.children === undefined ? 0 : Number(entry.children);
+  const parts = [];
+  if (Number.isFinite(adults) && adults > 0) parts.push(`${adults} ${adults === 1 ? 'adult' : 'adults'}`);
+  if (Number.isFinite(children) && children > 0) parts.push(`${children} ${children === 1 ? 'child' : 'children'}`);
+  return parts.length ? parts.join(' + ') : 'guest count not entered';
+}
+
+function ownerRezEntryLine(entry) {
+  const label = entry?.display_name || entry?.title || entry?.name || entry?.guest_name
+    || `OwnerRez record ${entry?.id || 'unknown'}`;
+  const property = entry?.property?.name || `property ${entry?.property_id || 'unknown'}`;
+  const manual = entry?.calendar_entry_kind === 'manual_calendar_entry'
+    || entry?.type === 'block' || entry?.is_block === true;
+  const detail = manual
+    ? 'manual calendar entry; guest vs owner use is not encoded'
+    : `typed booking; ${ownerRezGuestCount(entry)}`;
+  return `• ${ownerRezDateRange(entry)} — ${label}, ${property} (${detail})`;
+}
+
+export function formatOwnerRezOccupancyReply(payload, { mode = 'next' } = {}) {
+  const run = payload?.run;
+  if (!run) return 'The live OwnerRez lookup returned no durable run record, so no booking answer was generated.';
+  if (run.status !== 'completed') {
+    return `The live OwnerRez calendar workflow ${run.id || 'unknown'} is ${run.status || 'incomplete'}, so no booking answer was generated from memory or CRM data.`;
+  }
+  const output = run.output || {};
+  const allEntries = Array.isArray(output.primaryCalendarEntries)
+    ? output.primaryCalendarEntries
+    : (output.nextCalendarEntry ? [output.nextCalendarEntry] : []);
+  const entries = [...allEntries].sort((left, right) => (
+    String(left?.arrival || '').localeCompare(String(right?.arrival || ''))
+    || String(left?.departure || '').localeCompare(String(right?.departure || ''))
+    || String(left?.id || '').localeCompare(String(right?.id || ''))
+  ));
+  const selected = mode === 'upcoming' ? entries.slice(0, 40) : entries.slice(0, 1);
+  const title = mode === 'upcoming' ? '*Upcoming OwnerRez calendar entries:*' : '*Next OwnerRez calendar entry:*';
+  const lines = [title];
+  if (selected.length) {
+    lines.push('', ...selected.map(ownerRezEntryLine));
+    if (mode === 'upcoming' && entries.length > selected.length) {
+      lines.push('', `${entries.length - selected.length} additional entries were omitted; request a narrower live date window.`);
+    }
+  } else {
+    lines.push('', `No primary calendar entry starts from ${output.window?.start || 'the requested start'} through ${output.window?.end || 'the requested end'}. Widen the live OwnerRez window before concluding there is no upcoming stay.`);
+  }
+  if (selected.some(entry => entry?.calendar_entry_kind === 'manual_calendar_entry'
+    || entry?.type === 'block' || entry?.is_block === true)) {
+    lines.push('', 'OwnerRez manual calendar entries are reported in sequence because their encoding alone does not prove whether they are a guest event or owner use.');
+  }
+  const evidence = output._evidence?.id ? ` · Evidence: ${output._evidence.id}` : '';
+  lines.push('', `Live window: ${output.window?.start || 'unknown'} through ${output.window?.end || 'unknown'} · Workflow: ${run.id}${evidence}`);
+  return lines.join('\n');
+}
+
 export function formatWorkflowReply(payload) {
   const run = payload?.run;
   if (!run) return 'The workflow returned no durable run record.';
@@ -203,24 +281,7 @@ export function formatWorkflowReply(payload) {
     ].join('\n');
   }
   if (run.workflow_name === 'ownerrez.occupancy.read') {
-    const output = run.output || {};
-    const next = output.nextCalendarEntry || null;
-    const evidence = output._evidence?.id ? `Evidence: ${output._evidence.id}` : null;
-    const lines = [
-      `OwnerRez live calendar queried for ${output.window?.start || 'the requested start'} through ${output.window?.end || 'the requested end'}.`,
-    ];
-    if (next) {
-      const label = next.title || next.name || next.guest_name || `OwnerRez record ${next.id || 'unknown'}`;
-      const property = next.property?.name || `property ${next.property_id || 'unknown'}`;
-      lines.push(`Next primary calendar entry: ${next.arrival} → ${next.departure} — ${label}, ${property}.`);
-      if (next.type === 'block' || next.is_block === true) {
-        lines.push('OwnerRez encodes this as a manual block. That encoding does not establish guest-versus-owner use, so do not skip it when answering the next booking or reservation.');
-      }
-    } else {
-      lines.push('No primary calendar entry starts inside this window; widen the live OwnerRez date range before claiming there is no upcoming booking.');
-    }
-    lines.push(`Workflow: ${run.id}${evidence ? ` · ${evidence}` : ''}`);
-    return lines.join('\n');
+    return formatOwnerRezOccupancyReply(payload, { mode: 'next' });
   }
   const output = run.output || {};
   const artifacts = [
@@ -402,6 +463,97 @@ export function parseOwnerRezConfirmCommand(text) {
   const match = body.match(/^!ownerrez\s+confirm\s+([0-9a-f-]{36})\s+([0-9a-f]{8,12})\s*$/i);
   if (!match) return { error: 'invalid_confirmation' };
   return { proposalId: match[1].toLowerCase(), acceptanceHash: match[2].toLowerCase() };
+}
+
+function losAngelesDate() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'America/Los_Angeles',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function addCalendarDays(value, days) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) throw new Error('calendar date must use YYYY-MM-DD');
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+export function parseReservationReadRequest(text, { asOf = losAngelesDate() } = {}) {
+  const raw = String(text || '').trim();
+  if (!raw || raw.startsWith('!')) return null;
+  const body = raw.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  if (/\b(?:cash[ -]?flow|revenue|income|money|payouts?|balances?|worth|value|precio|ingresos?|pagos?|saldo)\b/.test(body)) return null;
+  if (/\b(?:move|change|cancel|create|edit|update|delete|modify|reschedule|hold|block|mover|cambiar|cancelar|crear|editar|actualizar|borrar|bloquear)\b/.test(body)) return null;
+  if (/\b(?:availability|available|disponibilidad|disponible)\b/.test(body)) return null;
+
+  const entity = /\b(?:bookings?|reservations?|arrivals?|stays?|reservas?|reservacion(?:es)?|llegadas?|estadias?)\b/;
+  if (!entity.test(body)) return null;
+  const nextMarker = /\b(?:next|upcoming|soonest|following|proxim[ao]s?)\b/.test(body);
+  const listRequest = /\b(?:list|show|lista|listar|muestra|mostrar|dame)\b/.test(body)
+    || /\b(?:what|which)(?: are| do we have)? (?:our )?(?:bookings?|reservations?|arrivals?|stays?)\b/.test(body)
+    || /\b(?:que|cuales)(?: son)? (?:las |los )?(?:reservas?|reservacion(?:es)?|llegadas?|estadias?)\b/.test(body);
+  if (!nextMarker && !listRequest) return null;
+
+  const pluralEntity = /\b(?:bookings|reservations|arrivals|stays|reservas|reservaciones|llegadas|estadias)\b/.test(body);
+  const numbered = /\b(?:next|proxim[ao]s?)\s+\d+\b/.test(body);
+  return {
+    mode: pluralEntity || numbered ? 'upcoming' : 'next',
+    start: asOf,
+    end: addCalendarDays(asOf, 370),
+  };
+}
+
+export function createReservationReadClaimHandler({
+  config,
+  execute = callControlPlane,
+  logger = null,
+  today = losAngelesDate,
+} = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
+    if (!config.reservationsChannelIds.has(channelId)) return undefined;
+    const request = parseReservationReadRequest(
+      event.bodyForAgent || event.body || event.content || '',
+      { asOf: today() },
+    );
+    if (!request) return undefined;
+    const messageId = trustedMessageId(event, ctx);
+    const actorUserId = String(event.senderId || ctx?.senderId || '');
+    if (!messageId || !actorUserId) {
+      return {
+        handled: true,
+        reply: { text: 'The live OwnerRez lookup was not run because trusted Slack message/user identity was unavailable. No booking answer was generated from CRM data or memory.' },
+      };
+    }
+    try {
+      const payload = await execute(config, {
+        workflow: 'ownerrez.occupancy.read',
+        input: { start: request.start, end: request.end },
+        context: {
+          channelId,
+          actorUserId,
+          messageId,
+          entrypoint: 'slack_reservations_read',
+        },
+        idempotencyKey: `slack:${channelId}:${messageId}:ownerrez.occupancy.read:${request.mode}`,
+      });
+      return {
+        handled: true,
+        reply: { text: formatOwnerRezOccupancyReply(payload, { mode: request.mode }) },
+      };
+    } catch (error) {
+      logger?.error?.(`resort-workflows OwnerRez calendar read failed: ${error.message}`);
+      return {
+        handled: true,
+        reply: { text: `The live OwnerRez calendar is temporarily unavailable (${error.code || 'workflow_error'}). No booking answer was generated from CRM data or memory; please retry or check #ops.` },
+      };
+    }
+  };
 }
 
 export function createInboundClaimHandler({ config, execute = callControlPlane, logger = null } = {}) {
@@ -711,6 +863,7 @@ const plugin = {
       if (!config.agentIds.has(ctx.agentId)) return null;
       return createWorkflowTool({ config, ctx });
     }, { name: 'resort_workflow' });
+    api.on('inbound_claim', createReservationReadClaimHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('inbound_claim', createInboundClaimHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });
     api.on('inbound_claim', createOwnerRezClaimHandler({ config, logger: api.logger }), { priority: 210, timeoutMs: 70_000 });
     api.on('inbound_claim', createMetaDmClaimHandler({ config, logger: api.logger }), { priority: 205, timeoutMs: 70_000 });

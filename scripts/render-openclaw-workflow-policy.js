@@ -125,6 +125,9 @@ function render({ policy, currentConfig, pluginIds = [] }) {
   const ownerrezChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.capabilities.includes('ownerrez.write'))
     .map(([id]) => id);
+  const reservationsChannelIds = Object.entries(policy.channels || {})
+    .filter(([, channel]) => channel.name === 'reservations')
+    .map(([id]) => id);
   return {
     channels: {
       slack: {
@@ -156,6 +159,7 @@ function render({ policy, currentConfig, pluginIds = [] }) {
             whatsappChannelIds,
             socialChannelIds,
             ownerrezChannelIds,
+            reservationsChannelIds,
             receiptChannelIds,
             ownerExpenseChannelIds,
             controlledChannelIds: Object.keys(policy.channels || {}),

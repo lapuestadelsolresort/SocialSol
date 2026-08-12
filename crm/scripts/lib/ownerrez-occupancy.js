@@ -79,6 +79,44 @@ async function fetchFullOccupancy(apiGet, {
 }
 
 /**
+ * Resolve booking guest names from OwnerRez itself. A failed individual guest
+ * lookup remains explicitly unresolved; callers must not fill the gap from CRM
+ * contacts or model memory.
+ */
+async function fetchGuestNames(apiGet, bookings, { delayMs = 150 } = {}) {
+  if (typeof apiGet !== 'function') throw new Error('apiGet must be a function');
+  const guestIds = [...new Set((bookings || [])
+    .map(booking => booking?.guest_id)
+    .filter(Boolean)
+    .map(String))];
+  const names = {};
+
+  for (const guestId of guestIds) {
+    try {
+      const guest = await apiGet(`guests/${guestId}`);
+      names[guestId] = [guest?.first_name, guest?.last_name].filter(Boolean).join(' ') || null;
+    } catch {
+      names[guestId] = null;
+    }
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+
+  return names;
+}
+
+function attachGuestNames(bookings, guestNames = {}) {
+  return (bookings || []).map(booking => {
+    if (!booking?.guest_id) return booking;
+    const guestName = guestNames[String(booking.guest_id)] || null;
+    return {
+      ...booking,
+      guest_name: guestName,
+      guest_name_source: guestName ? 'ownerrez.guests' : 'unavailable',
+    };
+  });
+}
+
+/**
  * Download the complete OwnerRez booking/block inventory without applying a
  * date or contact filter. Financial outlooks need to see unpriced bookings and
  * guestless holds as exceptions instead of silently dropping them.
@@ -172,8 +210,10 @@ function reservationDisplayName(booking, guestNames = {}) {
 
 module.exports = {
   DEFAULT_PROPERTY_IDS,
+  attachGuestNames,
   fetchAllBookings,
   fetchFullOccupancy,
+  fetchGuestNames,
   humanizeType,
   isBlock,
   reservationDisplayName,
