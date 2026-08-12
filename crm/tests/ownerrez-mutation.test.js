@@ -17,6 +17,23 @@ const { confirmDefinition, proposeDefinition } = require('../workflows/ownerrez-
 async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ownerrez-mutation-'));
   const db = createDB(path.join(directory, 'crm.db'));
+  const priorPolicyPath = process.env.RESORT_WORKFLOW_POLICY_PATH;
+  const policyPath = path.join(directory, 'policy.json');
+  fs.writeFileSync(policyPath, JSON.stringify({
+    version: 1,
+    shadow_mode: false,
+    live_workflows: ['ownerrez.mutation.confirm'],
+    autonomous_workflows: [],
+    always_on_effects: [],
+    channels: {
+      'TEST-RESERVATIONS': { name: 'reservations', capabilities: ['ownerrez.write'] },
+    },
+    restricted_capabilities: {
+      'ownerrez.write': { users: ['TEST-JASON', 'TEST-SARAH'] },
+    },
+    write_notifications: { user_ids: ['TEST-JASON', 'TEST-SARAH'], channel_ids: [] },
+  }));
+  process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
   try {
     await db.query(sql`PRAGMA foreign_keys=ON`);
     await db.query(sql`CREATE TABLE meta_messages (
@@ -28,6 +45,8 @@ async function withDb(run) {
     return await run(db);
   } finally {
     await db.dispose();
+    if (priorPolicyPath === undefined) delete process.env.RESORT_WORKFLOW_POLICY_PATH;
+    else process.env.RESORT_WORKFLOW_POLICY_PATH = priorPolicyPath;
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }

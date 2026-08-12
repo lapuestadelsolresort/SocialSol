@@ -36,6 +36,21 @@ async function request(app, endpoint, options = {}) {
 async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'whatsapp-status-test-'));
   const db = createDB(path.join(directory, 'crm.db'));
+  const priorPolicyPath = process.env.RESORT_WORKFLOW_POLICY_PATH;
+  const policyPath = path.join(directory, 'policy.json');
+  fs.writeFileSync(policyPath, JSON.stringify({
+    version: 1,
+    shadow_mode: true,
+    live_workflows: ['whatsapp.reply'],
+    autonomous_workflows: ['whatsapp.inbound.process'],
+    always_on_effects: [],
+    channels: {
+      'TEST-WHATSAPP': { name: 'whatsapp', capabilities: ['whatsapp.read', 'whatsapp.send'] },
+    },
+    restricted_capabilities: {},
+    write_notifications: { user_ids: [], channel_ids: [] },
+  }));
+  process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
   try {
     await db.query(sql`CREATE TABLE meta_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +66,8 @@ async function withDb(run) {
     return await run(db);
   } finally {
     await db.dispose();
+    if (priorPolicyPath === undefined) delete process.env.RESORT_WORKFLOW_POLICY_PATH;
+    else process.env.RESORT_WORKFLOW_POLICY_PATH = priorPolicyPath;
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }
