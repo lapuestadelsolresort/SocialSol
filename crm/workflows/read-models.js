@@ -3,7 +3,11 @@
 const { sql } = require('@databases/sqlite');
 const { nodeCommand } = require('../lib/workflow-command');
 const { readBankAccounts, readReport, REPORTS } = require('../lib/quickbooks-api');
-const { selectPrimaryCalendarEntries } = require('../scripts/lib/ownerrez-occupancy');
+const {
+  isBlock,
+  reservationDisplayName,
+  selectPrimaryCalendarEntries,
+} = require('../scripts/lib/ownerrez-occupancy');
 
 async function tableExists(db, name) {
   const [row] = await db.query(sql`SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name=${name}`);
@@ -196,12 +200,17 @@ const ownerrezOccupancyRead = evidenceReadDefinition({
       parsed.setUTCDate(parsed.getUTCDate() + 28);
       return parsed.toISOString().slice(0, 10);
     })();
-    const args = ['--start', start, '--end', end, '--json'];
+    const args = ['--start', start, '--end', end, '--enriched-json'];
     const result = await services.runCommand(nodeCommand('crm/scripts/ownerrez-full-occupancy.js', args));
     let records;
     try { records = JSON.parse(result.stdout); } catch { records = null; }
     if (!Array.isArray(records)) throw new Error('OwnerRez occupancy query returned no machine-readable records');
-    const primaryCalendarEntries = selectPrimaryCalendarEntries(records, { asOf: start });
+    const primaryCalendarEntries = selectPrimaryCalendarEntries(records, { asOf: start })
+      .map(record => ({
+        ...record,
+        calendar_entry_kind: isBlock(record) ? 'manual_calendar_entry' : 'typed_booking',
+        display_name: reservationDisplayName(record),
+      }));
     const nextCalendarEntry = primaryCalendarEntries[0] || null;
     return {
       source: 'ownerrez.live_occupancy_api',
@@ -212,6 +221,7 @@ const ownerrezOccupancyRead = evidenceReadDefinition({
         window: { start, end },
         activeOccupancyRecords: records.length,
         primaryCalendarEntryCount: primaryCalendarEntries.length,
+        primaryCalendarEntries,
         nextCalendarEntry,
         calendarSemantics: {
           primaryEntryRule: 'Earliest active record on or after window.start whose type is not linked_availability.',

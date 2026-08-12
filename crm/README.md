@@ -42,6 +42,7 @@ record in the requested window regardless of `guest_id` or `type`:
 ```bash
 node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2026-09-07
 node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2026-09-07 --json
+node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2026-09-07 --enriched-json
 ```
 
 The Monday `#reservations` job uses this same query through
@@ -52,6 +53,15 @@ entry rather than filtering to `type=booking`. OwnerRez uses `type=block` for
 some manually entered guest stays and events, so that field alone is not proof
 of owner use. `linked_availability` records are derived occupancy copies and
 are not separate arrivals.
+
+In `#reservations`, clear next/upcoming booking questions are claimed by the
+`resort-workflows` plugin before general agent generation. The claim handler
+executes the durable `ownerrez.occupancy.read` workflow, formats its live
+primary entries deterministically, and fails closed if OwnerRez cannot be
+queried. Typed-booking guest names come from OwnerRez's guest API; the workflow
+does not substitute CRM or agent-memory names. This runs in the existing CRM
+workflow worker and OpenClaw gateway and does not require a separate scheduler
+or LaunchAgent.
 
 ## Squarespace
 

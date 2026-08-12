@@ -3,8 +3,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  attachGuestNames,
   fetchAllBookings,
   fetchFullOccupancy,
+  fetchGuestNames,
   isBlock,
   reservationDisplayName,
   selectFullOccupancy,
@@ -123,4 +125,29 @@ test('next calendar entry keeps titled manual blocks and removes linked availabi
   const primary = selectPrimaryCalendarEntries(bookings, { asOf: '2026-08-12' });
   assert.deepEqual(primary.map(booking => booking.id), [101, 103]);
   assert.equal(primary[0].title, 'Sherry bachelor and bachelorette party');
+});
+
+test('guest names are resolved once from OwnerRez and failures stay unavailable', async () => {
+  const calls = [];
+  const apiGet = async endpoint => {
+    calls.push(endpoint);
+    if (endpoint === 'guests/10') return { first_name: 'Eric', last_name: 'Candelario' };
+    throw new Error('guest lookup unavailable');
+  };
+  const bookings = [
+    { id: 1, guest_id: 10 },
+    { id: 2, guest_id: 10 },
+    { id: 3, guest_id: 11 },
+    { id: 4, title: 'Manual event' },
+  ];
+
+  const names = await fetchGuestNames(apiGet, bookings, { delayMs: 0 });
+  assert.deepEqual(calls, ['guests/10', 'guests/11']);
+  assert.deepEqual(names, { '10': 'Eric Candelario', '11': null });
+  assert.deepEqual(attachGuestNames(bookings, names), [
+    { id: 1, guest_id: 10, guest_name: 'Eric Candelario', guest_name_source: 'ownerrez.guests' },
+    { id: 2, guest_id: 10, guest_name: 'Eric Candelario', guest_name_source: 'ownerrez.guests' },
+    { id: 3, guest_id: 11, guest_name: null, guest_name_source: 'unavailable' },
+    { id: 4, title: 'Manual event' },
+  ]);
 });

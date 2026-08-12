@@ -37,6 +37,10 @@
         "type": "array",
         "items": { "type": "string", "minLength": 1 }
       },
+      "reservationsChannelIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
       "receiptChannelIds": {
         "type": "array",
         "items": { "type": "string", "minLength": 1 }
