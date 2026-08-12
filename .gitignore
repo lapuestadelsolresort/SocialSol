@@ -32,6 +32,7 @@ workflow/openclaw-policy.patch.json
 
 # Accounting runtime data (bank statements, FX cache, config with vendor IDs)
 accounting/*.csv
+accounting/inbox/
 accounting/fx_cache/
 accounting/config.json
 squarespace/config.json
