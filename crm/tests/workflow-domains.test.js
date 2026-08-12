@@ -68,6 +68,51 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
   assert.equal(definitions.has('shell.exec'), false);
 });
 
+test('durable shell jobs retry only before dispatch and require review after dispatch', async () => {
+  const execute = getDefinition('squarespace.crm.sync').steps
+    .find(step => step.key === 'execute');
+  assert.equal(execute.maxAttempts, 2);
+  let commandCalls = 0;
+  const base = {
+    run: { id: '11111111-1111-4111-8111-111111111111' },
+    input: {},
+    state: { register_effect: { effectId: 'effect-1' } },
+    stepKey: 'execute',
+    services: {
+      shadowMode: false,
+      runCommand: async () => {
+        commandCalls += 1;
+        return { exitCode: 0, stdout: '{"ok":true}', stderr: '' };
+      },
+    },
+  };
+
+  await assert.rejects(() => execute.run({
+    ...base,
+    db: { query: async () => { throw new Error('SQLITE_BUSY: database is locked'); } },
+    store: {},
+  }), error => (
+    error.code === 'pre_dispatch_state_unavailable'
+    && error.retryable === true
+    && error.requiresManualReview !== true
+  ));
+  assert.equal(commandCalls, 0);
+
+  await assert.rejects(() => execute.run({
+    ...base,
+    db: { query: async () => [{ id: 'effect-1', status: 'requested', provider_ref: null }] },
+    store: {
+      sha256: () => 'hash',
+      transitionEffect: async () => { throw new Error('SQLITE_BUSY: database is locked'); },
+    },
+  }), error => (
+    error.code === 'post_dispatch_projection_failed'
+    && error.retryable === false
+    && error.requiresManualReview === true
+  ));
+  assert.equal(commandCalls, 1);
+});
+
 test('inbound WhatsApp CRM enrichment is resumable and idempotent', async () => {
   await withDb(async db => {
     await db.query(sql`CREATE TABLE leads (
