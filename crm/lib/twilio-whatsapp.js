@@ -6,7 +6,10 @@ const path = require('node:path');
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SECRETS_DIR = process.env.SOCIALSOL_SECRETS_DIR || path.join(REPO_ROOT, 'secrets');
 const SECRETS_PATH = path.join(SECRETS_DIR, 'twilio.json');
-const MAX_MESSAGE_LENGTH = 4096;
+// Twilio Programmable Messaging rejects a Body longer than 1,600 characters.
+// Enforce the provider boundary locally so an explicit Slack command cannot
+// create a known-to-fail external request.
+const MAX_MESSAGE_LENGTH = 1600;
 
 function loadTwilioSecrets(file = SECRETS_PATH) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
