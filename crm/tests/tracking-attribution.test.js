@@ -310,7 +310,7 @@ describe('Campaign lead reporting', () => {
     const content = fs.readFileSync(
       path.join(ROOT, '..', 'automation', 'daily_consolidated_report.py'),
       'utf-8'
-    );
+    ) + fs.readFileSync(path.join(ROOT, '..', 'automation', 'marketing_snapshot.py'), 'utf-8');
     assert.ok(
       content.includes('WhatsApp taps') && content.includes('verified inbound WhatsApp leads'),
       'The committed report must show taps and verified WhatsApp leads separately'

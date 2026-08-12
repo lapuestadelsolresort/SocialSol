@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from campaign_registry import (
     REGISTRY_PATH,
     apply_snapshot,
+    backup_registry,
     fetch_live_snapshot,
     load_registry,
     write_registry,
@@ -221,8 +222,12 @@ def main():
                 ), 2),
             }, indent=2))
         else:
-            write_registry(updated_registry, registry_path)
+            # Commit the CRM reconciliation before opening the independent
+            # registry-recovery connection, avoiding a self-inflicted lock.
+            write_registry(updated_registry, registry_path, backup=False)
             con.commit()
+            if os.path.realpath(registry_path) == os.path.realpath(REGISTRY_PATH):
+                backup_registry(updated_registry, registry_path)
             record(JOB_NAME, True, f"{len(snapshot)} campaigns; {sum(1 for row in snapshot if row['effective_status'] == 'ACTIVE')} active")
             print(json.dumps({
                 "reconciled_at": reconciled_at,

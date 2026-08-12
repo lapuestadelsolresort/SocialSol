@@ -13,7 +13,6 @@ OPENCLAW = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
 CHANNEL = os.environ.get("RESORT_SOCIAL_CHANNEL", "")
 SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "")
 EXPECTED = {
-    "resort-daily-consolidated": timedelta(hours=30),
     "resort-tracking-health": timedelta(hours=30),
     "resort-weekly-tracking-audit": timedelta(days=8),
     "resort-marketing-reconcile": timedelta(hours=30),
@@ -22,7 +21,6 @@ EXPECTED = {
     "resort-crm-restore-drill": timedelta(days=8),
     "resort-workflow-health": timedelta(minutes=15),
     "resort-log-rotation": timedelta(days=8),
-    "resort-crm-audience-sync": timedelta(hours=30),
 }
 
 

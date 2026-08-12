@@ -51,6 +51,13 @@ const templates = fs.readdirSync(templatesDir)
 
 fs.mkdirSync(outputDir, { recursive: true });
 
+const expectedOutputs = new Set(templates.map(name => path.basename(name, '.template')));
+for (const existing of fs.readdirSync(outputDir)) {
+  if (existing.endsWith('.plist') && !expectedOutputs.has(existing)) {
+    fs.unlinkSync(path.join(outputDir, existing));
+  }
+}
+
 function xmlEscape(value) {
   return String(value)
     .replaceAll('&', '&amp;')

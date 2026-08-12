@@ -4,6 +4,7 @@ import {
   createFinalizeHandler,
   createInboundClaimHandler,
   createMetaDmClaimHandler,
+  createMarketingConfirmClaimHandler,
   createManualReviewClaimHandler,
   createOwnerRezClaimHandler,
   createReceiptConfirmClaimHandler,
@@ -16,6 +17,7 @@ import {
   formatWorkflowReply,
   parseWhatsAppCommand,
   parseMetaDmCommand,
+  parseMarketingConfirmCommand,
   parseManualReviewCommand,
   parseOwnerRezConfirmCommand,
   parseReceiptConfirmCommand,
@@ -43,6 +45,17 @@ test('parses only explicit Meta DM mutations', () => {
   assert.deepEqual(parseMetaDmCommand('hello'), null);
   assert.deepEqual(parseMetaDmCommand('!dm 42 Welcome'), { dmId: 42, message: 'Welcome' });
   assert.deepEqual(parseMetaDmCommand('!dm Welcome'), { error: 'invalid_meta_dm_command' });
+});
+
+test('parses only exact paid-media confirmation commands', () => {
+  const id = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  assert.deepEqual(parseMarketingConfirmCommand(`!meta confirm ${id} abcdef123456`), {
+    proposalId: id, acceptanceHash: 'abcdef123456',
+  });
+  assert.equal(parseMarketingConfirmCommand('please increase the budget'), null);
+  assert.deepEqual(parseMarketingConfirmCommand(`!meta approve ${id}`), {
+    error: 'invalid_marketing_confirmation',
+  });
 });
 
 test('parses exact manual-review resolutions', () => {
@@ -502,6 +515,9 @@ test('model-facing tool cannot invoke command-only WhatsApp sends', async () => 
     workflow: 'receipt.owner_expense.confirm',
     input: {},
   }), error => error.code === 'workflow_command_required');
+  await assert.rejects(() => tool.execute('tool-call-4', {
+    workflow: 'marketing.change.confirm', input: {},
+  }), error => error.code === 'workflow_command_required');
   delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
 });
 
@@ -542,6 +558,40 @@ test('Meta DM command binds trusted Slack identity and remains command-only', as
   assert.equal(calls[0].context.entrypoint, 'slack_meta_dm_command');
   assert.equal(calls[0].context.actorUserId, 'U-JASON');
   assert.match(result.reply.text, /Delivery\/read is not confirmed/);
+});
+
+test('paid-media confirmation binds trusted Slack identity and remains command-only', async () => {
+  const proposalId = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  const config = pluginConfig({
+    socialChannelIds: ['C-SOCIAL'], shadowMode: true,
+    liveWorkflowNames: ['marketing.change.confirm'],
+  });
+  const calls = [];
+  const payload = {
+    run: {
+      id: 'run-marketing', workflow_name: 'marketing.change.confirm', status: 'completed',
+      output: {
+        status: 'verified_by_readback', requestId: proposalId,
+        operation: 'campaign_activate', providerRef: 'campaign-1',
+        effectId: 'effect-marketing', evidenceId: 'evidence-marketing',
+      },
+    },
+  };
+  const handler = createMarketingConfirmClaimHandler({
+    config, execute: async (_config, request) => { calls.push(request); return payload; },
+  });
+  assert.equal(await handler({
+    channel: 'slack', conversationId: 'C-SOCIAL', bodyForAgent: 'activate it',
+  }, {}), undefined);
+  const result = await handler({
+    channel: 'slack', conversationId: 'C-SOCIAL', messageId: '2100.1', senderId: 'U-JASON',
+    bodyForAgent: `!meta confirm ${proposalId} abcdef123456`,
+  }, {});
+  assert.equal(result.handled, true);
+  assert.equal(calls[0].workflow, 'marketing.change.confirm');
+  assert.equal(calls[0].context.entrypoint, 'slack_meta_campaign_confirm_command');
+  assert.equal(calls[0].context.actorUserId, 'U-JASON');
+  assert.match(result.reply.text, /verified by readback/);
 });
 
 test('manual-review resolution is available only as an exact controlled-channel command', async () => {

@@ -23,15 +23,17 @@ function validatePolicy(policy) {
       throw new Error(`invalid workflow policy channel: ${channelId || '<empty>'}`);
     }
   }
-  const grantsOwnerRezWrite = Object.values(policy.channels)
-    .some(channel => channel.capabilities.includes('ownerrez.write'));
-  const ownerRezRestriction = policy.restricted_capabilities?.['ownerrez.write'];
-  if (grantsOwnerRezWrite && (
-    !ownerRezRestriction || !Array.isArray(ownerRezRestriction.users)
-    || ownerRezRestriction.users.length === 0
-    || ownerRezRestriction.users.some(userId => typeof userId !== 'string' || !userId.trim())
-  )) {
-    throw new Error('workflow policy must restrict ownerrez.write to a non-empty user allowlist');
+  for (const capability of ['ownerrez.write', 'marketing.write']) {
+    const granted = Object.values(policy.channels)
+      .some(channel => channel.capabilities.includes(capability));
+    const restriction = policy.restricted_capabilities?.[capability];
+    if (granted && (
+      !restriction || !Array.isArray(restriction.users)
+      || restriction.users.length === 0
+      || restriction.users.some(userId => typeof userId !== 'string' || !userId.trim())
+    )) {
+      throw new Error(`workflow policy must restrict ${capability} to a non-empty user allowlist`);
+    }
   }
   for (const field of ['live_workflows', 'autonomous_workflows', 'always_on_effects']) {
     if (policy[field] !== undefined && (

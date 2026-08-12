@@ -255,6 +255,55 @@ const SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  `CREATE TABLE IF NOT EXISTS marketing_change_requests (
+    id TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,
+    target_ref TEXT NOT NULL,
+    scope_ref TEXT NOT NULL,
+    authority_tier TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    acceptance_hash TEXT,
+    preflight_json TEXT NOT NULL,
+    preflight_hash TEXT NOT NULL,
+    source_evidence_id TEXT REFERENCES workflow_evidence(id),
+    status TEXT NOT NULL DEFAULT 'pending',
+    reason TEXT NOT NULL,
+    proposed_by TEXT NOT NULL,
+    confirmed_by TEXT,
+    proposal_run_id TEXT REFERENCES workflow_runs(id),
+    execution_run_id TEXT REFERENCES workflow_runs(id),
+    effect_id TEXT REFERENCES workflow_effects(id),
+    provider_ref TEXT,
+    readback_evidence_id TEXT REFERENCES workflow_evidence(id),
+    processing_error TEXT,
+    expires_at TEXT,
+    confirmed_at TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS marketing_audience_state (
+    audience_key TEXT PRIMARY KEY,
+    audience_id TEXT NOT NULL,
+    audience_name TEXT NOT NULL,
+    email_count INTEGER NOT NULL DEFAULT 0,
+    hashed_emails_json TEXT NOT NULL DEFAULT '[]',
+    provider_readback_json TEXT,
+    last_workflow_run_id TEXT REFERENCES workflow_runs(id),
+    last_synced_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS marketing_campaign_registry (
+    registry_key TEXT PRIMARY KEY,
+    records_json TEXT NOT NULL,
+    records_hash TEXT NOT NULL,
+    record_count INTEGER NOT NULL,
+    source_path TEXT NOT NULL,
+    last_workflow_run_id TEXT,
+    observed_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
   `CREATE TABLE IF NOT EXISTS ownerrez_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
@@ -286,6 +335,10 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_social_content_status ON social_content(status, scheduled_for)`,
   `CREATE INDEX IF NOT EXISTS idx_ownerrez_proposals_status
      ON ownerrez_mutation_proposals(status, expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_marketing_change_status
+     ON marketing_change_requests(status, expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_marketing_change_target
+     ON marketing_change_requests(scope_ref, created_at)`,
 ];
 
 const META_MESSAGE_COLUMNS = [

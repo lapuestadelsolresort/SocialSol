@@ -8,12 +8,15 @@ and UTM aliases. Meta is the source of truth for delivery status and budgets.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import sqlite3
 import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -21,6 +24,7 @@ ROOT = HERE.parent
 REGISTRY_PATH = ROOT / "campaigns" / "active-campaigns.json"
 SECRETS_DIR = Path(os.environ.get("SOCIALSOL_SECRETS_DIR", ROOT / "secrets"))
 META_SECRETS_PATH = SECRETS_DIR / "meta.json"
+DB_PATH = Path(os.environ.get("DB_PATH", ROOT / "crm" / "data" / "crm.db"))
 
 
 class MetaAPIError(RuntimeError):
@@ -47,8 +51,91 @@ def load_json(path, default=None):
         return default
 
 
+def _is_primary_registry(path):
+    return Path(path).resolve() == Path(REGISTRY_PATH).resolve()
+
+
+def _ensure_registry_backup_table(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS marketing_campaign_registry (
+        registry_key TEXT PRIMARY KEY,
+        records_json TEXT NOT NULL,
+        records_hash TEXT NOT NULL,
+        record_count INTEGER NOT NULL,
+        source_path TEXT NOT NULL,
+        last_workflow_run_id TEXT,
+        observed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )""")
+
+
+def backup_registry(records, path=REGISTRY_PATH):
+    """Persist a recoverable copy of the ignored runtime registry in CRM SQLite."""
+    serialized = json.dumps(records, separators=(",", ":"), sort_keys=True)
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    observed_at = datetime.now(timezone.utc).isoformat()
+    con = sqlite3.connect(DB_PATH, timeout=20)
+    try:
+        con.execute("PRAGMA busy_timeout=20000")
+        _ensure_registry_backup_table(con)
+        con.execute("""INSERT INTO marketing_campaign_registry (
+            registry_key, records_json, records_hash, record_count, source_path,
+            last_workflow_run_id, observed_at, updated_at
+          ) VALUES ('active', ?, ?, ?, ?, ?, ?, datetime('now'))
+          ON CONFLICT(registry_key) DO UPDATE SET
+            records_json=excluded.records_json,
+            records_hash=excluded.records_hash,
+            record_count=excluded.record_count,
+            source_path=excluded.source_path,
+            last_workflow_run_id=COALESCE(excluded.last_workflow_run_id, marketing_campaign_registry.last_workflow_run_id),
+            observed_at=excluded.observed_at,
+            updated_at=datetime('now')""", (
+            serialized,
+            digest,
+            len(records),
+            str(Path(path)),
+            os.environ.get("WORKFLOW_RUN_ID"),
+            observed_at,
+        ))
+        con.commit()
+    finally:
+        con.close()
+    return {"records_hash": digest, "record_count": len(records), "observed_at": observed_at}
+
+
+def load_registry_backup():
+    if not DB_PATH.is_file():
+        raise ValueError("campaign registry is missing and the CRM recovery database is unavailable")
+    con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    try:
+        row = con.execute(
+            "SELECT records_json, records_hash FROM marketing_campaign_registry WHERE registry_key='active'"
+        ).fetchone()
+    except sqlite3.OperationalError as exc:
+        raise ValueError("campaign registry is missing and no CRM recovery snapshot exists") from exc
+    finally:
+        con.close()
+    if not row:
+        raise ValueError("campaign registry is missing and no CRM recovery snapshot exists")
+    serialized, expected_hash = row
+    actual_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    if actual_hash != expected_hash:
+        raise ValueError("CRM campaign registry recovery snapshot failed its integrity hash")
+    try:
+        records = json.loads(serialized)
+    except json.JSONDecodeError as exc:
+        raise ValueError("CRM campaign registry recovery snapshot is invalid JSON") from exc
+    if not isinstance(records, list):
+        raise ValueError("CRM campaign registry recovery snapshot is not an array")
+    return records
+
+
 def load_registry(path=REGISTRY_PATH):
-    raw = load_json(path, [])
+    sentinel = object()
+    raw = load_json(path, sentinel)
+    if raw is sentinel:
+        if Path(path).exists():
+            raise ValueError("campaign registry exists but is not readable valid JSON")
+        raw = load_registry_backup() if _is_primary_registry(path) else []
     if isinstance(raw, dict):
         raw = raw.get("campaigns", [])
     if not isinstance(raw, list):
@@ -56,7 +143,7 @@ def load_registry(path=REGISTRY_PATH):
     return raw
 
 
-def write_registry(records, path=REGISTRY_PATH):
+def write_registry(records, path=REGISTRY_PATH, *, backup=True):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".active-campaigns-", suffix=".json", dir=path.parent)
@@ -70,6 +157,8 @@ def write_registry(records, path=REGISTRY_PATH):
             os.unlink(tmp)
         except FileNotFoundError:
             pass
+    if backup and _is_primary_registry(path):
+        backup_registry(records, path)
 
 
 def load_meta_secrets(path=META_SECRETS_PATH):

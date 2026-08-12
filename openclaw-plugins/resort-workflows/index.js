@@ -29,6 +29,9 @@ const WORKFLOW_SCHEMA = {
         'receipts.status.read',
         'receipts.scoped.read',
         'social.content.read',
+        'marketing.snapshot.read',
+        'marketing.change.propose',
+        'meta.campaign.autonomous',
         'ownerrez.occupancy.read',
         'qbo.bank_balances.read',
         'qbo.report.read',
@@ -52,6 +55,7 @@ const COMMAND_ONLY_WORKFLOWS = new Set([
   'whatsapp.reply',
   'meta.dm.reply',
   'ownerrez.mutation.confirm',
+  'marketing.change.confirm',
   'receipt.owner_expense.ingest',
   'receipt.owner_expense.process',
   'receipt.owner_expense.confirm',
@@ -272,6 +276,44 @@ export function formatWorkflowReply(payload) {
       `Workflow: ${run.id}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
     ].join('\n');
   }
+  if (run.workflow_name === 'marketing.snapshot.read') {
+    const output = run.output || {};
+    const window = output.window || {};
+    const totals = output.totals || {};
+    const lines = [
+      `Paid Meta snapshot ${window.start || 'unknown'} through ${window.end || 'unknown'}: `
+        + `$${Number(totals.spend || 0).toFixed(2)} spend, ${Number(totals.sessions || 0)} CRM sessions, `
+        + `${Number(totals.wa_taps || 0)} WhatsApp taps, ${Number(totals.verified_wa_leads || 0)} verified leads.`,
+      `Tracking integrity: ${output.tracking_health?.healthy === true ? 'healthy' : 'failed; mutations blocked'}.`,
+    ];
+    for (const campaign of output.campaigns || []) {
+      lines.push(`• ${campaign.campaign_name}: $${Number(campaign.meta?.spend || 0).toFixed(2)} spend · ${Number(campaign.crm?.wa_taps || 0)} WA taps · ${Number(campaign.crm?.verified_wa_leads || 0)} verified leads`);
+    }
+    lines.push(`Bounded autonomous actions authorized now: ${(output.authorized_actions || []).length}.`);
+    lines.push(`Workflow: ${run.id}${output._evidence?.id ? ` · Evidence: ${output._evidence.id}` : ''}`);
+    return lines.join('\n');
+  }
+  if (run.workflow_name === 'marketing.change.propose') {
+    const output = run.output || {};
+    return [
+      'No paid-media or landing-page change has been made.',
+      `Proposed operation: ${output.operation || 'unknown'} · Target: ${output.targetRef || 'unknown'}`,
+      `Immutable request: ${output.requestHash || 'unknown'}${output.briefHash ? ` · Brief: ${output.briefHash}` : ''}`,
+      `Expires: ${output.expiresAt || 'unknown'}`,
+      'After reviewing the exact operation, paste this command as a new Slack message:',
+      `\`${output.confirmationCommand || 'confirmation command unavailable'}\``,
+      `Workflow: ${run.id}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
+    ].join('\n');
+  }
+  if (['marketing.change.confirm', 'meta.campaign.autonomous'].includes(run.workflow_name)) {
+    const output = run.output || {};
+    const authority = output.authorityTier === 'autonomous' ? 'bounded autonomous' : 'human-confirmed';
+    return [
+      `${output.operation || 'Marketing change'} completed as a ${authority} action and was verified by readback.`,
+      `Request: ${output.requestId || 'unknown'} · Provider reference: ${output.providerRef || 'unknown'}`,
+      `Workflow: ${run.id}${output.effectId ? ` · Effect: ${output.effectId}` : ''}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
+    ].join('\n');
+  }
   if (run.workflow_name === 'ownerrez.mutation.confirm') {
     const output = run.output || {};
     return [
@@ -396,6 +438,14 @@ export function parseMetaDmCommand(text) {
   const match = body.match(/^!dm\s+(\d+)\s+([\s\S]+)$/i);
   if (!match || !match[2].trim()) return { error: 'invalid_meta_dm_command' };
   return { dmId: Number(match[1]), message: match[2].trim() };
+}
+
+export function parseMarketingConfirmCommand(text) {
+  const body = String(text || '').trim();
+  if (!/^!meta(?:\s|$)/i.test(body)) return null;
+  const match = body.match(/^!meta\s+confirm\s+([0-9a-f-]{36})\s+([0-9a-f]{12})\s*$/i);
+  if (!match) return { error: 'invalid_marketing_confirmation' };
+  return { proposalId: match[1].toLowerCase(), acceptanceHash: match[2].toLowerCase() };
 }
 
 export function parseManualReviewCommand(text) {
@@ -778,6 +828,47 @@ export function createMetaDmClaimHandler({ config, execute = callControlPlane, l
   };
 }
 
+export function createMarketingConfirmClaimHandler({ config, execute = callControlPlane, logger = null } = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    if (!config.socialChannelIds.has(channelId)) return undefined;
+    const command = parseMarketingConfirmCommand(event.bodyForAgent || event.body || event.content || '');
+    if (!command) return undefined;
+    if (!workflowIsLive(config, 'marketing.change.confirm')) {
+      return { handled: true, reply: { text: 'Not changed. Paid-media confirmations are still in shadow mode.' } };
+    }
+    if (command.error) {
+      return { handled: true, reply: { text: 'Not changed. Use the exact `!meta confirm <proposal-id> <acceptance-hash>` command emitted by the proposal.' } };
+    }
+    const messageId = trustedMessageId(event, ctx);
+    if (!messageId) {
+      return { handled: true, reply: { text: 'Not changed. Slack did not provide a stable message ID, so the confirmation cannot be deduplicated safely.' } };
+    }
+    try {
+      const payload = await execute(config, {
+        workflow: 'marketing.change.confirm',
+        input: command,
+        context: {
+          channelId,
+          actorUserId: event.senderId || ctx?.senderId,
+          messageId,
+          entrypoint: 'slack_meta_campaign_confirm_command',
+        },
+        idempotencyKey: `slack:${channelId}:${messageId}:marketing.change.confirm`,
+      });
+      return { handled: true, reply: { text: formatWorkflowReply(payload) } };
+    } catch (error) {
+      logger?.error?.(`resort-workflows paid-media confirmation failed: ${error.message}`);
+      return {
+        handled: true,
+        reply: { text: `Not changed. The paid-media confirmation failed before verified readback (${error.code || 'workflow_error'}).` },
+      };
+    }
+  };
+}
+
 export function createManualReviewClaimHandler({ config, resolve = resolveManualReview, logger = null } = {}) {
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
@@ -948,6 +1039,7 @@ const plugin = {
     api.on('inbound_claim', createInboundClaimHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });
     api.on('inbound_claim', createOwnerRezClaimHandler({ config, logger: api.logger }), { priority: 210, timeoutMs: 70_000 });
     api.on('inbound_claim', createMetaDmClaimHandler({ config, logger: api.logger }), { priority: 205, timeoutMs: 70_000 });
+    api.on('inbound_claim', createMarketingConfirmClaimHandler({ config, logger: api.logger }), { priority: 207, timeoutMs: 70_000 });
     api.on('inbound_claim', createManualReviewClaimHandler({ config, logger: api.logger }), { priority: 220, timeoutMs: 35_000 });
     api.on('inbound_claim', createReceiptConfirmClaimHandler({ config, logger: api.logger }), { priority: 215, timeoutMs: 70_000 });
     api.on('message_received', createReceiptHandler({ config, logger: api.logger }), { priority: 100, timeoutMs: 70_000 });
