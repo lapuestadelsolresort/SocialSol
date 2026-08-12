@@ -241,6 +241,18 @@ cp campaigns/active-campaigns.example.json campaigns/active-campaigns.json
 Production credentials live in mode-600 JSON files under
 `SOCIALSOL_SECRETS_DIR`. See `docs/configuration.md`.
 
+## Production releases
+
+All source changes use a `codex/*` branch and GitHub pull request, including
+changes first requested through Slack. After the GitHub `verify` check passes
+and the PR is merged, fast-forward the clean Mac mini `main` checkout and use
+`npm run release:check` followed by `npm run release:deploy`. The guard requires
+the primary checkout, exact successful `origin/main` commit, and a clean tree;
+the deployment then backs up/restores the CRM, reruns the complete stack,
+restarts core services, checks health, and records the release locally. See
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full contract and recovery
+procedure.
+
 ---
 
 ## Security defaults

@@ -10,6 +10,9 @@ process, record the reviewed Git commit and ensure every intended change is
 committed. A CRM/worker process started before a source-file edit is stale even
 though its command points at the same path; the health monitor reports this as
 `runtime_code_drift`. Never use an incidental crash or reboot as a deployment.
+Normal application releases must follow `docs/DEPLOYMENT.md` and pass
+`npm run release:check` / `npm run release:deploy`. The steps below add the
+separate authority and producer cutover checks required for a workflow domain.
 
 ```bash
 npm run init:runtime

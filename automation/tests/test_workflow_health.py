@@ -1,7 +1,13 @@
 import sqlite3
 import unittest
 
-from workflow_health import expected_graph_agents, graph_agent_integrity, hard_failure_count, inspect
+from workflow_health import (
+    alert_configuration_missing,
+    expected_graph_agents,
+    graph_agent_integrity,
+    hard_failure_count,
+    inspect,
+)
 
 
 SCHEMA = """
@@ -41,6 +47,10 @@ class WorkflowHealthTests(unittest.TestCase):
     def test_missing_alert_configuration_fails_closed(self):
         con = self.database()
         self.assertEqual(hard_failure_count(inspect(con), alert_config_missing=1), 1)
+
+    def test_operator_check_suppresses_only_the_missing_alert_config_failure(self):
+        self.assertEqual(alert_configuration_missing(False, "", ""), 1)
+        self.assertEqual(alert_configuration_missing(True, "", ""), 0)
 
     def test_provider_acceptance_is_terminal_for_meta(self):
         con = self.database()

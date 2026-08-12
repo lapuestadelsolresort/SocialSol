@@ -89,15 +89,26 @@ function makeDurableJob(options) {
       {
         key: 'execute',
         effectClass: 'external_non_idempotent',
-        maxAttempts: 1,
+        maxAttempts: 2,
         async run({ db, run, input, state, services, store, stepKey }) {
-          if (typeof services.runCommand !== 'function') throw new Error('workflow command service is unavailable');
           const effectId = state.register_effect.effectId;
-          const [effect] = await db.query(require('@databases/sqlite').sql`SELECT * FROM workflow_effects WHERE id=${effectId}`);
-          if (effect?.provider_ref && effect.status !== 'requested') {
-            return { effectId, providerRef: effect.provider_ref, status: effect.status, replayed: true };
+          let effect;
+          let command;
+          try {
+            if (typeof services.runCommand !== 'function') {
+              throw new Error('workflow command service is unavailable');
+            }
+            [effect] = await db.query(require('@databases/sqlite').sql`SELECT * FROM workflow_effects WHERE id=${effectId}`);
+            if (!effect) throw new Error(`workflow effect not found: ${effectId}`);
+            if (effect.provider_ref && effect.status !== 'requested') {
+              return { effectId, providerRef: effect.provider_ref, status: effect.status, replayed: true };
+            }
+            command = buildCommand({ input, run, shadowMode: services.shadowMode === true });
+          } catch (error) {
+            error.code = error.code || 'pre_dispatch_state_unavailable';
+            error.retryable = true;
+            throw error;
           }
-          const command = buildCommand({ input, run, shadowMode: services.shadowMode === true });
           let result;
           try {
             result = await services.runCommand(command);
@@ -107,28 +118,35 @@ function makeDurableJob(options) {
             throw error;
           }
           const providerRef = `job:${run.id}`;
-          await store.transitionEffect(db, {
-            effectId,
-            providerRef,
-            status: 'accepted_by_provider',
-            providerStatus: 'process_exit_0',
-            response: {
-              exitCode: result.exitCode,
-              stdoutHash: store.sha256(result.stdout),
-              stderrHash: store.sha256(result.stderr),
-            },
-          });
-          await store.createEvidence(db, {
-            runId: run.id,
-            stepKey,
-            source: `${provider}.command`,
-            sourceRef: providerRef,
-            payload: {
-              exitCode: result.exitCode,
-              stdout: result.stdout,
-              stderr: result.stderr,
-            },
-          });
+          try {
+            await store.transitionEffect(db, {
+              effectId,
+              providerRef,
+              status: 'accepted_by_provider',
+              providerStatus: 'process_exit_0',
+              response: {
+                exitCode: result.exitCode,
+                stdoutHash: store.sha256(result.stdout),
+                stderrHash: store.sha256(result.stderr),
+              },
+            });
+            await store.createEvidence(db, {
+              runId: run.id,
+              stepKey,
+              source: `${provider}.command`,
+              sourceRef: providerRef,
+              payload: {
+                exitCode: result.exitCode,
+                stdout: result.stdout,
+                stderr: result.stderr,
+              },
+            });
+          } catch (error) {
+            error.code = error.code || 'post_dispatch_projection_failed';
+            error.retryable = false;
+            error.requiresManualReview = true;
+            throw error;
+          }
           return {
             effectId,
             providerRef,

@@ -183,7 +183,11 @@ def hard_failure_count(metrics, alert_config_missing=0):
     ])
 
 
-def main():
+def alert_configuration_missing(check_only, alert_channel=ALERT_CHANNEL, slack_account=SLACK_ACCOUNT):
+    return int(not check_only and (not alert_channel or not slack_account))
+
+
+def main(check_only=False):
     if not DB_PATH.is_file():
         raise RuntimeError(f"CRM database missing: {DB_PATH}")
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=20)
@@ -191,7 +195,11 @@ def main():
         metrics = inspect(con)
     finally:
         con.close()
-    alert_config_missing = int(not ALERT_CHANNEL or not SLACK_ACCOUNT)
+    # An operator-side deployment check may not inherit the LaunchAgent's
+    # notification environment. It still enforces every runtime/data metric,
+    # but it must not update the scheduled job record or emit a duplicate
+    # Slack alert.
+    alert_config_missing = alert_configuration_missing(check_only)
     metrics.update(runtime_integrity())
     try:
         policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
@@ -202,16 +210,21 @@ def main():
     hard_failures = hard_failure_count(metrics, alert_config_missing)
     detail = json.dumps({"observed_at": datetime.now(timezone.utc).isoformat(), **metrics}, sort_keys=True)
     if hard_failures:
-        record(JOB_NAME, False, detail)
-        notify("*Workflow integrity alert*\n```" + detail + "```")
+        if not check_only:
+            record(JOB_NAME, False, detail)
+            notify("*Workflow integrity alert*\n```" + detail + "```")
         raise RuntimeError(detail)
-    record(JOB_NAME, True, detail)
+    if not check_only:
+        record(JOB_NAME, True, detail)
     print(detail)
 
 
 if __name__ == "__main__":
     try:
-        main()
+        unknown = [arg for arg in sys.argv[1:] if arg != "--check-only"]
+        if unknown:
+            raise RuntimeError(f"unknown argument(s): {' '.join(unknown)}")
+        main(check_only="--check-only" in sys.argv[1:])
     except Exception as exc:
         print(f"workflow_health: {exc}", file=sys.stderr)
         sys.exit(1)
