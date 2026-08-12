@@ -3,6 +3,7 @@
 const { sql } = require('@databases/sqlite');
 const { nodeCommand } = require('../lib/workflow-command');
 const { readBankAccounts, readReport, REPORTS } = require('../lib/quickbooks-api');
+const { selectPrimaryCalendarEntries } = require('../scripts/lib/ownerrez-occupancy');
 
 async function tableExists(db, name) {
   const [row] = await db.query(sql`SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name=${name}`);
@@ -187,22 +188,34 @@ const ownerrezOccupancyRead = evidenceReadDefinition({
   validate: validateDateRange,
   async collect({ input, services }) {
     if (typeof services.runCommand !== 'function') throw new Error('workflow command service is unavailable');
-    const args = [];
-    if (input.start) args.push('--start', input.start);
-    if (input.end) args.push('--end', input.end);
-    args.push('--json');
+    const start = input.start || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const end = input.end || (() => {
+      const parsed = new Date(`${start}T12:00:00Z`);
+      parsed.setUTCDate(parsed.getUTCDate() + 28);
+      return parsed.toISOString().slice(0, 10);
+    })();
+    const args = ['--start', start, '--end', end, '--json'];
     const result = await services.runCommand(nodeCommand('crm/scripts/ownerrez-full-occupancy.js', args));
     let records;
     try { records = JSON.parse(result.stdout); } catch { records = null; }
     if (!Array.isArray(records)) throw new Error('OwnerRez occupancy query returned no machine-readable records');
+    const primaryCalendarEntries = selectPrimaryCalendarEntries(records, { asOf: start });
+    const nextCalendarEntry = primaryCalendarEntries[0] || null;
     return {
       source: 'ownerrez.live_occupancy_api',
-      sourceRef: `${input.start || 'today'}:${input.end || 'default'}`,
+      sourceRef: `${start}:${end}`,
       expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
       payload: {
         authority: 'OwnerRez',
-        window: { start: input.start || null, end: input.end || null },
+        window: { start, end },
         activeOccupancyRecords: records.length,
+        primaryCalendarEntryCount: primaryCalendarEntries.length,
+        nextCalendarEntry,
+        calendarSemantics: {
+          primaryEntryRule: 'Earliest active record on or after window.start whose type is not linked_availability.',
+          manualBlockRule: 'OwnerRez type=block is a manual calendar encoding and does not prove owner use; titled blocks may be guest stays or events.',
+          linkedAvailabilityRule: 'linked_availability records are derived occupancy copies and are not separate arrivals.',
+        },
         records,
       },
     };

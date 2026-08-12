@@ -47,6 +47,12 @@ node crm/scripts/ownerrez-full-occupancy.js --start 2026-08-10 --end 2026-09-07 
 The Monday `#reservations` job uses this same query through
 `crm/scripts/ownerrez-weekly-calendar.js --dry-run`.
 
+For “next booking/reservation/arrival,” use the earliest primary calendar
+entry rather than filtering to `type=booking`. OwnerRez uses `type=block` for
+some manually entered guest stays and events, so that field alone is not proof
+of owner use. `linked_availability` records are derived occupancy copies and
+are not separate arrivals.
+
 ## Squarespace
 
 The reviewed site-wide injection is `squarespace-injection-v6.html`. It loads the versioned Squarespace tracker, preserves UTMs, records contact intent, captures successful form submissions, and adds the WhatsApp attribution reference.

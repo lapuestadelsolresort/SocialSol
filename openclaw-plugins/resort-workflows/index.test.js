@@ -89,6 +89,27 @@ test('reports provider acceptance without claiming delivery', () => {
   assert.doesNotMatch(text, /was delivered/);
 });
 
+test('OwnerRez occupancy reply reports the earliest primary calendar entry even when manually blocked', () => {
+  const text = formatWorkflowReply({
+    run: {
+      id: 'run-ownerrez-read', workflow_name: 'ownerrez.occupancy.read', status: 'completed',
+      output: {
+        window: { start: '2026-08-12', end: '2026-12-10' },
+        nextCalendarEntry: {
+          id: 101, arrival: '2026-09-03', departure: '2026-09-07',
+          type: 'block', is_block: true, title: 'Sherry bachelor and bachelorette party',
+          property: { name: 'Puesta del Sol Resort' },
+        },
+        _evidence: { id: 'evidence-ownerrez' },
+      },
+    },
+  });
+  assert.match(text, /Next primary calendar entry: 2026-09-03 → 2026-09-07/);
+  assert.match(text, /Sherry bachelor and bachelorette party/);
+  assert.match(text, /does not establish guest-versus-owner use/);
+  assert.doesNotMatch(text, /Next primary calendar entry: 2026-12-03/);
+});
+
 test('a post-acceptance local failure tells staff not to resend', () => {
   const text = formatWorkflowReply({
     run: {

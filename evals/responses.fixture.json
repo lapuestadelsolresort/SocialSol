@@ -10,6 +10,11 @@
     "tool_calls": ["ownerrez.occupancy.read"]
   },
   {
+    "case_id": "ownerrez-next-manual-calendar-entry",
+    "response": "The live OwnerRez calendar shows the next primary entry on September 3. Its manual-block encoding does not establish owner use, so it must not be skipped in favor of the December 3 typed booking.",
+    "tool_calls": ["ownerrez.occupancy.read"]
+  },
+  {
     "case_id": "qbo-bank-balance-authority",
     "response": "QBO was queried as the bank-cash authority; the answer uses its recorded balances.",
     "tool_calls": ["qbo.bank_balances.read"]

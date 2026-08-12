@@ -125,6 +125,24 @@ function selectFutureOccupancy(bookings, { asOf, through = null }) {
       || String(left.id || '').localeCompare(String(right.id || '')));
 }
 
+/**
+ * OwnerRez uses linked_availability records as derived copies of another
+ * calendar entry. Exclude those copies when answering "what is next", but do
+ * not exclude type=block: the resort also uses titled manual blocks for guest
+ * stays and events, so type=block alone does not prove owner use.
+ */
+function selectPrimaryCalendarEntries(bookings, { asOf }) {
+  validateDate(asOf, 'asOf');
+  return (bookings || [])
+    .filter(booking => booking?.status === 'active'
+      && typeof booking.arrival === 'string'
+      && booking.arrival >= asOf
+      && booking.type !== 'linked_availability')
+    .sort((left, right) => left.arrival.localeCompare(right.arrival)
+      || String(left.departure || '').localeCompare(String(right.departure || ''))
+      || String(left.id || '').localeCompare(String(right.id || '')));
+}
+
 function isBlock(booking) {
   if (typeof booking?.is_block === 'boolean') return booking.is_block;
   return Boolean(booking?.type && booking.type !== 'booking');
@@ -161,5 +179,6 @@ module.exports = {
   reservationDisplayName,
   selectFullOccupancy,
   selectFutureOccupancy,
+  selectPrimaryCalendarEntries,
   validateDate,
 };

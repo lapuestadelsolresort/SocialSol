@@ -67,3 +67,27 @@ test('narrow live workflow cutovers remove the shadow-only prompt for their owni
     else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;
   }
 });
+
+test('reservations prompt requires live OwnerRez reads and preserves titled manual entries', () => {
+  const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
+  process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';
+  try {
+    const patch = render({
+      policy: {
+        shadow_mode: false,
+        channels: {
+          CRESERVATIONS: { name: 'reservations', capabilities: ['ownerrez.read'] },
+        },
+      },
+      currentConfig: { channels: { slack: { accounts: { 'test-account': {} } } } },
+    });
+    const prompt = patch.channels.slack.accounts['test-account'].channels.CRESERVATIONS.systemPrompt;
+    assert.match(prompt, /call ownerrez\.occupancy\.read/);
+    assert.match(prompt, /use nextCalendarEntry/);
+    assert.match(prompt, /not proof of owner use/);
+    assert.match(prompt, /Never answer mutable booking facts from CRM rows, memory/);
+  } finally {
+    if (previousAccount === undefined) delete process.env.OPENCLAW_SLACK_ACCOUNT;
+    else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;
+  }
+});

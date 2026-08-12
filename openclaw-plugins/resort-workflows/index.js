@@ -198,6 +198,26 @@ export function formatWorkflowReply(payload) {
       `Workflow: ${run.id}${output.effectId ? ` · Effect: ${output.effectId}` : ''}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
     ].join('\n');
   }
+  if (run.workflow_name === 'ownerrez.occupancy.read') {
+    const output = run.output || {};
+    const next = output.nextCalendarEntry || null;
+    const evidence = output._evidence?.id ? `Evidence: ${output._evidence.id}` : null;
+    const lines = [
+      `OwnerRez live calendar queried for ${output.window?.start || 'the requested start'} through ${output.window?.end || 'the requested end'}.`,
+    ];
+    if (next) {
+      const label = next.title || next.name || next.guest_name || `OwnerRez record ${next.id || 'unknown'}`;
+      const property = next.property?.name || `property ${next.property_id || 'unknown'}`;
+      lines.push(`Next primary calendar entry: ${next.arrival} → ${next.departure} — ${label}, ${property}.`);
+      if (next.type === 'block' || next.is_block === true) {
+        lines.push('OwnerRez encodes this as a manual block. That encoding does not establish guest-versus-owner use, so do not skip it when answering the next booking or reservation.');
+      }
+    } else {
+      lines.push('No primary calendar entry starts inside this window; widen the live OwnerRez date range before claiming there is no upcoming booking.');
+    }
+    lines.push(`Workflow: ${run.id}${evidence ? ` · ${evidence}` : ''}`);
+    return lines.join('\n');
+  }
   const output = run.output || {};
   const artifacts = [
     output.effectId ? `Effect: ${output.effectId}` : null,
