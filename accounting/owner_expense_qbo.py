@@ -181,6 +181,8 @@ def verify_journal_entry(
     amount_usd: float,
     expense_account_id: str,
     liability_account_id: str,
+    expected_source_reference: Optional[str] = None,
+    require_receipt_marker: bool = True,
 ) -> Dict:
     if str(entry.get('Id')) != str(qbo_id):
         raise ValueError('QBO JournalEntry id readback mismatch')
@@ -192,8 +194,20 @@ def verify_journal_entry(
     }
     if not expected.issubset(line_signature(entry)):
         raise ValueError('QBO JournalEntry account/amount readback mismatch')
-    if f"SocialSol owner expense receipt {receipt_id}" not in str(entry.get('PrivateNote') or ''):
+    private_note = str(entry.get('PrivateNote') or '')
+    receipt_marker_verified = f"SocialSol owner expense receipt {receipt_id}" in private_note
+    source_text = ' | '.join([
+        private_note,
+        *(str(line.get('Description') or '') for line in entry.get('Line', [])),
+    ])
+    source_reference_verified = bool(
+        expected_source_reference
+        and str(expected_source_reference).strip() in source_text
+    )
+    if require_receipt_marker and not receipt_marker_verified:
         raise ValueError('QBO JournalEntry receipt marker readback mismatch')
+    if not require_receipt_marker and not source_reference_verified:
+        raise ValueError('QBO JournalEntry source reference readback mismatch')
     return {
         'verified_by_readback': True,
         'qbo_id': str(qbo_id),
@@ -201,6 +215,8 @@ def verify_journal_entry(
         'amount_usd': round(amount_usd, 2),
         'expense_account_id': str(expense_account_id),
         'liability_account_id': str(liability_account_id),
+        'receipt_marker_verified': receipt_marker_verified,
+        'source_reference_verified': source_reference_verified,
     }
 
 
@@ -213,6 +229,8 @@ def verify_repayment_purchase(
     amount_usd: float,
     liability_account_id: str,
     bank_account_id: str,
+    expected_source_reference: Optional[str] = None,
+    require_receipt_marker: bool = True,
 ) -> Dict:
     if str(purchase.get('Id')) != str(qbo_id):
         raise ValueError('QBO Purchase id readback mismatch')
@@ -229,8 +247,20 @@ def verify_repayment_purchase(
         lines.append((account_id, round(float(line.get('Amount') or 0), 2)))
     if (str(liability_account_id), round(amount_usd, 2)) not in lines:
         raise ValueError('QBO Purchase liability line readback mismatch')
-    if f"SocialSol owner repayment receipt {receipt_id}" not in str(purchase.get('PrivateNote') or ''):
+    private_note = str(purchase.get('PrivateNote') or '')
+    receipt_marker_verified = f"SocialSol owner repayment receipt {receipt_id}" in private_note
+    source_text = ' | '.join([
+        private_note,
+        *(str(line.get('Description') or '') for line in purchase.get('Line', [])),
+    ])
+    source_reference_verified = bool(
+        expected_source_reference
+        and str(expected_source_reference).strip() in source_text
+    )
+    if require_receipt_marker and not receipt_marker_verified:
         raise ValueError('QBO Purchase receipt marker readback mismatch')
+    if not require_receipt_marker and not source_reference_verified:
+        raise ValueError('QBO Purchase source reference readback mismatch')
     return {
         'verified_by_readback': True,
         'qbo_id': str(qbo_id),
@@ -238,6 +268,8 @@ def verify_repayment_purchase(
         'amount_usd': round(amount_usd, 2),
         'liability_account_id': str(liability_account_id),
         'bank_account_id': str(bank_account_id),
+        'receipt_marker_verified': receipt_marker_verified,
+        'source_reference_verified': source_reference_verified,
     }
 
 
@@ -333,6 +365,8 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument('--qbo-id')
     cli.add_argument('--expected-amount-usd', type=float)
     cli.add_argument('--expected-fx-rate', type=float)
+    cli.add_argument('--expected-source-reference')
+    cli.add_argument('--reconcile-existing', action='store_true')
     cli.add_argument('--verify-only', action='store_true')
     cli.add_argument('--verify-accounts', action='store_true')
     cli.add_argument('--live', action='store_true')
@@ -383,6 +417,11 @@ def main(argv=None) -> Dict:
     else:
         amount_usd, fx_rate = amount_in_home_currency(amount, currency, txn_date)
     request_id = request_id_for_receipt(receipt_id, args.transaction_kind)
+    if args.reconcile_existing:
+        if not args.verify_only:
+            raise ValueError('--reconcile-existing requires --verify-only')
+        if not str(args.expected_source_reference or '').strip():
+            raise ValueError('--expected-source-reference is required for reconciliation')
 
     accounts = verify_accounts(
         client,
@@ -405,12 +444,16 @@ def main(argv=None) -> Dict:
             verified = verify_journal_entry(
                 client.read_entity('journalentry', qbo_id),
                 expense_account_id=expense_account_id,
+                expected_source_reference=args.expected_source_reference,
+                require_receipt_marker=not args.reconcile_existing,
                 **expected,
             )
         else:
             verified = verify_repayment_purchase(
                 client.read_entity('purchase', qbo_id),
                 bank_account_id=bank_account_id,
+                expected_source_reference=args.expected_source_reference,
+                require_receipt_marker=not args.reconcile_existing,
                 **expected,
             )
         return {

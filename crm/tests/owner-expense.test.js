@@ -101,6 +101,7 @@ test('registry exposes only the guarded owner-expense workflow family', () => {
   assert.equal(definitions.get('receipt.owner_expense.ingest').capability, 'qbo.owner_expense.write');
   assert.deepEqual(definitions.get('receipt.owner_expense.process').allowed_triggers, ['workflow']);
   assert.deepEqual(definitions.get('receipt.owner_expense.confirm').allowed_triggers, ['slack_receipt_confirm_command']);
+  assert.deepEqual(definitions.get('receipt.owner_expense.reconcile').allowed_triggers, ['admin_reconciliation']);
 });
 
 test('high-confidence owner-paid receipt debits expense and credits owner liability after QBO readback', async () => {
@@ -212,6 +213,75 @@ test('explicit receipt confirmation updates the same receipt and queues one post
     const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${ingestRun.output.receiptId}`);
     assert.equal(receipt.status, 'posted');
     assert.equal(receipt.qbo_entity_id, 'JE-9002');
+  });
+});
+
+test('admin reconciliation adopts one verified existing QBO journal without creating another', async () => {
+  await withOwnerDb(async db => {
+    const initialServices = {
+      fetchSlackReceipt: async () => source(),
+      extractOwnerExpense: async () => extraction({
+        category_key: null, confidence: 0.7, review_reason: 'Category unclear',
+      }),
+      runCommand: async () => { throw new Error('must not post before reconciliation'); },
+    };
+    const ingestRun = await ingest(db, initialServices, 'reconcile-existing');
+    await executeGraph(db, getDefinition('receipt.owner_expense.process'), ingestRun.output.processRunId, initialServices);
+    const commands = [];
+    const reconcileRun = await startGraph(db, getDefinition('receipt.owner_expense.reconcile'), {
+      idempotencyKey: 'admin:receipt:reconcile-existing:JE-2472',
+      triggerType: 'admin_reconciliation', triggerRef: 'qbo:JE-2472',
+      channelId: CHANNEL, actorUserId: null,
+      input: {
+        receiptId: ingestRun.output.receiptId,
+        qboId: 'JE-2472', transactionKind: 'owner_paid_expense',
+        transactionDate: '2026-08-06', currency: 'MXN', amount: 4400,
+        amountUsd: 255.37, fxRate: 17.23, categoryKey: 'maintenance',
+        vendor: 'Fidencio Lopez', description: 'Maintenance labor - 4 days',
+        sourceReference: '0670449961',
+      },
+    }, {
+      runCommand: async command => {
+        commands.push(command);
+        return { exitCode: 0, stderr: '', stdout: JSON.stringify({
+          status: 'VERIFIED', verified_by_readback: true,
+          qbo_id: 'JE-2472', qbo_entity_type: 'JournalEntry', amount_usd: 255.37,
+          fx_rate: 17.23, expense_account_id: '5100', liability_account_id: '2100',
+          receipt_marker_verified: false, source_reference_verified: true,
+        }) };
+      },
+    });
+    assert.equal(reconcileRun.status, 'completed', reconcileRun.error_message);
+    assert.equal(reconcileRun.output.status, 'posted');
+    assert.equal(reconcileRun.output.reconciledExisting, true);
+    assert.equal(commands.length, 1);
+    assert.ok(commands[0].args.includes('--verify-only'));
+    assert.ok(commands[0].args.includes('--reconcile-existing'));
+    assert.ok(commands[0].args.includes('--expected-source-reference'));
+    assert.equal(commands[0].args.includes('--live'), false);
+
+    const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${ingestRun.output.receiptId}`);
+    assert.equal(receipt.status, 'posted');
+    assert.equal(receipt.qbo_entity_type, 'JournalEntry');
+    assert.equal(receipt.qbo_entity_id, 'JE-2472');
+    assert.equal(receipt.category_key, 'maintenance');
+    assert.equal(receipt.category_name, 'Maintenance');
+    assert.equal(receipt.amount_usd, 255.37);
+    assert.equal(receipt.fx_rate, 17.23);
+    assert.equal(receipt.workflow_run_id, reconcileRun.id);
+    const reconciliation = JSON.parse(receipt.extraction_json).reconciliation;
+    assert.equal(reconciliation.qboId, 'JE-2472');
+    assert.equal(reconciliation.sourceReference, '0670449961');
+
+    const [effect] = await db.query(sql`SELECT * FROM workflow_effects WHERE run_id=${reconcileRun.id}`);
+    assert.equal(effect.status, 'verified_by_readback');
+    assert.equal(effect.provider_ref, 'JE-2472');
+    assert.match(effect.operation, /reconcile_existing_journal_entry/);
+    const [evidence] = await db.query(sql`SELECT * FROM workflow_evidence WHERE run_id=${reconcileRun.id}`);
+    assert.match(evidence.source, /reconciliation_readback/);
+    assert.equal(evidence.source_ref, 'JE-2472');
+    const [outbox] = await db.query(sql`SELECT payload_json FROM workflow_outbox WHERE run_id=${reconcileRun.id}`);
+    assert.match(JSON.parse(outbox.payload_json).message, /no new QBO transaction was created/);
   });
 });
 
