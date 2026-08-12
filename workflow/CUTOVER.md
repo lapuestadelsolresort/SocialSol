@@ -120,6 +120,28 @@ that retires `/api/meta-dm/reply`. Confirm an explicit `!dm` records a single
 provider message ID and reports only acceptance; ordinary model prose must not
 invoke the workflow.
 
+### Paid-Meta autonomy canary
+
+After the normal release deploy, run `npm run configure:social-autonomy` first
+and review its dry-run summary. The production cutover is one guarded command:
+
+```bash
+npm run cutover:social-autonomy
+```
+
+It backs up and updates the ignored workflow policy, merges the OpenClaw shadow
+configuration, replaces the direct daily report with `marketing.report.daily`,
+installs the graph-owned `meta.audience.sync` schedule, retires the stale
+pipeline validator, and restarts the gateway. LaunchAgent and policy backups
+are retained for rollback. The command does not report success until the daily
+report and audience-sync canaries complete as durable graph runs. Before
+accepting an autonomous campaign action,
+confirm a fresh `marketing.snapshot.read` covers at least three completed days,
+tracking is healthy, the live budget still equals the evidence, and the target
+has a committed campaign brief. A one-day report, missing brief, changed live
+budget, expired evidence, or prior autonomous mutation within 24 hours must
+fail before provider dispatch.
+
 ## 4. Rollback
 
 Stop the new graph producer, restore `shadow_mode: true`, re-render and merge the

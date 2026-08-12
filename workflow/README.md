@@ -69,6 +69,22 @@ flowchart LR
 - Meta DMs: the former loopback HTTP sender is retired. Instagram/Facebook
   replies use `!dm <dm-id> <message>` in `#social-sol`, a command-only durable
   workflow, and provider acceptance is never presented as delivery.
+- Paid media: `marketing.snapshot.read` records live Meta delivery, exact CRM
+  conversions, tracking health, and the only bounded actions available to
+  autonomy. Evidence must cover at least three completed local days; daily
+  one-day reports are informative only. `meta.campaign.autonomous` accepts an
+  exact unexpired pause or budget decrease, never an increase, and permits one autonomous campaign
+  mutation per 24 hours. Paused provisioning, activation, increases, and
+  landing variant changes use `marketing.change.propose` followed by the same
+  authorized user issuing the 15-minute `!meta confirm` command. That path also
+  permits a human-requested pause when bounded evidence is not the reason for
+  the change. The immutable request, committed brief, provider preflight,
+  effect, and readback all have
+  durable hashes/evidence. `marketing.report.daily` and `meta.audience.sync`
+  are graph-owned scheduled jobs whose Slack notifications use the outbox;
+  audience state and a hash-verified campaign-registry recovery snapshot are
+  stored inside the encrypted-backup CRM database. Campaigns without a
+  committed brief fail closed for autonomous mutations.
 - Reservations: authoritative OwnerRez reads and a fixed 34-operation mutation
   catalog. Every write requires a durable proposal, exact same-user Slack
   confirmation within 15 minutes, a fresh precondition check, execute-once
@@ -122,3 +138,5 @@ or a manual review is open. Provider-acceptance and callback-optional effects
 do not create permanent false alarms after successful acceptance. Missing
 schema migrations, Slack alert configuration, runtime processes, or a running
 process whose loaded source predates checkout edits are also unhealthy.
+Live paid-media report and audience-sync graphs must each have a completed run
+within 30 hours, and their LaunchAgents must remain loaded.

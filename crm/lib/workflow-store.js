@@ -74,7 +74,9 @@ async function createRun(db, {
   const inputHash = sha256(inputJson);
   const policySnapshotJson = policySnapshot === null ? null : stableJson(policySnapshot);
   const policySnapshotHash = policySnapshotJson === null ? null : sha256(policySnapshotJson);
-  const serializationKey = definition.serializeMutations === true ? definition.name : null;
+  const serializationKey = definition.serializeMutations === true
+    ? String(definition.serializationKey || definition.name)
+    : null;
 
   async function existingRun(row) {
     const run = await getRun(db, row.id);

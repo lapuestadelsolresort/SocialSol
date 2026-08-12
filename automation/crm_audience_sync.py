@@ -12,8 +12,9 @@ created once, then updated incrementally (new emails added, removed emails
 purged). A Lookalike can be built from either seed audience once it reaches
 sufficient size (Meta recommends 1,000+, but smaller lists still work).
 
-Designed to run daily via LaunchAgent alongside meta_daily_insights.py.
-Reports its activity to #social-sol for tracking.
+The production schedule runs this behind ``meta.audience.sync`` so provider
+effects, readback, and Slack notification are durable. Direct execution remains
+available for an explicit dry run or emergency operator recovery.
 
 Usage:
     python3 crm_audience_sync.py [--dry-run] [--verbose]
@@ -26,20 +27,19 @@ import os
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-from job_health import get_status, record
+from job_health import record
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DB_PATH = os.environ.get("DB_PATH", os.path.join(ROOT, "crm", "data", "crm.db"))
 SECRETS_DIR = os.environ.get("SOCIALSOL_SECRETS_DIR", os.path.join(ROOT, "secrets"))
 SECRETS = os.path.join(SECRETS_DIR, "meta.json")
-STATE_PATH = os.path.join(ROOT, "memory", "crm-audience-state.json")
+LEGACY_STATE_PATH = os.path.join(ROOT, "memory", "crm-audience-state.json")
 CHANNEL = os.environ.get("RESORT_SOCIAL_CHANNEL", "")
 OPENCLAW = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
 SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "")
@@ -52,14 +52,19 @@ AUDIENCES = {
         "name": "LPDS — CRM Past Guests & Inquiries",
         "description": "Emails from leads + OwnerRez guest contacts (Airbnb, VRBO, direct)",
         "query": """
-            SELECT DISTINCT LOWER(TRIM(email)) FROM (
+            WITH candidates(email) AS (
               SELECT email FROM leads
               WHERE email IS NOT NULL AND email != '' AND TRIM(email) != ''
               UNION
               SELECT email FROM contacts
               WHERE email IS NOT NULL AND email != '' AND TRIM(email) != ''
                 AND ownerrez_guest_id IS NOT NULL
-                AND do_not_contact = 0
+                AND COALESCE(do_not_contact, 0) = 0
+            )
+            SELECT DISTINCT LOWER(TRIM(c.email))
+            FROM candidates c
+            WHERE NOT EXISTS (
+              SELECT 1 FROM suppressions s WHERE LOWER(TRIM(s.email))=LOWER(TRIM(c.email))
             )
         """,
     },
@@ -68,10 +73,29 @@ AUDIENCES = {
         "description": "Emails from CRM contacts table — outbound prospects (planners, venues)",
         "query": """
             SELECT DISTINCT LOWER(TRIM(email))
-            FROM contacts
-            WHERE email IS NOT NULL AND email != ''
-              AND TRIM(email) != ''
-              AND status NOT IN ('dead')
+            FROM contacts c
+            WHERE c.email IS NOT NULL AND c.email != ''
+              AND TRIM(c.email) != ''
+              AND COALESCE(c.status, 'new') != 'dead'
+              AND COALESCE(c.do_not_contact, 0) = 0
+              AND c.ownerrez_guest_id IS NULL
+              AND c.airbnb_account_id IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM suppressions s
+                WHERE LOWER(TRIM(s.email))=LOWER(TRIM(c.email))
+              )
+              AND (
+                c.relationship_type IN ('prospect_planner', 'prospect_b2b')
+                OR c.source_query LIKE '%_wedding_planner'
+                OR c.source_query LIKE '%_houston_wedding_planner'
+                OR EXISTS (
+                  SELECT 1
+                  FROM campaign_contacts cc
+                  JOIN outreach_campaigns oc ON oc.id=cc.campaign_id
+                  WHERE cc.contact_id=c.id
+                    AND oc.persona IN ('wedding_planner', 'event_planner')
+                )
+              )
         """,
     },
 }
@@ -91,10 +115,9 @@ def sha256_email(email: str) -> str:
 
 
 def api_get(endpoint, token, **params):
-    params["access_token"] = token
     qs = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
     url = f"{G}/{endpoint}?{qs}"
-    req = urllib.request.Request(url)
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
@@ -106,10 +129,11 @@ def api_get(endpoint, token, **params):
 
 
 def api_post(endpoint, token, data: dict):
-    data["access_token"] = token
     body = urllib.parse.urlencode(data, quote_via=urllib.parse.quote).encode("utf-8")
     url = f"{G}/{endpoint}"
-    req = urllib.request.Request(url, data=body, method="POST")
+    req = urllib.request.Request(
+        url, data=body, method="POST", headers={"Authorization": f"Bearer {token}"}
+    )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
@@ -123,27 +147,89 @@ def api_post(endpoint, token, data: dict):
     return payload
 
 
+def ensure_state_table(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS marketing_audience_state (
+        audience_key TEXT PRIMARY KEY,
+        audience_id TEXT NOT NULL,
+        audience_name TEXT NOT NULL,
+        email_count INTEGER NOT NULL DEFAULT 0,
+        hashed_emails_json TEXT NOT NULL DEFAULT '[]',
+        provider_readback_json TEXT,
+        last_workflow_run_id TEXT,
+        last_synced_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )""")
+
+
 def load_state() -> dict:
+    con = sqlite3.connect(DB_PATH, timeout=20)
+    con.row_factory = sqlite3.Row
     try:
-        with open(STATE_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def save_state(state: dict):
-    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".crm-audience-", dir=os.path.dirname(STATE_PATH))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(state, fh, indent=2, sort_keys=True)
-            fh.write("\n")
-        os.replace(tmp, STATE_PATH)
+        ensure_state_table(con)
+        rows = con.execute("SELECT * FROM marketing_audience_state").fetchall()
+        state = {
+            row["audience_key"]: {
+                "audience_id": row["audience_id"],
+                "audience_name": row["audience_name"],
+                "email_count": row["email_count"],
+                "hashed_emails": json.loads(row["hashed_emails_json"] or "[]"),
+                "last_synced_at": row["last_synced_at"],
+            }
+            for row in rows
+        }
     finally:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
+        con.close()
+    if state:
+        return state
+    try:
+        with open(LEGACY_STATE_PATH, "r", encoding="utf-8") as fh:
+            legacy = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        legacy = {}
+    migrated = {
+        key: value for key, value in legacy.items()
+        if key in AUDIENCES and isinstance(value, dict) and value.get("audience_id")
+    }
+    if migrated:
+        save_state(migrated)
+    return migrated
+
+
+def save_state(state: dict, provider_readbacks=None):
+    con = sqlite3.connect(DB_PATH, timeout=20)
+    try:
+        con.execute("PRAGMA busy_timeout=20000")
+        ensure_state_table(con)
+        workflow_run_id = os.environ.get("WORKFLOW_RUN_ID")
+        for key, value in state.items():
+            if not value.get("audience_id"):
+                continue
+            con.execute("""INSERT INTO marketing_audience_state (
+                audience_key, audience_id, audience_name, email_count, hashed_emails_json,
+                provider_readback_json, last_workflow_run_id, last_synced_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+              ON CONFLICT(audience_key) DO UPDATE SET
+                audience_id=excluded.audience_id,
+                audience_name=excluded.audience_name,
+                email_count=excluded.email_count,
+                hashed_emails_json=excluded.hashed_emails_json,
+                provider_readback_json=COALESCE(excluded.provider_readback_json, marketing_audience_state.provider_readback_json),
+                last_workflow_run_id=COALESCE(excluded.last_workflow_run_id, marketing_audience_state.last_workflow_run_id),
+                last_synced_at=excluded.last_synced_at,
+                updated_at=datetime('now')""", (
+                key,
+                value["audience_id"],
+                value.get("audience_name") or AUDIENCES[key]["name"],
+                int(value.get("email_count") or 0),
+                json.dumps(value.get("hashed_emails") or [], separators=(",", ":")),
+                json.dumps((provider_readbacks or {}).get(key), separators=(",", ":"))
+                if (provider_readbacks or {}).get(key) else None,
+                workflow_run_id,
+                value.get("last_synced_at") or datetime.now(timezone.utc).isoformat(),
+            ))
+        con.commit()
+    finally:
+        con.close()
 
 
 def get_crm_emails(query: str) -> set:
@@ -210,10 +296,12 @@ def remove_audience_users(audience_id: str, token: str, hashed_emails: list[str]
         "data": [[h] for h in hashed_emails],
     }
     # DELETE method with payload
-    data = {"access_token": token, "payload": json.dumps(payload)}
+    data = {"payload": json.dumps(payload)}
     body = urllib.parse.urlencode(data, quote_via=urllib.parse.quote).encode("utf-8")
     url = f"{G}/{audience_id}/users"
-    req = urllib.request.Request(url, data=body, method="DELETE")
+    req = urllib.request.Request(
+        url, data=body, method="DELETE", headers={"Authorization": f"Bearer {token}"}
+    )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -273,6 +361,11 @@ def sync_audience(key: str, config: dict, act: str, token: str,
 
     if not audience_id:
         audience_id = find_existing_audience(act, token, name)
+        if audience_id and not prev:
+            raise RuntimeError(
+                f"found existing audience {audience_id} without a membership ledger; "
+                "refusing an additive-only sync that could retain suppressed contacts"
+            )
 
     action = "updated"
     if not audience_id:
@@ -302,10 +395,13 @@ def sync_audience(key: str, config: dict, act: str, token: str,
                 "emails": len(emails), "action": f"would_update (+{len(added)}/-{len(removed)})"}
 
     # 5. Incremental sync: add new, remove gone
+    receipts = {}
     if removed:
-        remove_audience_users(audience_id, token, sorted(removed))
+        receipts["remove"] = remove_audience_users(audience_id, token, sorted(removed))
     if added or action == "created":
-        upload_audience_users(audience_id, token, hashed if action == "created" else sorted(added))
+        receipts["add"] = upload_audience_users(
+            audience_id, token, hashed if action == "created" else sorted(added)
+        )
     if verbose:
         print(f"  {key}: synced {len(hashed)} users (+{len(added)}/-{len(removed)})")
 
@@ -320,19 +416,59 @@ def sync_audience(key: str, config: dict, act: str, token: str,
 
     return {"key": key, "name": name, "audience_id": audience_id,
             "emails": len(emails), "action": action,
-            "added": len(added), "removed": len(removed)}
+            "added": len(added), "removed": len(removed),
+            "provider_receipts": receipts}
+
+
+def verify_state(token):
+    state = load_state()
+    if not state:
+        raise RuntimeError("audience state is empty")
+    readbacks = {}
+    for key, value in state.items():
+        audience_id = value.get("audience_id")
+        if not audience_id:
+            raise RuntimeError(f"audience state is missing an id for {key}")
+        provider = api_get(audience_id, token, fields="id,name")
+        if str(provider.get("id") or "") != str(audience_id):
+            raise RuntimeError(f"Meta readback did not return audience {audience_id}")
+        if provider.get("name") != AUDIENCES[key]["name"]:
+            raise RuntimeError(f"Meta audience name drift for {key}")
+        readbacks[key] = provider
+    save_state(state, provider_readbacks=readbacks)
+    return {
+        "verified": True,
+        "audiences": [
+            {
+                "key": key,
+                "audience_id": value["audience_id"],
+                "audience_name": value["audience_name"],
+                "email_count": value["email_count"],
+                "provider": readbacks[key],
+            }
+            for key, value in sorted(state.items())
+        ],
+    }
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--workflow-managed", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--verify", action="store_true")
     args = parser.parse_args()
 
     with open(SECRETS) as f:
         creds = json.load(f)
     token = creds["access_token"]
     act = creds["ad_account_act"]
+
+    if args.verify:
+        result = verify_state(token)
+        print(json.dumps(result, separators=(",", ":"), sort_keys=True))
+        return
 
     state = load_state()
     results = []
@@ -370,21 +506,30 @@ def main():
 
         lines.append("")
         lines.append("_These audiences are available for retargeting campaigns and Lookalike generation._")
-        post_slack("\n".join(lines), args.dry_run)
+        if not args.workflow_managed:
+            post_slack("\n".join(lines), args.dry_run)
 
-    if not args.dry_run:
+    if not args.dry_run and not args.workflow_managed:
         ok = all(r["action"] != "error" for r in results)
         detail = "; ".join(f"{r['key']}={r['action']}" for r in results)
         record(JOB_NAME, ok, detail)
 
-    if args.verbose or args.dry_run:
-        print(json.dumps(results, indent=2))
+    if args.workflow_managed and any(row["action"] == "error" for row in results):
+        raise RuntimeError("one or more audience mutations failed; inspect provider state before retry")
+    if args.verbose or args.dry_run or args.json or args.workflow_managed:
+        payload = {
+            "ok": all(row["action"] != "error" for row in results),
+            "results": results,
+            "changed": len(changes),
+        }
+        print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        record(JOB_NAME, False, str(exc)[:300])
+        if "--workflow-managed" not in sys.argv:
+            record(JOB_NAME, False, str(exc)[:300])
         print(f"crm_audience_sync: {exc}", file=sys.stderr)
         sys.exit(1)

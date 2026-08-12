@@ -48,8 +48,8 @@ business at sale.
 | CRM → Meta Custom Audience retargeting sync | Daily | `#social-sol` |
 | Inbound email scanner (Gmail) | Every 15 min | `#social-sol` |
 | Telmex bill reminder | Monthly | `#utility-payments` |
-| Daily campaign report | Daily | `#business-intel` |
-| Budget guardrails check | Continuous | `#business-intel` |
+| Durable paid-Meta snapshot/report | Daily + on demand | `#social-sol` |
+| Evidence-bound pause/budget-decrease guardrails | On demand; max once/campaign/24h | `#social-sol` |
 | Sender-domain warmup | Scheduled batches | `#prospector-paulina` |
 | Paulina preparation + send digest | Daily 8:30am PT (preparation weekdays) | `#prospector-paulina` |
 | Regina reengagement + send digest | Daily 7:30am PT | `#reengager-regina` |
@@ -96,6 +96,24 @@ business at sale.
 - Instagram/Facebook DM replies are likewise command-only: `!dm <dm-id>
   <message>` in `#social-sol`. The retired `/api/meta-dm/reply` endpoint cannot
   bypass the durable ledger.
+- Paid-Meta decisions begin with `marketing.snapshot.read`, which records live
+  Meta delivery, exact CRM conversion facts, tracking health, and any fixed
+  bounded actions as expiring evidence. Autonomous evidence requires at least
+  three completed local days; the one-day daily report cannot authorize a
+  spend mutation. `meta.campaign.autonomous` accepts only
+  an exact pause or budget decrease present in that healthy evidence, permits
+  at most one autonomous mutation per campaign per 24 hours, and requires
+  provider readback. New campaigns are provisioned paused; activation, budget
+  increases, and landing-variant changes require `marketing.change.propose`
+  followed within 15 minutes by the same authorized Slack user pasting the
+  emitted `!meta confirm <proposal-id> <acceptance-hash>` command. The command
+  binds the immutable request, committed campaign-brief hash, and preflight
+  snapshot. A human may also use that confirmation path for an unplanned pause;
+  only evidence-listed pauses may execute autonomously. Ambiguous Meta results
+  stop for manual review and are not replayed.
+  A live campaign without a matching committed brief remains reportable but is
+  excluded from autonomy. The ignored runtime registry and Custom Audience
+  membership ledgers have hashed recovery copies in the backed-up CRM database.
 - OwnerRez writes are additionally restricted to configured user IDs. A
   proposal records its exact fixed-catalog operation, request hash, reason,
   preflight snapshot, and 15-minute expiry. The same authorized Slack user must

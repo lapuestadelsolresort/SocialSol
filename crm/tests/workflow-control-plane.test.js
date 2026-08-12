@@ -51,6 +51,7 @@ test('workflow schema is additive and includes durable run/effect/outbox state',
     for (const expected of [
       'workflow_runs', 'workflow_steps', 'workflow_events', 'workflow_effects',
       'workflow_evidence', 'workflow_outbox', 'workflow_manual_reviews',
+      'marketing_change_requests', 'marketing_audience_state', 'marketing_campaign_registry',
     ]) {
       assert.equal(names.has(expected), true, expected);
     }

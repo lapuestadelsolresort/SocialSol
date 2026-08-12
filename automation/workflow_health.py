@@ -35,6 +35,12 @@ GRAPH_AGENTS = {
     "squarespace.crm.sync": "com.lapuestadelsolresort.graph-squarespace-sync",
     "social.publish_routine": "com.lapuestadelsolresort.graph-social-routine",
     "social.publish_due": "com.lapuestadelsolresort.graph-social-publish",
+    "marketing.report.daily": "com.lapuestadelsolresort.daily-report",
+    "meta.audience.sync": "com.lapuestadelsolresort.crm-audience-sync",
+}
+SCHEDULED_GRAPH_MAX_AGE = {
+    "marketing.report.daily": 30 * 60 * 60,
+    "meta.audience.sync": 30 * 60 * 60,
 }
 
 
@@ -55,6 +61,44 @@ def graph_agent_integrity(policy, run=subprocess.run):
         )
         missing += int(result.returncode != 0)
     return {"runtime_graph_agents_missing": missing, "runtime_policy_error": 0}
+
+
+def scheduled_graph_integrity(con, policy, now=None):
+    live = set(policy.get("live_workflows") or [])
+    current = now or datetime.now(timezone.utc)
+    metrics = {
+        "scheduled_graph_missing": 0,
+        "scheduled_graph_stale": 0,
+        "scheduled_graph_failed": 0,
+    }
+    for workflow, max_age_seconds in SCHEDULED_GRAPH_MAX_AGE.items():
+        if workflow not in live:
+            continue
+        completed = con.execute(
+            """SELECT updated_at FROM workflow_runs
+                 WHERE workflow_name=? AND status='completed'
+                 ORDER BY updated_at DESC LIMIT 1""",
+            (workflow,),
+        ).fetchone()
+        latest = con.execute(
+            """SELECT status, updated_at FROM workflow_runs
+                 WHERE workflow_name=? ORDER BY created_at DESC LIMIT 1""",
+            (workflow,),
+        ).fetchone()
+        if not completed:
+            metrics["scheduled_graph_missing"] += 1
+        else:
+            try:
+                stamp = datetime.fromisoformat(completed[0])
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                stale = (current - stamp.astimezone(timezone.utc)).total_seconds() > max_age_seconds
+            except (TypeError, ValueError):
+                stale = True
+            metrics["scheduled_graph_stale"] += int(stale)
+        if latest and latest[0] == "failed" and (not completed or latest[1] > completed[0]):
+            metrics["scheduled_graph_failed"] += 1
+    return metrics
 
 
 def runtime_integrity():
@@ -250,6 +294,8 @@ def hard_failure_count(metrics, alert_config_missing=0):
         metrics.get("runtime_git_wrong_branch", 0), metrics.get("runtime_git_dirty", 0),
         metrics.get("runtime_git_check_error", 0),
         metrics.get("runtime_graph_agents_missing", 0), metrics.get("runtime_policy_error", 0),
+        metrics.get("scheduled_graph_missing", 0), metrics.get("scheduled_graph_stale", 0),
+        metrics.get("scheduled_graph_failed", 0),
         metrics.get("schema_migration_required", 0), metrics.get("queued_runs_over_1m", 0),
         metrics.get("stalled_runs", 0), metrics.get("overdue_retries", 0), metrics.get("dead_outbox", 0),
         metrics.get("stale_outbox_leases", 0), metrics.get("stale_step_leases", 0),
@@ -266,9 +312,15 @@ def alert_configuration_missing(check_only, alert_channel=ALERT_CHANNEL, slack_a
 def main(check_only=False):
     if not DB_PATH.is_file():
         raise RuntimeError(f"CRM database missing: {DB_PATH}")
+    try:
+        policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        policy = None
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=20)
     try:
         metrics = inspect(con)
+        if policy is not None:
+            metrics.update(scheduled_graph_integrity(con, policy))
     finally:
         con.close()
     # An operator-side deployment check may not inherit the LaunchAgent's
@@ -279,7 +331,8 @@ def main(check_only=False):
     metrics.update(runtime_integrity())
     metrics.update(checkout_integrity())
     try:
-        policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+        if policy is None:
+            raise RuntimeError("workflow policy is unavailable")
         metrics.update(graph_agent_integrity(policy))
     except Exception:
         metrics.update({"runtime_graph_agents_missing": 0, "runtime_policy_error": 1})

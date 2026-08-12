@@ -12,12 +12,15 @@ from workflow_health import (
     incident_alert_active,
     inspect,
     notify_incident_once,
+    scheduled_graph_integrity,
     set_incident_alert_active,
 )
 
 
 SCHEMA = """
-CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, status TEXT, created_at TEXT, updated_at TEXT);
+CREATE TABLE workflow_runs (
+  id TEXT PRIMARY KEY, workflow_name TEXT, status TEXT, created_at TEXT, updated_at TEXT
+);
 CREATE TABLE workflow_steps (
   run_id TEXT, status TEXT, available_at TEXT, lease_expires_at TEXT
 );
@@ -156,6 +159,25 @@ class WorkflowHealthTests(unittest.TestCase):
         metrics = graph_agent_integrity(policy, run=fake_run)
         self.assertEqual(metrics["runtime_graph_agents_missing"], 1)
         self.assertGreater(hard_failure_count(metrics), 0)
+
+    def test_live_scheduled_graphs_require_a_recent_success(self):
+        con = self.database()
+        policy = {"live_workflows": ["marketing.report.daily", "meta.audience.sync"]}
+        missing = scheduled_graph_integrity(con, policy)
+        self.assertEqual(missing["scheduled_graph_missing"], 2)
+        self.assertGreater(hard_failure_count(missing), 0)
+        con.execute("""INSERT INTO workflow_runs
+            (id,workflow_name,status,created_at,updated_at)
+            VALUES ('report','marketing.report.daily','completed',datetime('now'),datetime('now'))""")
+        con.execute("""INSERT INTO workflow_runs
+            (id,workflow_name,status,created_at,updated_at)
+            VALUES ('audience','meta.audience.sync','completed',datetime('now'),datetime('now'))""")
+        healthy = scheduled_graph_integrity(con, policy)
+        self.assertEqual(healthy, {
+            "scheduled_graph_missing": 0,
+            "scheduled_graph_stale": 0,
+            "scheduled_graph_failed": 0,
+        })
 
 
 if __name__ == "__main__":
