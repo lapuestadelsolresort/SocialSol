@@ -11,7 +11,7 @@
  * Posts findings to #prospector-paulina via openclaw.
  *
  * Usage:
- *   node engagement-analysis.js [--dry-run]
+ *   node engagement-analysis.js [--dry-run] [--no-slack] [--json]
  */
 
 'use strict';
@@ -37,12 +37,22 @@ const STATE_PATH = path.join(SCRIPTS_DIR, 'iteration-state.json');
 const CONFIG_PATH = path.join(SCRIPTS_DIR, '..', 'config.json');
 const SLACK_CHANNEL = process.env.PROSPECTOR_SLACK_CHANNEL;
 const CAMPAIGN_SLUG = process.env.PAULINA_CAMPAIGN_SLUG || 'planner_partner_program_v1';
+const ARGS = process.argv.slice(2);
 const DRY_RUN = process.argv.includes('--dry-run');
+const NO_SLACK = process.argv.includes('--no-slack');
+const JSON_OUTPUT = process.argv.includes('--json');
+const WORKFLOW_RUN_ID = (() => {
+  const index = ARGS.indexOf('--workflow-run-id');
+  const supplied = index >= 0 ? ARGS[index + 1] : process.env.WORKFLOW_RUN_ID;
+  return typeof supplied === 'string' && /^[0-9a-f-]{36}$/i.test(supplied)
+    ? supplied
+    : null;
+})();
 
 const MODEL = 'claude-haiku-4-5';
 
 function log(...args) {
-  console.log('[engagement-analysis]', new Date().toISOString(), ...args);
+  process.stderr.write(`[engagement-analysis] ${new Date().toISOString()} ${args.join(' ')}\n`);
 }
 
 function loadState() {
@@ -63,11 +73,20 @@ function loadState() {
 }
 
 function saveState(state) {
-  fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+  const temporary = `${STATE_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
+  fs.renameSync(temporary, STATE_PATH);
+}
+
+function workflowReplay(state, workflowRunId) {
+  if (!workflowRunId) return null;
+  const prior = (state.hypotheses || [])
+    .find(entry => entry.workflow_run_id === workflowRunId);
+  return prior?.workflow_result ? { ...prior.workflow_result, replayed: true } : null;
 }
 
 function slackPost(msg) {
-  if (DRY_RUN) { console.log('[DRY-RUN] Slack:', msg); return; }
+  if (DRY_RUN || NO_SLACK) return;
   if (!SLACK_CHANNEL || !process.env.OPENCLAW_SLACK_ACCOUNT) {
     log('WARN: Slack post skipped; configure PROSPECTOR_SLACK_CHANNEL and OPENCLAW_SLACK_ACCOUNT');
     return;
@@ -232,6 +251,12 @@ async function main() {
   const db = createDB(DB_PATH);
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   const state = loadState();
+  const replay = workflowReplay(state, WORKFLOW_RUN_ID);
+  if (replay) {
+    await db.dispose();
+    if (JSON_OUTPUT) process.stdout.write(`${JSON.stringify(replay)}\n`);
+    return replay;
+  }
   state.day = (state.day || 0) + 1;
 
   log(`Starting engagement analysis (day ${state.day})`);
@@ -271,6 +296,7 @@ async function main() {
   const entry = {
     day: state.day,
     date: new Date().toISOString().split('T')[0],
+    workflow_run_id: WORKFLOW_RUN_ID,
     hypothesis: hypothesis.hypothesis,
     test: hypothesis.test,
     success_metric: hypothesis.success_metric,
@@ -289,12 +315,6 @@ async function main() {
     },
   };
   state.hypotheses = state.hypotheses || [];
-  state.hypotheses.push(entry);
-  state.current_hypothesis = entry;
-  if (hypothesis.composer_hint) {
-    state.active_composer_hint = hypothesis.composer_hint;
-  }
-  saveState(state);
 
   // Build Slack post — all numbers from the canonical report
   const replyDetails = recent.external_reply_details || [];
@@ -338,11 +358,62 @@ ${hypothesis.data_summary}
 *Test:* ${hypothesis.test}
 *Win condition:* ${hypothesis.success_metric}`;
 
+  const workflowResult = {
+    ok: true,
+    replayed: false,
+    dry_run: DRY_RUN,
+    workflow_run_id: WORKFLOW_RUN_ID,
+    day: entry.day,
+    date: entry.date,
+    recent: {
+      window_days: recent.window_days,
+      actual_sent: recent.actual_sent,
+      production_sent: recent.production_sent,
+      test_sent: recent.test_sent,
+      delivered: recent.delivered,
+      production_delivered: recent.production_delivered,
+      bounced: recent.bounced,
+      external_replies: recent.external_replies,
+      opens: recent.opens,
+      open_tracking_eligible_delivered: recent.open_tracking_eligible_delivered,
+      clicks: recent.clicks,
+    },
+    tracking: {
+      opens_available: tracking.opens_available,
+      clicks_available: tracking.clicks_available,
+    },
+    queue: queue ? {
+      remaining_contacts: queue.remaining_contacts,
+      verified_ready: queue.verified_ready,
+      verification_buffer_status: queue.verification_buffer_status,
+    } : null,
+    hypothesis: {
+      data_summary: hypothesis.data_summary,
+      hypothesis: hypothesis.hypothesis,
+      test: hypothesis.test,
+      success_metric: hypothesis.success_metric,
+      composer_hint: hypothesis.composer_hint,
+    },
+  };
+
+  entry.workflow_result = workflowResult;
+  if (!DRY_RUN) {
+    state.hypotheses.push(entry);
+    state.current_hypothesis = entry;
+    if (hypothesis.composer_hint) state.active_composer_hint = hypothesis.composer_hint;
+    saveState(state);
+  }
+
   slackPost(msg);
 
   await db.dispose();
   log('Done');
-  return hypothesis;
+  if (JSON_OUTPUT) process.stdout.write(`${JSON.stringify(workflowResult)}\n`);
+  return workflowResult;
 }
 
-main().catch(e => { console.error('FATAL:', e); process.exit(1); });
+if (require.main === module) {
+  main().catch(e => { console.error('FATAL:', e); process.exit(1); });
+}
+
+module.exports = { main, pullHypothesisSupplementary, workflowReplay };

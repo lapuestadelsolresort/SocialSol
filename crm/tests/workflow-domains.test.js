@@ -12,6 +12,7 @@ const { executeGraph, startGraph } = require('../lib/workflow-engine');
 const { ensureSchemaAsync } = require('../lib/workflow-schema');
 const { tokenMatches } = require('../routes/workflows');
 const { getDefinition, listDefinitions } = require('../workflows/registry');
+const { runVerifiedCommand } = require('../workflows/paulina-prepare');
 const { matchingPost } = require('../workflows/social-publish');
 
 async function withDb(run) {
@@ -56,7 +57,7 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
   for (const expected of [
     'whatsapp.reply', 'whatsapp.inbound.process', 'meta.dm.reply', 'receipt.ingest', 'receipt.annotate', 'receipt.reconcile',
     'social.content.upsert', 'social.content.publish', 'social.publish_routine',
-    'paulina.daily', 'paulina.performance.read', 'regina.daily', 'regina.campaign',
+    'paulina.daily', 'paulina.prepare_daily', 'paulina.performance.read', 'regina.daily', 'regina.campaign',
     'guest.reply.draft', 'crm.sync', 'crm.pipeline.read',
     'ownerrez.occupancy.read', 'squarespace.summary.read',
     'ownerrez.mutation.propose', 'ownerrez.mutation.confirm',
@@ -397,6 +398,146 @@ test('Paulina verified no-op runs do not post misleading Resend write notificati
       WHERE run_id=${run.id} AND topic='slack.notification'`);
     assert.equal(count, 0);
   });
+});
+
+test('Paulina preparation is a run-scoped graph with verified stage effects', async () => {
+  await withDb(async db => {
+    await db.query(sql`CREATE TABLE outreach_campaigns (
+      id INTEGER PRIMARY KEY, slug TEXT, status TEXT, persona TEXT
+    )`);
+    await db.query(sql`CREATE TABLE contacts (
+      id INTEGER PRIMARY KEY, email TEXT, email_status TEXT, do_not_contact INTEGER,
+      status TEXT, source_query TEXT
+    )`);
+    await db.query(sql`CREATE TABLE campaign_contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, campaign_id INTEGER, contact_id INTEGER,
+      attached_by TEXT, attached_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(campaign_id, contact_id)
+    )`);
+    await db.query(sql`CREATE TABLE suppressions (email TEXT)`);
+    await db.query(sql`CREATE TABLE outreach_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, campaign_id INTEGER,
+      workflow_run_id TEXT, status TEXT, sent_at TEXT
+    )`);
+    await db.query(sql`INSERT INTO outreach_campaigns (id, slug, status, persona)
+      VALUES (7, 'planner_partner_program_v1', 'active', 'wedding_planner')`);
+    await db.query(sql`INSERT INTO contacts
+      (id, email, email_status, do_not_contact, status, source_query)
+      VALUES (1, 'one@example.test', 'verified', 0, 'new', 'run_wedding_planner'),
+             (2, 'two@example.test', 'verified', 0, 'new', 'run_wedding_planner')`);
+
+    let commandCalls = 0;
+    const run = await startGraph(db, getDefinition('paulina.prepare_daily'), {
+      idempotencyKey: 'paulina-prepare-2026-08-12', triggerType: 'system', input: {},
+    }, {
+      now: '2026-08-12T15:30:00.000Z',
+      paulinaConfig: {
+        reporting: { active_campaign_slug: 'planner_partner_program_v1' },
+        email_verification: { queue_buffer_days: 2, max_per_daily_run: 25 },
+      },
+      paulinaState: { paused: false },
+      runCommand: async command => {
+        commandCalls += 1;
+        const script = path.basename(command.args[0]);
+        if (script === 'engagement-analysis.js') {
+          return { exitCode: 0, stderr: '', stdout: JSON.stringify({
+            ok: true,
+            recent: { window_days: 14, production_sent: 4, external_replies: 1 },
+          }) };
+        }
+        if (script === 'daily-capacity.js') {
+          return { exitCode: 0, stderr: '', stdout: JSON.stringify({
+            ok: true, batch_size: 2, daily_target: 10, weekly_cap: 50, campaign_week: 1,
+          }) };
+        }
+        if (script === 'run-research.js') {
+          assert.equal(command.env.PAULINA_WORKFLOW_NO_SLACK, '1');
+          return { exitCode: 0, stderr: '', stdout: JSON.stringify({
+            ok: true, status: 'completed', inserted: 2, import_errors: 0,
+          }) };
+        }
+        if (script === 'preverify-queue.js') {
+          return { exitCode: 0, stderr: '', stdout: JSON.stringify({
+            ok: true, checked: 0, verified_available_before: 2,
+            verified_available_after: 2, target_met: false,
+          }) };
+        }
+        if (script === 'composer.js') {
+          assert.match(command.env.WORKFLOW_RUN_ID, /^[0-9a-f-]{36}$/);
+          await db.query(sql`INSERT INTO outreach_sends
+            (campaign_id, workflow_run_id, status)
+            VALUES (7, ${command.env.WORKFLOW_RUN_ID}, 'pending_approval'),
+                   (7, ${command.env.WORKFLOW_RUN_ID}, 'pending_approval')`);
+          return { exitCode: 0, stderr: '', stdout: JSON.stringify({
+            ok: true, already_composed: 0,
+            composed: [{ draft_id: 1 }, { draft_id: 2 }], failed: [],
+          }) };
+        }
+        throw new Error(`unexpected command ${script}`);
+      },
+    });
+
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(commandCalls, 5);
+    assert.equal(run.output.batchSize, 2);
+    assert.equal(run.output.attached, 2);
+    assert.equal(run.output.composition.attributed_drafts, 2);
+    const effects = await db.query(sql`SELECT status FROM workflow_effects
+      WHERE run_id=${run.id} ORDER BY requested_at, id`);
+    assert.equal(effects.length, 4);
+    assert.deepEqual(new Set(effects.map(effect => effect.status)), new Set(['verified_by_readback']));
+    const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE run_id=${run.id} AND topic='slack.notification'`);
+    assert.match(JSON.parse(notification.payload_json).message, /composed 2 new drafts/);
+  });
+});
+
+test('Paulina preparation records a weekend no-op without external effects', async () => {
+  await withDb(async db => {
+    let commandCalls = 0;
+    const run = await startGraph(db, getDefinition('paulina.prepare_daily'), {
+      idempotencyKey: 'paulina-prepare-weekend', triggerType: 'system', input: {},
+    }, {
+      now: '2026-08-16T15:30:00.000Z',
+      paulinaConfig: { reporting: { active_campaign_slug: 'planner_partner_program_v1' } },
+      paulinaState: { paused: false },
+      runCommand: async () => { commandCalls += 1; throw new Error('must not run'); },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.status, 'skipped');
+    assert.equal(run.output.reason, 'weekend');
+    assert.equal(commandCalls, 0);
+    assert.equal(run.effects.length, 0);
+    const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM workflow_outbox
+      WHERE run_id=${run.id}`);
+    assert.equal(count, 0);
+  });
+});
+
+test('Paulina preparation distinguishes safe pre-dispatch retry from post-command review', async () => {
+  const base = {
+    db: {},
+    run: { id: '11111111-1111-4111-8111-111111111111' },
+    state: { preflight: { campaignSlug: 'planner' } },
+    stepKey: 'research',
+    services: { runCommand: async () => ({ exitCode: 0, stdout: '{"ok":true}', stderr: '' }) },
+  };
+  const options = {
+    provider: 'research', operation: 'test', request: {}, command: {},
+    readback: async () => ({ ok: true }),
+  };
+  await assert.rejects(() => runVerifiedCommand({
+    ...base,
+    store: { createEffect: async () => { throw new Error('database locked'); } },
+  }, options), error => error.retryable === true && error.requiresManualReview !== true);
+
+  await assert.rejects(() => runVerifiedCommand({
+    ...base,
+    store: {
+      createEffect: async () => ({ id: 'effect-1', status: 'requested' }),
+      transitionEffect: async () => { throw new Error('projection failed'); },
+    },
+  }, options), error => error.retryable === false && error.requiresManualReview === true);
 });
 
 test('Regina verification excludes concurrent outreach rows from another producer', async () => {

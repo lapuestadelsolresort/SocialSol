@@ -80,6 +80,23 @@ graph invokes it every five minutes, attributes every resulting row to the
 workflow run, and verifies the result against the CRM. It re-verifies every
 recipient and fails closed if the verification provider is unavailable.
 
+## Weekday preparation graph
+
+```bash
+node crm/scripts/workflow-trigger.js paulina.prepare_daily --bucket day
+node crm/scripts/workflow-trigger.js paulina.prepare_daily --bucket day \
+  --idempotency-key paulina-prepare-canary-YYYY-MM-DD \
+  --input-json '{"dryRun":true,"skipAnalysis":true,"skipResearch":true}'
+```
+
+The 8:30 a.m. LaunchAgent invokes the first command. The fixed graph records
+preflight, truthful engagement analysis, capacity, research, campaign
+attachment, ZeroBounce verification, draft composition, provider readbacks,
+and the Slack summary as separate steps. Weekend and paused runs are durable
+no-ops. A provider-facing step that dies mid-flight opens manual review and is
+not automatically replayed. The dry-run command is the deployment canary; its
+custom idempotency key must never reuse the scheduled daily key.
+
 ## Supporting maintenance
 
 ```bash

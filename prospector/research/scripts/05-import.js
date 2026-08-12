@@ -370,7 +370,7 @@ async function main() {
   fs.writeFileSync(path.join(dir, 'summary.jsonl'), JSON.stringify(summary) + '\n');
 
   // Slack post (skipped on dry-run)
-  if (!args.dryRun) {
+  if (!args.dryRun && process.env.PAULINA_WORKFLOW_NO_SLACK !== '1') {
     const msg = buildSlackMessage({ runDate, personaSummary, importResult, costExtract, dryRun: false });
     const slackRes = await postToChannel(channelTarget, msg);
     if (!slackRes.ok) {
@@ -378,8 +378,10 @@ async function main() {
     } else {
       console.error(`[05-import] Slack posted to ${channelTarget} (${channelName})`);
     }
-  } else {
+  } else if (args.dryRun) {
     console.error(`[05-import] DRY-RUN: skipping bulk-import POST and Slack post.`);
+  } else {
+    console.error(`[05-import] Workflow mode: Slack summary deferred to durable outbox.`);
   }
 
   console.error(`[05-import] DONE. status=${importStatusFinal} attempted=${importResult.attempted} inserted=${importResult.inserted} errors=${importResult.errors.length}`);

@@ -8,7 +8,7 @@ const { runDir, todayISODate, loadConfig } = require('./lib/config');
 const { postToChannel } = require('./lib/slack');
 
 function parseArgs(argv) {
-  const args = { persona: null, dryRun: false, runDate: null };
+  const args = { persona: null, dryRun: false, runDate: null, json: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--persona') args.persona = argv[++i];
@@ -16,8 +16,20 @@ function parseArgs(argv) {
     else if (a === '--dry-run') args.dryRun = true;
     else if (a === '--run-date') args.runDate = argv[++i];
     else if (a.startsWith('--run-date=')) args.runDate = a.slice('--run-date='.length);
+    else if (a === '--json') args.json = true;
   }
   return args;
+}
+
+function readRunSummary(dir) {
+  try {
+    const line = fs.readFileSync(path.join(dir, 'summary.jsonl'), 'utf8')
+      .split(/\r?\n/)
+      .find(Boolean);
+    return line ? JSON.parse(line) : null;
+  } catch {
+    return null;
+  }
 }
 
 function chooseRunDate(initial) {
@@ -56,12 +68,26 @@ async function main() {
   const startISO = todayISODate();
   const runDate = args.runDate || chooseRunDate(startISO);
   const dir = runDir(runDate);
+  const workflowRunId = /^[0-9a-f-]{36}$/i.test(process.env.WORKFLOW_RUN_ID || '')
+    ? process.env.WORKFLOW_RUN_ID
+    : null;
+  if (args.runDate && fs.existsSync(path.join(dir, 'meta.json'))) {
+    const previous = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+    if (workflowRunId && previous.workflow_run_id === workflowRunId && previous.status === 'completed') {
+      const summary = readRunSummary(dir);
+      if (!summary) throw new Error(`completed research run ${runDate} has no summary readback`);
+      if (args.json) process.stdout.write(`${JSON.stringify({ ok: true, replayed: true, ...summary })}\n`);
+      return;
+    }
+    throw new Error(`explicit research run directory already exists and is not a completed replay: ${runDate}`);
+  }
   fs.mkdirSync(dir, { recursive: true });
 
   const meta = {
     persona: args.persona,
     run_date: runDate,
     dry_run: args.dryRun,
+    workflow_run_id: workflowRunId,
     started_at: new Date().toISOString(),
     status: 'running',
   };
@@ -100,7 +126,7 @@ async function main() {
       console.error('[run-research] ' + msg);
       const cfg = (() => { try { return loadConfig(); } catch { return {}; } })();
       const target = cfg.channel_id ? `channel:${cfg.channel_id}` : '#prospector-paulina';
-      await postToChannel(target, msg);
+      if (process.env.PAULINA_WORKFLOW_NO_SLACK !== '1') await postToChannel(target, msg);
     }
   }
 
@@ -115,7 +141,10 @@ async function main() {
   for (const stage of stages) {
     const t0 = Date.now();
     console.error(`\n=== ${stage.name} ===`);
-    const code = await runStage(stage.file, stage.args, {});
+    const code = await runStage(stage.file, stage.args, {
+      PAULINA_WORKFLOW_NO_SLACK: process.env.PAULINA_WORKFLOW_NO_SLACK || '',
+      WORKFLOW_RUN_ID: workflowRunId || '',
+    });
     const dt = Date.now() - t0;
     if (code !== 0) {
       // Stage 3 returns code 4 when cost cap hits — partial run; continue to dedup/import on what we have.
@@ -129,7 +158,9 @@ async function main() {
         fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
         const cfg = (() => { try { return loadConfig(); } catch { return {}; } })();
         const target = cfg.channel_id ? `channel:${cfg.channel_id}` : '#prospector-paulina';
-        await postToChannel(target, `❌ Research run ${runDate} (${args.persona}) failed at ${stage.name} (exit ${code}). See runs/${runDate}/`);
+        if (process.env.PAULINA_WORKFLOW_NO_SLACK !== '1') {
+          await postToChannel(target, `❌ Research run ${runDate} (${args.persona}) failed at ${stage.name} (exit ${code}). See runs/${runDate}/`);
+        }
         console.error(`[run-research] FAILED at ${stage.name}, exit ${code}`);
         process.exit(code || 1);
       } else {
@@ -160,8 +191,15 @@ async function main() {
   }
 
   console.error(`\n[run-research] DONE: runs/${runDate}/ (status=${meta.status}, dry_run=${args.dryRun})`);
+  if (args.json) {
+    const summary = readRunSummary(dir);
+    if (!summary) throw new Error(`research run ${runDate} completed without summary readback`);
+    process.stdout.write(`${JSON.stringify({ ok: true, replayed: false, ...summary })}\n`);
+  }
 }
 
 if (require.main === module) {
   main().catch(e => { console.error(e); process.exit(1); });
 }
+
+module.exports = { chooseRunDate, main, parseArgs, readRunSummary };

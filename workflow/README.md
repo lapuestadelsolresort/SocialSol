@@ -74,10 +74,11 @@ flowchart LR
   confirmation within 15 minutes, a fresh precondition check, execute-once
   semantics, operation-specific provider readback, and human notification.
 - Lead flywheel: OwnerRez and Squarespace source sync, CRM pipeline reads,
+  Paulina's run-scoped analysis/research/verification/composition preparation,
   Paulina and Regina sends with stable Resend idempotency keys, CRM/Resend
-  readback, exact workflow-run attribution, and ambiguous-send pausing instead
-  of whole-script replay. Resend retains an idempotency key for 24 hours; the
-  durable CRM send status remains the longer-lived replay guard.
+  readback, exact workflow-run attribution, and ambiguous-effect pausing
+  instead of whole-script replay. Resend retains an idempotency key for 24
+  hours; the durable CRM send status remains the longer-lived replay guard.
 - Social: channel-owned content records plus routine or selected Postiz
   publishing. Approved rows are dispatched shortly before their scheduled time;
   scheduled/publishing remain distinct from published.

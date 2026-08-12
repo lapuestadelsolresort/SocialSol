@@ -6,6 +6,7 @@ const { definition: ownerrezWebhookProcess } = require('./ownerrez-event');
 const { definition: whatsappInboundProcess } = require('./whatsapp-inbound');
 const { definition: metaDmReply } = require('./meta-dm-reply');
 const { definition: socialPublishDue } = require('./social-publish-due');
+const { definition: paulinaPrepareDaily } = require('./paulina-prepare');
 const operational = require('./operational-jobs');
 const localRecords = require('./local-records');
 const readModels = require('./read-models');
@@ -18,6 +19,7 @@ const DEFINITIONS = new Map([
   [whatsappInboundProcess.name, whatsappInboundProcess],
   [metaDmReply.name, metaDmReply],
   [socialPublishDue.name, socialPublishDue],
+  [paulinaPrepareDaily.name, paulinaPrepareDaily],
   [ownerrezMutationPropose.name, ownerrezMutationPropose],
   [ownerrezMutationConfirm.name, ownerrezMutationConfirm],
   ...Object.values(operational)
