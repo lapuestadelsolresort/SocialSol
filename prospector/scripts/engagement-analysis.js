@@ -27,9 +27,14 @@ const {
   DB_PATH,
   OPENCLAW_BIN: OPENCLAW,
 } = require('../../lib/runtime-paths');
+const {
+  buildPerformanceReport,
+  parseDatabaseTimestamp,
+} = require('../lib/performance-report');
 
 const SCRIPTS_DIR = __dirname;
 const STATE_PATH = path.join(SCRIPTS_DIR, 'iteration-state.json');
+const CONFIG_PATH = path.join(SCRIPTS_DIR, '..', 'config.json');
 const SLACK_CHANNEL = process.env.PROSPECTOR_SLACK_CHANNEL;
 const CAMPAIGN_SLUG = process.env.PAULINA_CAMPAIGN_SLUG || 'planner_partner_program_v1';
 const DRY_RUN = process.argv.includes('--dry-run');
@@ -80,130 +85,123 @@ function slackPost(msg) {
   }
 }
 
-async function pullEngagementData(db) {
-  // Last 14 days of sends with engagement
+/**
+ * Pull supplementary hook-angle and subject-prefix breakdowns for the
+ * hypothesis engine. Top-level stats come from the canonical
+ * buildPerformanceReport(); this query adds the per-variant detail it
+ * doesn't carry.
+ */
+async function pullHypothesisSupplementary(db, config) {
+  const reporting = config.reporting || {};
+  const openTrackingStart = parseDatabaseTimestamp(reporting.open_tracking_enabled_at);
+  const opensAvailable = reporting.open_tracking_enabled === true && Boolean(openTrackingStart);
+
   const sends = await db.query(sql`
     SELECT
-      os.id, os.subject, os.hook_angle, os.sent_at,
-      os.opened_at, os.clicked_at, os.reply_detected_at,
-      os.bounced_at, os.complained_at, os.status,
-      c.name, c.company, c.email, c.source,
-      oc.slug as campaign_slug, oc.persona
+      os.subject, os.hook_angle, os.sent_at,
+      os.delivered_at, os.opened_at, os.reply_detected_at,
+      os.bounced_at, os.status
     FROM outreach_sends os
-    JOIN contacts c ON c.id = os.contact_id
-    LEFT JOIN outreach_campaigns oc ON oc.id = os.campaign_id
+    JOIN outreach_campaigns oc ON oc.id = os.campaign_id
     WHERE os.sent_at >= datetime('now', '-14 days')
       AND oc.slug = ${CAMPAIGN_SLUG}
       AND os.status NOT IN ('drafted', 'pending_approval', 'cancelled')
     ORDER BY os.sent_at DESC
   `);
 
-  // Aggregate stats
-  const total = sends.length;
-  const delivered = sends.filter(s => !s.bounced_at && s.status !== 'bounced').length;
-  const bounced = sends.filter(s => s.bounced_at || s.status === 'bounced').length;
-  const opened = sends.filter(s => s.opened_at).length;
-  const replied = sends.filter(s => s.reply_detected_at).length;
-  const clicked = sends.filter(s => s.clicked_at).length;
-
   // By hook angle
   const byHook = {};
   for (const s of sends) {
     const angle = s.hook_angle || 'unknown';
-    if (!byHook[angle]) byHook[angle] = { sent: 0, opened: 0, replied: 0, bounced: 0 };
+    if (!byHook[angle]) byHook[angle] = {
+      sent: 0, open_eligible_delivered: 0, opened: 0, replied: 0, bounced: 0,
+    };
     byHook[angle].sent++;
-    if (s.opened_at) byHook[angle].opened++;
+    const sentAt = parseDatabaseTimestamp(s.sent_at);
+    const openEligibleForSend = opensAvailable && sentAt && sentAt >= openTrackingStart;
+    if (openEligibleForSend && s.delivered_at) byHook[angle].open_eligible_delivered++;
+    if (openEligibleForSend && s.delivered_at && s.opened_at) byHook[angle].opened++;
     if (s.reply_detected_at) byHook[angle].replied++;
     if (s.bounced_at || s.status === 'bounced') byHook[angle].bounced++;
   }
+  if (!opensAvailable) {
+    for (const metrics of Object.values(byHook)) {
+      metrics.opened = null;
+      metrics.open_eligible_delivered = null;
+    }
+  }
 
-  // Subject line patterns (first 5 words)
+  // Subject line patterns (first 4 words)
   const bySubjectPrefix = {};
   for (const s of sends) {
     const prefix = (s.subject || '').split(' ').slice(0, 4).join(' ');
-    if (!bySubjectPrefix[prefix]) bySubjectPrefix[prefix] = { sent: 0, opened: 0, replied: 0 };
+    if (!bySubjectPrefix[prefix]) bySubjectPrefix[prefix] = {
+      sent: 0, open_eligible_delivered: 0, opened: 0, replied: 0,
+    };
     bySubjectPrefix[prefix].sent++;
-    if (s.opened_at) bySubjectPrefix[prefix].opened++;
+    const sentAt = parseDatabaseTimestamp(s.sent_at);
+    const openEligibleForSend = opensAvailable && sentAt && sentAt >= openTrackingStart;
+    if (openEligibleForSend && s.delivered_at) bySubjectPrefix[prefix].open_eligible_delivered++;
+    if (openEligibleForSend && s.delivered_at && s.opened_at) bySubjectPrefix[prefix].opened++;
     if (s.reply_detected_at) bySubjectPrefix[prefix].replied++;
   }
+  if (!opensAvailable) {
+    for (const metrics of Object.values(bySubjectPrefix)) {
+      metrics.opened = null;
+      metrics.open_eligible_delivered = null;
+    }
+  }
 
-  // Recent replies details
-  const replyDetails = sends
-    .filter(s => s.reply_detected_at)
-    .map(s => ({ name: s.name, company: s.company, subject: s.subject, hook_angle: s.hook_angle, sent_at: s.sent_at, replied_at: s.reply_detected_at }));
-
-  // Bounce details
-  const bounceDetails = sends
-    .filter(s => s.bounced_at || s.status === 'bounced')
-    .map(s => ({ name: s.name, email: s.email, company: s.company }));
-
-  return {
-    total, delivered, bounced, opened, replied, clicked,
-    open_rate: delivered > 0 ? ((opened / delivered) * 100).toFixed(1) : '0.0',
-    reply_rate: delivered > 0 ? ((replied / delivered) * 100).toFixed(1) : '0.0',
-    click_rate: delivered > 0 ? ((clicked / delivered) * 100).toFixed(1) : '0.0',
-    bounce_rate: total > 0 ? ((bounced / total) * 100).toFixed(1) : '0.0',
-    byHook, bySubjectPrefix,
-    replyDetails, bounceDetails,
-    raw_sends: sends.slice(0, 20),
-  };
+  return { byHook, bySubjectPrefix };
 }
 
-async function pullQueueStats(db) {
-  const [row] = await db.query(sql`
-    SELECT COUNT(*) as eligible FROM campaign_contacts cc
-    JOIN outreach_campaigns oc ON oc.id = cc.campaign_id
-    WHERE oc.slug = ${CAMPAIGN_SLUG}
-      AND
-    NOT EXISTS (
-      SELECT 1 FROM outreach_sends os
-      WHERE os.contact_id = cc.contact_id
-        AND os.campaign_id = cc.campaign_id
-        AND os.status != 'cancelled'
-    )
-  `);
-  const [contacted] = await db.query(sql`SELECT COUNT(*) as n FROM contacts WHERE status='contacted'`);
-  const [newLeads] = await db.query(sql`SELECT COUNT(*) as n FROM contacts WHERE status='new' AND do_not_contact=0`);
-  return {
-    eligible_in_campaign: row.eligible,
-    contacted: contacted.n,
-    new_contacts: newLeads.n,
-  };
-}
-
-async function generateHypothesis(stats, prevState) {
+async function generateHypothesis(report, supplementary, prevState) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const recent = report.recent;
+  const tracking = report.tracking;
 
   const prevHypotheses = (prevState.hypotheses || []).slice(-3)
     .map(h => `Day ${h.day}: ${h.hypothesis} → Test: ${h.test} → Result: ${h.result || 'pending'}`)
     .join('\n');
 
+  const openLine = tracking.opens_available
+    ? `${recent.opens}/${recent.open_tracking_eligible_delivered} tracking-eligible delivered messages (open rate: ${recent.open_rate_percent == null ? 'unavailable until a tracked delivery exists' : `${recent.open_rate_percent}%`}; tracking active since ${tracking.opens_enabled_at})`
+    : `unavailable. ${tracking.opens_note}`;
+  const clickLine = tracking.clicks_available
+    ? `${recent.clicks} (secondary click rate: ${recent.click_rate_percent}%)`
+    : 'unavailable because click tracking is not configured';
+  const replyDetails = recent.external_reply_details || [];
+
   const prompt = `You are the outreach analyst for La Puesta del Sol Resort (a private oceanfront resort in Riviera Nayarit, Mexico). You run cold email prospecting only to wedding and event planners. The offer is a venue partner program with direct resort access, hosted site visits, co-marketing support, and a documented 10% referral commission. A reply is the primary conversion event. An attributed click to the planner partner page is a secondary engagement signal. The email must not ask for a booking or couple introduction.
 
-## Last 14 Days Engagement Data
-- Total sent: ${stats.total}
-- Delivered: ${stats.delivered} | Bounced: ${stats.bounced} (${stats.bounce_rate}%)
-- Opened: ${stats.opened} (open rate: ${stats.open_rate}%)
-- Replied: ${stats.replied} (reply rate: ${stats.reply_rate}%)
-- Clicked: ${stats.clicked} (secondary click rate: ${stats.click_rate}%)
+## Last ${recent.window_days} Days Engagement Data (canonical)
+- Actual sent: ${recent.actual_sent} (${recent.production_sent} production, ${recent.test_sent} test)
+- Delivered: ${recent.delivered} (production: ${recent.production_delivered}) | Bounced: ${recent.bounced}
+- Opens: ${openLine}
+- External replies: ${recent.external_replies} (production reply rate: ${recent.production_reply_rate_percent == null ? 'unavailable' : `${recent.production_reply_rate_percent}%`})
+- Clicks: ${clickLine}
 
 ## Engagement by Hook Angle
-${JSON.stringify(stats.byHook, null, 2)}
+${JSON.stringify(supplementary.byHook, null, 2)}
 
 ## Engagement by Subject Line Pattern
-${JSON.stringify(stats.bySubjectPrefix, null, 2)}
+${JSON.stringify(supplementary.bySubjectPrefix, null, 2)}
 
-## Recent Replies
-${stats.replyDetails.length > 0 ? JSON.stringify(stats.replyDetails, null, 2) : 'None yet'}
-
-## Recent Bounces
-${stats.bounceDetails.length > 0 ? stats.bounceDetails.map(b => `${b.name} (${b.company}) - ${b.email}`).join('\n') : 'None'}
+## Recent External Replies
+${replyDetails.length > 0 ? JSON.stringify(replyDetails, null, 2) : 'None yet'}
 
 ## Previous Hypotheses & Results
 ${prevHypotheses || 'None yet (Day 1)'}
 
+## Interpretation guardrails
+${tracking.delivery_note}
+${tracking.sample_note}
+
 ## Task
-1. In 2-3 sentences: what does the data tell us? Be honest — if we have no opens yet, say so and why that might be.
+1. In 2-3 sentences: what does the data tell us? Be honest. Do not infer spam
+   placement, inbox placement, sender reputation, warmup health, or a 0% open
+   rate when open tracking is unavailable. Do not grade a reply rate without an
+   approved benchmark and adequate sample size.
 2. Form ONE clear hypothesis about what to test tomorrow (subject line style, hook angle, persona segment, send timing, email length, etc.)
 3. State the specific test: what exactly changes tomorrow?
 4. Define what success looks like using replies among delivered emails. Opens and clicks can diagnose the funnel but cannot be the win condition.
@@ -232,30 +230,36 @@ Keep it sharp and actionable. Max 200 words total. Format as JSON:
 
 async function main() {
   const db = createDB(DB_PATH);
+  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   const state = loadState();
   state.day = (state.day || 0) + 1;
 
   log(`Starting engagement analysis (day ${state.day})`);
 
-  let stats, queueStats, hypothesis;
+  let report, supplementary, hypothesis;
 
   try {
-    stats = await pullEngagementData(db);
-    queueStats = await pullQueueStats(db);
-    log(`Stats: ${stats.total} sent, ${stats.opened} opened, ${stats.replied} replied, ${stats.bounced} bounced`);
+    report = await buildPerformanceReport(db, sql, config);
+    supplementary = await pullHypothesisSupplementary(db, config);
+    const recent = report.recent;
+    log(`Stats (canonical): ${recent.actual_sent} sent, opens ${report.tracking.opens_available ? recent.opens : 'unavailable'}, ${recent.external_replies} external replies, ${recent.bounced} bounced`);
   } catch (e) {
     log('ERROR pulling stats:', e.message);
     await db.dispose();
     process.exit(1);
   }
 
+  const recent = report.recent;
+  const tracking = report.tracking;
+  const queue = report.active_queue;
+
   try {
-    hypothesis = await generateHypothesis(stats, state);
+    hypothesis = await generateHypothesis(report, supplementary, state);
     log('Hypothesis:', hypothesis.hypothesis);
   } catch (e) {
     log('ERROR generating hypothesis:', e.message);
     hypothesis = {
-      data_summary: `${stats.total} emails sent, ${stats.replied} replied, ${stats.opened} opened.`,
+      data_summary: `${recent.actual_sent} emails sent and ${recent.external_replies} external replies. Open data is ${tracking.opens_available ? `${recent.opens} opens among ${recent.open_tracking_eligible_delivered} delivered messages sent after tracking activation` : 'unavailable because tracking is not fully configured'}.`,
       hypothesis: 'Insufficient data — continuing with current approach.',
       test: 'No change today.',
       success_metric: 'At least 1 reply in the next 10 delivered emails.',
@@ -273,9 +277,15 @@ async function main() {
     composer_hint: hypothesis.composer_hint,
     result: null,
     stats_snapshot: {
-      total: stats.total, delivered: stats.delivered, bounced: stats.bounced,
-      opened: stats.opened, replied: stats.replied, clicked: stats.clicked,
-      open_rate: stats.open_rate, reply_rate: stats.reply_rate, click_rate: stats.click_rate,
+      actual_sent: recent.actual_sent, production_sent: recent.production_sent,
+      delivered: recent.delivered, production_delivered: recent.production_delivered,
+      bounced: recent.bounced,
+      opens: recent.opens, external_replies: recent.external_replies,
+      clicks: recent.clicks,
+      open_rate_percent: recent.open_rate_percent,
+      production_reply_rate_percent: recent.production_reply_rate_percent,
+      click_rate_percent: recent.click_rate_percent,
+      open_tracking_eligible_delivered: recent.open_tracking_eligible_delivered,
     },
   };
   state.hypotheses = state.hypotheses || [];
@@ -286,29 +296,40 @@ async function main() {
   }
   saveState(state);
 
-  // Build Slack post
-  const replyLines = stats.replyDetails.length > 0
-    ? '\n🎉 *Replies:* ' + stats.replyDetails.map(r => `${r.name} (${r.company})`).join(', ')
+  // Build Slack post — all numbers from the canonical report
+  const replyDetails = recent.external_reply_details || [];
+  const replyLines = replyDetails.length > 0
+    ? '\n🎉 *Replies:* ' + replyDetails.map(r => `${r.name} (${r.company})`).join(', ')
     : '';
 
-  const bounceLines = stats.bounceDetails.length > 0
-    ? '\n⚠️ *Bounces:* ' + stats.bounceDetails.slice(0, 3).map(b => b.email).join(', ')
-    : '';
-
-  const hookLines = Object.entries(stats.byHook)
-    .map(([angle, d]) => `  • ${angle}: ${d.sent} sent, ${d.opened} opened, ${d.replied} replied`)
+  const hookLines = Object.entries(supplementary.byHook)
+    .map(([angle, d]) => `  • ${angle}: ${d.sent} sent, ${tracking.opens_available ? `${d.opened}/${d.open_eligible_delivered} tracked-delivered opened, ` : ''}${d.replied} replied`)
     .join('\n') || '  • No data yet';
+
+  const clickSummary = tracking.clicks_available
+    ? `${recent.clicks} (${recent.click_rate_percent}%)`
+    : 'unavailable (tracking disabled)';
+  const openSummary = tracking.opens_available
+    ? `${recent.opens}/${recent.open_tracking_eligible_delivered} delivered since activation (${recent.open_rate_percent == null ? 'rate pending first tracked delivery' : `${recent.open_rate_percent}%`})`
+    : 'unavailable (tracking not configured)';
+
+  const bounceRate = recent.actual_sent > 0
+    ? ((recent.bounced / recent.actual_sent) * 100).toFixed(1)
+    : '0.0';
+  const queueLine = queue
+    ? `*Queue:* ${queue.remaining_contacts} remaining | ${queue.verified_ready} verified ready`
+    : '';
 
   const msg = `📈 *Engagement Report — Day ${state.day} (${entry.date})*
 
-*Last 14 days:* ${stats.total} sent → ${stats.delivered} delivered | ${stats.bounced} bounced (${stats.bounce_rate}%)
-*Primary — replies:* ${stats.replied} (${stats.reply_rate}% of delivered)${replyLines}
-*Secondary — clicks:* ${stats.clicked} (${stats.click_rate}%) | *Diagnostic opens:* ${stats.opened} (${stats.open_rate}%)${bounceLines}
+*Last ${recent.window_days} days:* ${recent.actual_sent} sent (${recent.production_sent} production, ${recent.test_sent} test) → ${recent.delivered} delivered | ${recent.bounced} bounced (${bounceRate}%)
+*Primary — replies:* ${recent.external_replies} (${recent.production_reply_rate_percent == null ? 'rate unavailable' : `${recent.production_reply_rate_percent}% of production delivered`})${replyLines}
+*Secondary — clicks:* ${clickSummary} | *Diagnostic opens:* ${openSummary}
 
 *By hook angle:*
 ${hookLines}
 
-*Queue:* ${queueStats.eligible_in_campaign} eligible | ${queueStats.contacted} in conversation
+${queueLine}
 
 ---
 🔬 *Today's hypothesis:*
