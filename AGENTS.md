@@ -20,6 +20,31 @@ Before changing or running a workflow:
    warmup recipients.
 5. Run `npm run check:stack` before proposing a commit.
 
+## Change and release completion
+
+The repository's primary checkout is the serving production checkout. Keep it
+on clean `main`; never switch it to a feature branch or edit source there.
+Build changes in a separate Git worktree on a `codex/*` branch.
+
+For an implementation request, a commit or feature-branch push is an
+intermediate checkpoint, not completion. Unless the requester explicitly says
+to stop at a local change, commit, branch, pull request, or no-deploy state,
+finish the complete release path:
+
+1. Validate the change and run `npm run check:stack`.
+2. Commit and push the `codex/*` branch.
+3. Open a pull request to `main` and wait for the GitHub `verify` check.
+4. Merge only after that check passes.
+5. Fast-forward the serving checkout to `origin/main` and run
+   `npm run release:check` followed by `npm run release:deploy`.
+6. Verify the deployment record, live workflow health, clean Git state, and
+   exact local/remote `main` SHA before reporting completion.
+
+If unrelated edits are discovered in the serving checkout, preserve them in a
+named stash or separate worktree, restore clean `main` immediately, and handle
+them in a separate pull request. Never leave uncommitted source changes in the
+serving checkout.
+
 Service command references live in:
 
 - `prospector/COMMANDS.md`

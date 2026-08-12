@@ -6,6 +6,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +19,10 @@ SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "")
 ALERT_CHANNEL = os.environ.get("RESORT_OPS_ALERTS_CHANNEL", "")
 JOB_NAME = "resort-workflow-health"
 POLICY_PATH = Path(os.environ.get("RESORT_WORKFLOW_POLICY_PATH", ROOT / "workflow" / "policy.json"))
+ALERT_STATE_PATH = Path(os.environ.get(
+    "RESORT_WORKFLOW_HEALTH_ALERT_STATE_PATH",
+    ROOT / "memory" / "workflow-health-alert-state.json",
+))
 
 GRAPH_AGENTS = {
     "accounting.classify": "com.lapuestadelsolresort.graph-accounting-inbox",
@@ -100,6 +105,36 @@ def runtime_integrity():
     }
 
 
+def checkout_integrity(run=subprocess.run):
+    """Fail closed when the serving checkout leaves clean local main."""
+    metrics = {
+        "runtime_git_wrong_branch": 0,
+        "runtime_git_dirty": 0,
+        "runtime_git_check_error": 0,
+    }
+    try:
+        branch = run(
+            ["git", "-C", str(ROOT), "branch", "--show-current"],
+            check=True,
+            timeout=10,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        status = run(
+            ["git", "-C", str(ROOT), "status", "--porcelain=v1", "--untracked-files=all"],
+            check=True,
+            timeout=10,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except Exception:
+        metrics["runtime_git_check_error"] = 1
+        return metrics
+    metrics["runtime_git_wrong_branch"] = int(branch != "main")
+    metrics["runtime_git_dirty"] = int(bool(status))
+    return metrics
+
+
 def scalar(con, query):
     return con.execute(query).fetchone()[0]
 
@@ -169,10 +204,51 @@ def notify(message):
     return True
 
 
+def incident_alert_active(path=ALERT_STATE_PATH):
+    try:
+        state = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return state.get("active") is True if isinstance(state, dict) else False
+
+
+def set_incident_alert_active(active, path=ALERT_STATE_PATH):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "active": bool(active),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    fd, temporary_path = tempfile.mkstemp(
+        prefix=".workflow-health-alert-", dir=path.parent
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary_path, path)
+    finally:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+
+
+def notify_incident_once(message, notify_fn=notify, path=ALERT_STATE_PATH):
+    if incident_alert_active(path):
+        return False
+    if not notify_fn(message):
+        return False
+    set_incident_alert_active(True, path)
+    return True
+
+
 def hard_failure_count(metrics, alert_config_missing=0):
     return sum([
         metrics.get("runtime_process_missing", 0), metrics.get("runtime_code_drift", 0),
         metrics.get("runtime_process_check_error", 0),
+        metrics.get("runtime_git_wrong_branch", 0), metrics.get("runtime_git_dirty", 0),
+        metrics.get("runtime_git_check_error", 0),
         metrics.get("runtime_graph_agents_missing", 0), metrics.get("runtime_policy_error", 0),
         metrics.get("schema_migration_required", 0), metrics.get("queued_runs_over_1m", 0),
         metrics.get("stalled_runs", 0), metrics.get("overdue_retries", 0), metrics.get("dead_outbox", 0),
@@ -201,6 +277,7 @@ def main(check_only=False):
     # Slack alert.
     alert_config_missing = alert_configuration_missing(check_only)
     metrics.update(runtime_integrity())
+    metrics.update(checkout_integrity())
     try:
         policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
         metrics.update(graph_agent_integrity(policy))
@@ -212,10 +289,14 @@ def main(check_only=False):
     if hard_failures:
         if not check_only:
             record(JOB_NAME, False, detail)
-            notify("*Workflow integrity alert*\n```" + detail + "```")
+            # Slack is edge-triggered; local status and Healthchecks still
+            # record every failed interval while the incident remains open.
+            notify_incident_once("*Workflow integrity alert*\n```" + detail + "```")
         raise RuntimeError(detail)
     if not check_only:
         record(JOB_NAME, True, detail)
+        if incident_alert_active():
+            set_incident_alert_active(False)
     print(detail)
 
 

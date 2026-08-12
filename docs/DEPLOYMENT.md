@@ -42,8 +42,15 @@ operations in `workflow/CUTOVER.md`.
 
 Do not edit production source files in place. If a hot fix is needed, create a
 branch/PR and follow the same path. If a change starts in Slack, ask the agent
-to commit it to a `codex/*` branch and open a PR; never let the Slack agent
-leave a persistent source edit in the serving checkout.
+to use a separate worktree, commit it to a `codex/*` branch, and complete the
+PR/CI/merge/deploy path; never let the Slack agent switch the serving checkout
+or leave a persistent source edit there. A feature-branch push is an
+intermediate checkpoint, not a completed release, unless the requester
+explicitly asks the agent to stop there.
+
+The scheduled workflow-health check treats a non-`main` serving checkout or
+any tracked/untracked source change as a hard failure. Ignored runtime overlays
+remain outside that check.
 
 ## Failure handling
 
