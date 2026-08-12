@@ -133,7 +133,9 @@ It backs up and updates the ignored workflow policy, merges the OpenClaw shadow
 configuration, replaces the direct daily report with `marketing.report.daily`,
 installs the graph-owned `meta.audience.sync` schedule, retires the stale
 pipeline validator, and restarts the gateway. LaunchAgent and policy backups
-are retained for rollback. Before accepting an autonomous campaign action,
+are retained for rollback. The command does not report success until the daily
+report and audience-sync canaries complete as durable graph runs. Before
+accepting an autonomous campaign action,
 confirm a fresh `marketing.snapshot.read` covers at least three completed days,
 tracking is healthy, the live budget still equals the evidence, and the target
 has a committed campaign brief. A one-day report, missing brief, changed live

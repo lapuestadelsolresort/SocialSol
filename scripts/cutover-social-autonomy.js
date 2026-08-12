@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { ROOT } = require('../lib/runtime-paths');
+const { loadControlToken } = require('../crm/lib/workflow-auth');
 const { configure } = require('./configure-social-autonomy');
 
 const LAUNCHAGENTS = [
@@ -69,7 +70,34 @@ function retireLaunchAgent(name, domain, backupDirectory) {
   return { label, retired: true, backup };
 }
 
-function main(args = process.argv.slice(2)) {
+async function waitForWorkflowRun(runId, {
+  fetchImpl = fetch,
+  token = loadControlToken(),
+  timeoutMs = 15 * 60_000,
+  pollMs = 1000,
+  sleep = delay => new Promise(resolve => setTimeout(resolve, delay)),
+} = {}) {
+  if (!runId) throw new Error('workflow canary did not return a run id');
+  if (!token || token.length < 32) throw new Error('workflow control token is unavailable');
+  const baseUrl = String(process.env.RESORT_WORKFLOW_BASE_URL || 'http://127.0.0.1:3456').replace(/\/+$/, '');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const response = await fetchImpl(`${baseUrl}/api/workflows/runs/${encodeURIComponent(runId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `workflow canary read returned ${response.status}`);
+    if (payload.run?.status === 'completed') return payload.run;
+    if (['failed', 'blocked'].includes(payload.run?.status)) {
+      throw new Error(`workflow canary ${runId} ${payload.run.status}: ${payload.run.error_message || 'no detail'}`);
+    }
+    await sleep(pollMs);
+  }
+  throw new Error(`workflow canary ${runId} did not complete within ${timeoutMs}ms`);
+}
+
+async function main(args = process.argv.slice(2)) {
   if (!args.includes('--confirm-production')) {
     throw new Error('refusing social autonomy cutover without --confirm-production');
   }
@@ -83,18 +111,27 @@ function main(args = process.argv.slice(2)) {
   const installed = LAUNCHAGENTS.map(name => installLaunchAgent(name, domain, backupDirectory));
   const retired = RETIRED_LAUNCHAGENTS.map(name => retireLaunchAgent(name, domain, backupDirectory));
   run('/bin/launchctl', ['kickstart', '-k', `${domain}/ai.openclaw.gateway`]);
-  const canaries = [
+  const submissions = [
     run(process.execPath, ['crm/scripts/workflow-trigger.js', 'marketing.report.daily', '--bucket', 'day']),
     run(process.execPath, ['crm/scripts/workflow-trigger.js', 'meta.audience.sync', '--bucket', 'day']),
   ].map(result => JSON.parse(String(result.stdout || '{}')));
+  const canaries = await Promise.all(submissions.map(submission => waitForWorkflowRun(submission.run?.id)));
   return { ok: true, configured, installed, retired, canaries, gatewayRestarted: true };
 }
 
 if (require.main === module) {
-  try { console.log(JSON.stringify(main(), null, 2)); } catch (error) {
+  main().then(result => console.log(JSON.stringify(result, null, 2))).catch(error => {
     console.error(`[cutover-social-autonomy] ${error.message}`);
     process.exitCode = 1;
-  }
+  });
 }
 
-module.exports = { LAUNCHAGENTS, RETIRED_LAUNCHAGENTS, installLaunchAgent, main, retireLaunchAgent, run };
+module.exports = {
+  LAUNCHAGENTS,
+  RETIRED_LAUNCHAGENTS,
+  installLaunchAgent,
+  main,
+  retireLaunchAgent,
+  run,
+  waitForWorkflowRun,
+};
