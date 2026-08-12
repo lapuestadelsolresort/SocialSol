@@ -21,6 +21,21 @@ const PROMPTS = {
   reservations: 'This channel reads OwnerRez for occupancy and reservations. OwnerRez writes are restricted by trusted Slack user id in the control-plane policy. Never use CRM contact rows as availability.',
 };
 
+const CHANNEL_MUTATION_WORKFLOWS = {
+  whatsapp: ['whatsapp.reply'],
+  'social-sol': [
+    'meta.dm.reply',
+    'social.content.upsert',
+    'social.content.publish',
+    'social.publish_routine',
+    'social.publish_due',
+  ],
+  'prospector-paulina': ['paulina.daily'],
+  'reengager-regina': ['regina.daily', 'regina.campaign'],
+  accounting: ['accounting.classify', 'qbo.write', 'receipt.reconcile'],
+  reservations: ['ownerrez.mutation.confirm'],
+};
+
 function receiptPrompt(name) {
   return `This is the scoped ${name} receipt channel. Channel members may submit or amend this channel's receipts and read only this channel's receipt ledger through resort_workflow. Cross-channel accounting data is not available here.`;
 }
@@ -64,10 +79,10 @@ function render({ policy, currentConfig, pluginIds = [] }) {
       || (receipt ? receiptPrompt(channel.name)
         : hasCapabilities ? 'Use resort_workflow for durable, channel-authorized resort operations.'
           : noAuthorityPrompt(channel.name));
-    const hasLiveMutation = (channel.name === 'whatsapp' && liveWorkflows.has('whatsapp.reply'))
-      || (channel.name === 'social-sol' && liveWorkflows.has('meta.dm.reply'))
-      || (channel.name === 'reservations' && liveWorkflows.has('ownerrez.mutation.confirm'))
-      || (receipt && liveWorkflows.has('receipt.ingest'));
+    const namedMutations = CHANNEL_MUTATION_WORKFLOWS[channel.name] || [];
+    const hasLiveMutation = namedMutations.some(workflow => liveWorkflows.has(workflow))
+      || (receipt && ['receipt.ingest', 'receipt.annotate']
+        .some(workflow => liveWorkflows.has(workflow)));
     channels[channelId] = {
       enabled: true,
       requireMention: false,
@@ -167,4 +182,13 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { CONFIG_PATH, POLICY_PATH, PROMPTS, loadedPluginIds, noAuthorityPrompt, receiptPrompt, render };
+module.exports = {
+  CHANNEL_MUTATION_WORKFLOWS,
+  CONFIG_PATH,
+  POLICY_PATH,
+  PROMPTS,
+  loadedPluginIds,
+  noAuthorityPrompt,
+  receiptPrompt,
+  render,
+};

@@ -7,8 +7,14 @@ const path = require('node:path');
 const { ROOT } = require('../../lib/runtime-paths');
 const { loadControlToken } = require('../lib/workflow-auth');
 const { loadPolicy } = require('../lib/channel-policy');
+const { workflowIsLive } = require('../lib/workflow-execution-policy');
 
 const INBOX = path.join(ROOT, 'accounting', 'inbox');
+
+function accountingWorkflowsLive(policy) {
+  return workflowIsLive(policy, 'accounting.classify')
+    && workflowIsLive(policy, 'qbo.write');
+}
 
 async function execute(workflow, input, idempotencyKey, fetchImpl = fetch) {
   const token = loadControlToken();
@@ -50,7 +56,7 @@ async function main(fetchImpl = fetch) {
     .map(entry => path.join(INBOX, entry.name))
     .sort()
     .slice(0, 25);
-  if (loadPolicy().shadow_mode === true) {
+  if (!accountingWorkflowsLive(loadPolicy({ fresh: true }))) {
     console.log(JSON.stringify({ ok: true, shadow: true, candidates: files.map(file => path.basename(file)) }));
     return;
   }
@@ -74,4 +80,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { INBOX, execute, main };
+module.exports = { INBOX, accountingWorkflowsLive, execute, main };

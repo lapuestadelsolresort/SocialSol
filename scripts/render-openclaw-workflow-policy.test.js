@@ -40,3 +40,30 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
     else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;
   }
 });
+
+test('narrow live workflow cutovers remove the shadow-only prompt for their owning channels', () => {
+  const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
+  process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';
+  try {
+    const patch = render({
+      policy: {
+        shadow_mode: true,
+        live_workflows: ['paulina.daily', 'accounting.classify', 'qbo.write', 'receipt.ingest'],
+        channels: {
+          CPAULINA: { name: 'prospector-paulina', capabilities: ['paulina.send'] },
+          CACCT: { name: 'accounting', capabilities: ['accounting.write', 'qbo.write'] },
+          CRECEIPT: { name: 'receipt-worker', capabilities: ['receipts.submit', 'accounting.read_scoped'] },
+        },
+      },
+      currentConfig: { channels: { slack: { accounts: { 'test-account': {} } } } },
+    });
+    const channels = patch.channels.slack.accounts['test-account'].channels;
+    for (const channelId of ['CPAULINA', 'CACCT', 'CRECEIPT']) {
+      assert.deepEqual(channels[channelId].tools.allow, ['resort_workflow']);
+      assert.doesNotMatch(channels[channelId].systemPrompt, /^SHADOW MODE:/);
+    }
+  } finally {
+    if (previousAccount === undefined) delete process.env.OPENCLAW_SLACK_ACCOUNT;
+    else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;
+  }
+});
