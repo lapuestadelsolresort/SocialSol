@@ -257,8 +257,6 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status, updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_runs_channel ON workflow_runs(channel_id, created_at)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_serialization
-     ON workflow_runs(serialization_key) WHERE serialization_key IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_steps_due ON workflow_steps(status, available_at)`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_events_run ON workflow_events(run_id, id)`,
   `CREATE INDEX IF NOT EXISTS idx_workflow_effects_run ON workflow_effects(run_id, requested_at)`,
@@ -356,6 +354,8 @@ async function ensureColumnsAsync(db, sql, table, specs) {
 function ensureSchemaBetterSqlite(db) {
   for (const statement of SCHEMA_STATEMENTS) db.exec(statement);
   ensureColumnsBetterSqlite(db, 'workflow_runs', WORKFLOW_RUN_COLUMNS);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_serialization
+    ON workflow_runs(serialization_key) WHERE serialization_key IS NOT NULL`);
   ensureColumnsBetterSqlite(db, 'workflow_steps', WORKFLOW_STEP_COLUMNS);
   ensureColumnsBetterSqlite(db, 'workflow_effects', WORKFLOW_EFFECT_COLUMNS);
   ensureColumnsBetterSqlite(db, 'workflow_manual_reviews', WORKFLOW_MANUAL_REVIEW_COLUMNS);
@@ -392,6 +392,8 @@ async function ensureSchemaAsync(db, sql) {
     await db.query(sql.__dangerous__rawValue(statement));
   }
   await ensureColumnsAsync(db, sql, 'workflow_runs', WORKFLOW_RUN_COLUMNS);
+  await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_serialization
+    ON workflow_runs(serialization_key) WHERE serialization_key IS NOT NULL`);
   await ensureColumnsAsync(db, sql, 'workflow_steps', WORKFLOW_STEP_COLUMNS);
   await ensureColumnsAsync(db, sql, 'workflow_effects', WORKFLOW_EFFECT_COLUMNS);
   await ensureColumnsAsync(db, sql, 'workflow_manual_reviews', WORKFLOW_MANUAL_REVIEW_COLUMNS);

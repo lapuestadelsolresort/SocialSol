@@ -75,6 +75,42 @@ test('workflow schema is additive and includes durable run/effect/outbox state',
   });
 });
 
+test('workflow schema upgrades legacy runs before creating the serialization index', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-legacy-schema-'));
+  const db = createDB(path.join(directory, 'crm.db'));
+  try {
+    await db.query(sql`CREATE TABLE workflow_runs (
+      id TEXT PRIMARY KEY,
+      workflow_name TEXT NOT NULL,
+      workflow_version INTEGER NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'created',
+      trigger_type TEXT NOT NULL,
+      trigger_ref TEXT,
+      channel_id TEXT,
+      actor_user_id TEXT,
+      input_json TEXT NOT NULL,
+      state_json TEXT NOT NULL DEFAULT '{}',
+      output_json TEXT,
+      current_step TEXT,
+      error_code TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT
+    )`);
+    await ensureSchemaAsync(db, sql);
+    const runColumns = new Set((await db.query(sql`PRAGMA table_info(workflow_runs)`)).map(row => row.name));
+    assert.equal(runColumns.has('serialization_key'), true);
+    const indexes = new Set((await db.query(sql`PRAGMA index_list(workflow_runs)`)).map(row => row.name));
+    assert.equal(indexes.has('idx_workflow_runs_serialization'), true);
+  } finally {
+    await db.dispose();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('WhatsApp graph is idempotent and distinguishes provider acceptance, delivery, and read', async () => {
   await withDb(async db => {
     await db.query(sql`INSERT INTO meta_messages
