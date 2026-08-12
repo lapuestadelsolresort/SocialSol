@@ -18,10 +18,11 @@ from campaign_measurement import (
 )
 from campaign_registry import fetch_live_snapshot, group_registry, load_meta_secrets, load_registry
 from job_health import get_status, record
+from runtime_paths import runtime_state_path
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("DB_PATH", ROOT / "crm/data/crm.db"))
-HEALTH_PATH = ROOT / "state/tracking-health.json"
+HEALTH_PATH = runtime_state_path("tracking-health.json")
 OPENCLAW = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
 CHANNEL = os.environ.get("RESORT_SOCIAL_CHANNEL", "")
 SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "")

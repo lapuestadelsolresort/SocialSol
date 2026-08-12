@@ -29,6 +29,7 @@ workflow/openclaw-policy.patch.json
 
 # Runtime data
 **/data/
+/runtime/
 
 # Accounting runtime data (bank statements, FX cache, config with vendor IDs)
 accounting/*.csv

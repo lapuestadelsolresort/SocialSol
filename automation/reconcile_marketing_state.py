@@ -30,6 +30,27 @@ VARIANT_EXPERIMENTS = [
     ("exp-retreats-challenger-a", "Retreats challenger A LP", "retreats-challenger-a-en"),
 ]
 
+RETREATS_ALLOCATION_PASS_ID = "operator-retreats-allocation-2026-08-11"
+RETREATS_RECONCILED_ALLOCATION = {
+    "retreats-challenger-a-en": 85,
+    "retreats-control-en": 15,
+}
+RETREATS_RECONCILIATION = {
+    "rationale": (
+        "Preserve the already-live operator allocation while measurement continues; "
+        "the original weight change lacked a decision row and this reconciliation "
+        "does not claim a winner."
+    ),
+    "change_made": (
+        "Reconciled the source mirror to the observed live 85% challenger / 15% "
+        "control allocation without changing serving."
+    ),
+    "observation_window": (
+        "Continue until both retreat arms reach 100 qualified sessions; do not "
+        "promote or kill before the gate."
+    ),
+}
+
 
 def campaign_experiments(registry):
     experiments = []
@@ -55,6 +76,22 @@ def campaign_experiments(registry):
 
 
 def reconcile(con, experiments, budget_cap_daily_usd):
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS decisions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT DEFAULT (datetime('now')),
+          pass_id TEXT,
+          actor TEXT DEFAULT 'optimizer',
+          action TEXT NOT NULL,
+          target_kind TEXT,
+          target_id TEXT,
+          before TEXT,
+          after TEXT,
+          rationale TEXT
+        )
+        """
+    )
     for slug, title, campaign_id, utm in experiments:
         con.execute(
             """
@@ -77,6 +114,15 @@ def reconcile(con, experiments, budget_cap_daily_usd):
         )
 
     for slug, title, variant_slug in VARIANT_EXPERIMENTS:
+        reconciliation = (
+            RETREATS_RECONCILIATION
+            if slug == "exp-retreats-challenger-a"
+            else {
+                "rationale": "Every live variant needs an explicit experiment ledger.",
+                "change_made": "Registered the existing live variant without changing traffic weight.",
+                "observation_window": "100 qualified sessions before promotion or kill decision",
+            }
+        )
         con.execute(
             """
             INSERT INTO experiments (
@@ -85,16 +131,49 @@ def reconcile(con, experiments, budget_cap_daily_usd):
               observation_window, linked_variant_slug, source, created_by
             ) VALUES (?, ?, 'running', 'lp_variant', 'leads', 'cta', 'low',
               'Landing-page copy should improve attributable WhatsApp leads.',
-              'Every live variant needs an explicit experiment ledger.',
-              'Registered the existing live variant without changing traffic weight.',
+              ?,
+              ?,
               'wa_click_per_qualified', 'qualified_rate,lead_rate,booking_rate',
-              '100 qualified sessions before promotion or kill decision',
+              ?,
               ?, 'reconcile_marketing_state', 'reconcile_job')
             ON CONFLICT(slug) DO UPDATE SET
               status='running', linked_variant_slug=excluded.linked_variant_slug,
+              rationale=excluded.rationale, change_made=excluded.change_made,
+              observation_window=excluded.observation_window,
               updated_at=datetime('now')
             """,
-            (slug, title, variant_slug),
+            (
+                slug,
+                title,
+                reconciliation["rationale"],
+                reconciliation["change_made"],
+                reconciliation["observation_window"],
+                variant_slug,
+            ),
+        )
+
+    for variant_slug, weight in RETREATS_RECONCILED_ALLOCATION.items():
+        con.execute(
+            """
+            INSERT INTO decisions (
+              pass_id, actor, action, target_kind, target_id, before, after, rationale
+            )
+            SELECT ?, 'operator_reconciliation', 'reconcile_weight', 'lp_variant',
+                   ?, ?, ?, ?
+            WHERE NOT EXISTS (
+              SELECT 1 FROM decisions
+              WHERE pass_id=? AND action='reconcile_weight' AND target_id=?
+            )
+            """,
+            (
+                RETREATS_ALLOCATION_PASS_ID,
+                variant_slug,
+                json.dumps(50),
+                json.dumps(weight),
+                RETREATS_RECONCILIATION["rationale"],
+                RETREATS_ALLOCATION_PASS_ID,
+                variant_slug,
+            ),
         )
 
     con.execute(

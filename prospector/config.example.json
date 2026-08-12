@@ -53,6 +53,23 @@
     "allow_catch_all": false,
     "fail_closed": true
   },
+  "reporting": {
+    "active_campaign_slug": "planner_partner_program_v1",
+    "legacy_campaign_slugs": [
+      "planner_outreach_v1"
+    ],
+    "window_days": 14,
+    "open_tracking_enabled": false,
+    "open_tracking_enabled_at": null,
+    "open_tracking_subdomain": null,
+    "click_tracking_enabled": false,
+    "test_contact_names": [
+      "replace-with-internal-test-contact"
+    ],
+    "test_contact_name_prefixes": [
+      "Smoke Test"
+    ]
+  },
   "research": {
     "model": "claude-sonnet-4-6",
     "cost_cap_usd": 5,

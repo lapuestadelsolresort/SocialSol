@@ -5,7 +5,7 @@
   "source": null,
   "audience": null,
   "status": "live",
-  "traffic_weight": 50,
+  "traffic_weight": 85,
   "type": "landing_page",
   "is_control": false,
   "bucket": "leads",
