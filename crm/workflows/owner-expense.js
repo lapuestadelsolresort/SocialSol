@@ -46,6 +46,33 @@ function validateConfirmation(input) {
   if (!String(input.vendor || '').trim()) throw new Error('vendor is required');
 }
 
+function validateReconciliation(input) {
+  validateConfirmation(input);
+  if (!/^[A-Za-z0-9-]{1,80}$/.test(String(input.qboId || ''))) {
+    throw new Error('valid existing QBO entity id is required');
+  }
+  if (!Number.isFinite(Number(input.amountUsd)) || Number(input.amountUsd) <= 0) {
+    throw new Error('positive existing QBO USD amount is required');
+  }
+  if (input.fxRate !== null && input.fxRate !== undefined
+    && (!Number.isFinite(Number(input.fxRate)) || Number(input.fxRate) <= 0)) {
+    throw new Error('positive FX rate is required when supplied');
+  }
+  if (!String(input.description || '').trim()) throw new Error('description is required');
+  const currency = String(input.currency || '').toUpperCase();
+  const expectedUsd = currency === 'MXN'
+    ? Number(input.amount) / Number(input.fxRate)
+    : Number(input.amount);
+  if ((currency === 'MXN' && !Number.isFinite(expectedUsd))
+    || Math.abs(expectedUsd - Number(input.amountUsd)) >= 0.01) {
+    throw new Error('existing QBO USD amount does not match the original amount and FX rate');
+  }
+  const sourceReference = String(input.sourceReference || '').trim();
+  if (!sourceReference || sourceReference.length > 160 || /[\r\n]/.test(sourceReference)) {
+    throw new Error('sourceReference is required for existing QBO reconciliation');
+  }
+}
+
 function parseFiles(value) {
   try {
     const parsed = JSON.parse(value || '[]');
@@ -77,6 +104,7 @@ function expenseForKey(categoryKey) {
 
 function qboArguments(receipt, profile, account, {
   qboId = null, verifyOnly = false, amountUsd = null, fxRate = null,
+  reconcileExisting = false, sourceReference = null,
 } = {}) {
   const args = [
     '--receipt-id', receipt.id,
@@ -105,6 +133,9 @@ function qboArguments(receipt, profile, account, {
       args.push('--expected-amount-usd', String(amountUsd));
     }
     if (fxRate !== null && fxRate !== undefined) args.push('--expected-fx-rate', String(fxRate));
+    if (reconcileExisting) {
+      args.push('--reconcile-existing', '--expected-source-reference', String(sourceReference || ''));
+    }
   }
   else args.push('--live');
   return args;
@@ -682,14 +713,222 @@ const confirmDefinition = {
   },
 };
 
+const reconcileDefinition = {
+  name: 'receipt.owner_expense.reconcile',
+  version: 1,
+  capability: 'qbo.owner_expense.write',
+  mutates: true,
+  allowedTriggers: ['admin_reconciliation'],
+  validate: validateReconciliation,
+  steps: [
+    {
+      key: 'load_candidate', effectClass: 'read', maxAttempts: 2,
+      async run({ db, run, input }) {
+        const profile = profileForRun(run);
+        const account = input.transactionKind === OWNER_PAID_EXPENSE
+          ? expenseForKey(input.categoryKey) : null;
+        const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${input.receiptId}`);
+        if (!receipt) throw new Error('owner expense receipt was not found');
+        if (receipt.slack_channel_id !== run.channel_id) {
+          const error = new Error('owner expense receipt belongs to another channel');
+          error.code = 'receipt_scope_violation';
+          throw error;
+        }
+        if (receipt.qbo_entity_id || receipt.status === 'posted') {
+          throw new Error('owner expense receipt is already posted');
+        }
+        if (!['needs_review', 'ready_to_post'].includes(receipt.status)) {
+          throw new Error('owner expense receipt is not eligible for QBO reconciliation');
+        }
+        return { receipt, profile, account };
+      },
+    },
+    {
+      key: 'register_reconciliation_effect', effectClass: 'local_write', maxAttempts: 1,
+      async run({ db, run, input, state, store, stepKey }) {
+        const isRepayment = input.transactionKind === OWNER_REPAYMENT;
+        const entityType = isRepayment ? 'Purchase' : 'JournalEntry';
+        const effect = await store.createEffect(db, {
+          runId: run.id,
+          stepKey,
+          effectType: isRepayment
+            ? 'accounting_purchase_reconciliation'
+            : 'accounting_journal_entry_reconciliation',
+          provider: 'quickbooks',
+          operation: isRepayment
+            ? 'owner_repayment.reconcile_existing_purchase'
+            : 'owner_expense.reconcile_existing_journal_entry',
+          idempotencyKey: `receipt:${input.receiptId}:qbo-reconcile:${entityType}:${input.qboId}`,
+          request: {
+            receiptId: input.receiptId,
+            qboId: String(input.qboId),
+            entityType,
+            transactionDate: input.transactionDate,
+            currency: input.currency,
+            amount: Number(input.amount),
+            amountUsd: Number(input.amountUsd),
+            fxRate: input.fxRate === null || input.fxRate === undefined ? null : Number(input.fxRate),
+            transactionKind: input.transactionKind,
+            categoryKey: input.categoryKey || null,
+            expenseAccount: state.load_candidate.account,
+            liabilityAccount: state.load_candidate.profile.liability_account,
+            repaymentBankAccount: isRepayment ? state.load_candidate.profile.repayment_bank_account : null,
+            sourceReference: String(input.sourceReference),
+          },
+          target: {
+            entityType,
+            qboId: String(input.qboId),
+            liabilityAccountId: state.load_candidate.profile.liability_account.id,
+          },
+        });
+        return { effectId: effect.id, entityType };
+      },
+    },
+    {
+      key: 'verify_existing_qbo', effectClass: 'external_read', maxAttempts: 3,
+      async run({ db, run, input, state, services, store, stepKey }) {
+        if (typeof services.runCommand !== 'function') throw new Error('workflow command service is unavailable');
+        const candidate = {
+          ...state.load_candidate.receipt,
+          transaction_date: input.transactionDate,
+          currency: String(input.currency).toUpperCase(),
+          amount: Number(input.amount),
+          transaction_kind: input.transactionKind,
+          vendor: String(input.vendor).trim(),
+          description: String(input.description || '').trim(),
+          category_key: input.transactionKind === OWNER_PAID_EXPENSE ? input.categoryKey : null,
+        };
+        let result;
+        try {
+          result = await services.runCommand(pythonCommand(
+            'accounting/owner_expense_qbo.py',
+            qboArguments(candidate, state.load_candidate.profile, state.load_candidate.account, {
+              qboId: String(input.qboId),
+              verifyOnly: true,
+              amountUsd: Number(input.amountUsd),
+              fxRate: input.fxRate,
+              reconcileExisting: true,
+              sourceReference: String(input.sourceReference),
+            }),
+          ));
+        } catch (error) {
+          error.code = error.code || 'qbo_owner_expense_reconciliation_readback_failed';
+          error.retryable = true;
+          error.requiresManualReview = true;
+          throw error;
+        }
+        const parsed = lastJsonValue(result.stdout);
+        if (!parsed || parsed.status !== 'VERIFIED' || parsed.verified_by_readback !== true
+          || parsed.source_reference_verified !== true
+          || String(parsed.qbo_id || '') !== String(input.qboId)
+          || String(parsed.qbo_entity_type || '') !== state.register_reconciliation_effect.entityType) {
+          const error = new Error(parsed?.error || 'existing QBO owner ledger entity was not verified exactly');
+          error.code = 'qbo_owner_expense_reconciliation_unverified';
+          error.retryable = true;
+          error.requiresManualReview = true;
+          throw error;
+        }
+        const evidence = await store.createEvidence(db, {
+          runId: run.id,
+          stepKey,
+          source: `quickbooks.${String(parsed.qbo_entity_type).toLowerCase()}.reconciliation_readback`,
+          sourceRef: String(input.qboId),
+          payload: { ...parsed, sourceReference: String(input.sourceReference) },
+        });
+        await store.transitionEffect(db, {
+          effectId: state.register_reconciliation_effect.effectId,
+          providerRef: String(input.qboId),
+          status: 'verified_by_readback',
+          providerStatus: `${String(parsed.qbo_entity_type).toLowerCase()}_existing_lines_verified`,
+          response: { ...parsed, evidenceId: evidence.id, reconciledExisting: true },
+        });
+        return { ...parsed, evidenceId: evidence.id };
+      },
+    },
+    {
+      key: 'persist_reconciliation', effectClass: 'local_write', maxAttempts: 2,
+      async run({ db, run, input, state, store }) {
+        const receipt = state.load_candidate.receipt;
+        const priorExtraction = store.parseJson(receipt.extraction_json, {});
+        const categoryName = state.load_candidate.account?.name || null;
+        const reconciliation = {
+          source: 'admin_qbo_reconciliation',
+          qboId: String(input.qboId),
+          qboEntityType: state.verify_existing_qbo.qbo_entity_type,
+          sourceReference: String(input.sourceReference),
+          evidenceId: state.verify_existing_qbo.evidenceId,
+          reconciledAt: new Date().toISOString(),
+        };
+        await db.query(sql`UPDATE accounting_receipts SET
+          vendor=${String(input.vendor).trim().slice(0, 300)}, transaction_date=${input.transactionDate},
+          currency=${String(input.currency).toUpperCase()}, amount=${Number(input.amount)},
+          transaction_kind=${input.transactionKind}, description=${String(input.description || '').trim().slice(0, 1000)},
+          category_key=${input.transactionKind === OWNER_PAID_EXPENSE ? input.categoryKey : null},
+          category_name=${categoryName}, extraction_confidence=1, review_reason=NULL,
+          extraction_json=${JSON.stringify({ ...priorExtraction, reconciliation })},
+          amount_usd=${Number(input.amountUsd)}, fx_rate=${input.fxRate ?? null},
+          qbo_entity_type=${state.verify_existing_qbo.qbo_entity_type}, qbo_entity_id=${String(input.qboId)},
+          status='posted', posted_at=datetime('now'), workflow_run_id=${run.id}, updated_at=datetime('now')
+          WHERE id=${receipt.id} AND qbo_entity_id IS NULL AND status IN ('needs_review','ready_to_post')`);
+        const [readback] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${receipt.id}`);
+        if (!readback || readback.status !== 'posted'
+          || String(readback.qbo_entity_id || '') !== String(input.qboId)
+          || String(readback.workflow_run_id || '') !== String(run.id)) {
+          throw new Error('owner expense reconciliation projection readback mismatch');
+        }
+        return { receipt: readback };
+      },
+    },
+    {
+      key: 'notify', effectClass: 'internal_notification', maxAttempts: 2,
+      async run({ db, run, input, state, store }) {
+        const profile = state.load_candidate.profile;
+        const isRepayment = input.transactionKind === OWNER_REPAYMENT;
+        const accountLine = isRepayment
+          ? `Debit: ${profile.liability_account.name} · Credit: ${profile.repayment_bank_account.name}`
+          : `Debit: ${state.load_candidate.account.name} · Credit: ${profile.liability_account.name}`;
+        const outbox = await store.enqueueOutbox(db, {
+          runId: run.id,
+          topic: 'slack.notification',
+          idempotencyKey: `${run.id}:owner-expense:reconciled:slack`,
+          payload: {
+            channelId: run.channel_id,
+            threadTs: state.load_candidate.receipt.slack_thread_ts || state.load_candidate.receipt.slack_message_id,
+            message: [
+              `✅ Reconciled the existing QBO ${state.verify_existing_qbo.qbo_entity_type} ${input.qboId} to ${profile.owner_name}'s receipt ledger; no new QBO transaction was created.`,
+              accountLine,
+              `USD ${Number(input.amountUsd).toFixed(2)} · Source reference: ${input.sourceReference}`,
+              `Workflow: ${run.id} · Evidence: ${state.verify_existing_qbo.evidenceId}`,
+            ].join('\n'),
+          },
+        });
+        return { outboxId: outbox.id, status: 'reconciled' };
+      },
+    },
+  ],
+  output({ state }) {
+    return {
+      status: 'posted',
+      reconciledExisting: true,
+      receiptId: state.persist_reconciliation.receipt.id,
+      qboEntityType: state.verify_existing_qbo.qbo_entity_type,
+      qboId: state.verify_existing_qbo.qbo_id,
+      effectId: state.register_reconciliation_effect.effectId,
+      evidenceId: state.verify_existing_qbo.evidenceId,
+    };
+  },
+};
+
 module.exports = {
   confirmDefinition,
   confirmationCommand,
   ingestDefinition,
   processDefinition,
   qboArguments,
+  reconcileDefinition,
   reviewReasons,
   validateConfirmation,
   validateIngest,
+  validateReconciliation,
   validIsoDate,
 };

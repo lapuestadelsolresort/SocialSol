@@ -81,6 +81,29 @@ class OwnerExpenseQBOTests(unittest.TestCase):
                 amount_usd=252.69, expense_account_id='5100', liability_account_id='2100',
             )
 
+    def test_reconciliation_links_existing_journal_by_exact_source_reference(self):
+        entry = build_journal_entry(
+            receipt_id='legacy-marker', txn_date=date(2026, 8, 6), amount=4400,
+            currency='MXN', amount_usd=255.37, fx_rate=17.23,
+            expense_account_id='5100', liability_account_id='2100',
+            owner_name='Test Owner', vendor='Fidencio Lopez',
+            description='Maintenance labor - SPEI ref 0670449961',
+        )
+        entry['Id'] = '2472'
+        verified = verify_journal_entry(
+            entry, qbo_id='2472', receipt_id='receipt-uuid', txn_date=date(2026, 8, 6),
+            amount_usd=255.37, expense_account_id='5100', liability_account_id='2100',
+            expected_source_reference='0670449961', require_receipt_marker=False,
+        )
+        self.assertTrue(verified['source_reference_verified'])
+        self.assertFalse(verified['receipt_marker_verified'])
+        with self.assertRaisesRegex(ValueError, 'source reference readback mismatch'):
+            verify_journal_entry(
+                entry, qbo_id='2472', receipt_id='receipt-uuid', txn_date=date(2026, 8, 6),
+                amount_usd=255.37, expense_account_id='5100', liability_account_id='2100',
+                expected_source_reference='wrong-reference', require_receipt_marker=False,
+            )
+
     def test_repayment_purchase_debits_liability_and_credits_bank(self):
         purchase = build_repayment_purchase(
             receipt_id='receipt-2', txn_date=date(2026, 8, 6), amount=4700,

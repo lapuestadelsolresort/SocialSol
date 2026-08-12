@@ -81,6 +81,25 @@ Rare owner repayments are also review-gated. Their exact confirmation creates
 a QBO Purchase that debits the owner liability and credits the configured bank,
 with an exact-date/amount/bank duplicate preflight before the write.
 
+If a QBO owner-ledger entity was created outside the durable workflow, reconcile
+it instead of confirming the pending receipt (which could create a duplicate).
+The command is dry-run by default and, in production mode, verifies the existing
+QBO ID, date, USD amount, debit/credit accounts, and receipt source reference
+before recording the effect, evidence, and posted receipt projection. It never
+creates a QBO transaction:
+
+```bash
+npm run reconcile:owner-expense -- \
+  --receipt-id <receipt-uuid> --qbo-id <existing-qbo-id> \
+  --date YYYY-MM-DD --currency MXN --amount 4400 --amount-usd 255.37 \
+  --fx-rate 17.23 --category-key maintenance \
+  --vendor "Vendor Name" --description "Business purpose" \
+  --source-reference <receipt-reference>
+
+# After inspecting the dry-run output, repeat with:
+# --confirm-production
+```
+
 ## Adding a New Vendor
 
 Edit `config.json` → `vendors`. Add:
