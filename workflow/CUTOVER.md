@@ -90,9 +90,14 @@ after every domain has completed its independent cutover.
 |---|---|
 | `graph-paulina` | `com.lapuestadelsolresort.orchestrator` |
 | `graph-regina` | `com.lapuestadelsolresort.regina-anniversary` |
-| `graph-social-publish` | `com.lapuestadelsolresort.gtku` |
+| `graph-social-routine` | `com.lapuestadelsolresort.gtku` |
 | `graph-crm-sync` | legacy OwnerRez sync LaunchAgent |
 | `graph-squarespace-sync` | legacy Squarespace sync LaunchAgent |
+
+`graph-social-publish` is the five-minute dispatcher for approved
+`social_content` rows. It is additive and does not replace GTKU. The daily
+`graph-social-routine` owns the durable GTKU series after the legacy GTKU
+LaunchAgent is unloaded.
 
 The accounting inbox graph has no legacy autonomous QBO writer; add a statement
 to `accounting/inbox/` only after the dry-run classification has been reviewed.
