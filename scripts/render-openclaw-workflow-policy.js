@@ -90,16 +90,21 @@ function render({ policy, currentConfig, pluginIds = [] }) {
       || (receipt && ['receipt.ingest', 'receipt.annotate',
         'receipt.owner_expense.ingest', 'receipt.owner_expense.process', 'receipt.owner_expense.confirm']
         .some(workflow => liveWorkflows.has(workflow)));
+    const workflowOnly = policy.shadow_mode !== true || hasLiveMutation || channel.name === 'reservations';
     channels[channelId] = {
       enabled: true,
       requireMention: false,
       allowBots: false,
-      ...(policy.shadow_mode === true && !hasLiveMutation
+      ...(workflowOnly
+        // The empty additive list is intentional. Production config is updated
+        // with a deep merge, so this clears a stale shadow-mode alsoAllow value.
+        ? { tools: { allow: hasCapabilities ? ['resort_workflow'] : [], alsoAllow: [] } }
+        : policy.shadow_mode === true
         ? (hasCapabilities ? { tools: { alsoAllow: ['resort_workflow'] } } : {})
-        : { tools: { allow: hasCapabilities ? ['resort_workflow'] : [] } }),
-      systemPrompt: policy.shadow_mode === true && !hasLiveMutation
-        ? 'SHADOW MODE: keep the existing production path active. resort_workflow mutations are disabled; use its reads only as comparison evidence. Provider delivery and completion claims still require a real artifact.'
-        : prompt,
+        : {}),
+      systemPrompt: workflowOnly
+        ? prompt
+        : 'SHADOW MODE: keep the existing production path active. resort_workflow mutations are disabled; use its reads only as comparison evidence. Provider delivery and completion claims still require a real artifact.',
     };
   }
   const existingPaths = currentConfig.plugins?.load?.paths || [];

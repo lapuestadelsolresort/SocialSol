@@ -8,6 +8,8 @@ import {
   createOwnerRezClaimHandler,
   createReceiptConfirmClaimHandler,
   createReservationReadClaimHandler,
+  createReservationReplyDispatchHandler,
+  createReservationToolGuard,
   createReceiptHandler,
   createWorkflowTool,
   formatOwnerRezOccupancyReply,
@@ -284,6 +286,86 @@ test('reservation read claim executes the durable live workflow before replying'
   });
   assert.equal(calls[0].idempotencyKey, 'slack:C-RES:3000.1:ownerrez.occupancy.read:upcoming');
   assert.ok(result.reply.text.indexOf('Sherry bachelor') < result.reply.text.indexOf('Eric Candelario'));
+});
+
+test('reservation reply dispatch claims an ordinary Slack turn before the model runs', async () => {
+  const config = pluginConfig({ reservationsChannelIds: ['C-RES'], slackAccountId: 'ig-drafts' });
+  const calls = [];
+  const sent = [];
+  let finalized = null;
+  let idleReason = null;
+  const counts = { tool: 0, block: 0, final: 0 };
+  const handler = createReservationReplyDispatchHandler({
+    config,
+    today: () => '2026-08-12',
+    execute: async (_config, request) => {
+      calls.push(request);
+      return {
+        run: {
+          id: 'run-real-contract', workflow_name: 'ownerrez.occupancy.read', status: 'completed',
+          output: {
+            window: { start: '2026-08-12', end: '2027-08-17' },
+            primaryCalendarEntries: [{
+              id: 100, arrival: '2026-09-03', departure: '2026-09-07',
+              calendar_entry_kind: 'manual_calendar_entry',
+              display_name: 'Sherry bachelor and bachelorette party',
+              property: { name: 'Puesta del Sol Resort' },
+            }],
+          },
+        },
+      };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', Surface: 'slack', AccountId: 'ig-drafts',
+      OriginatingChannel: 'slack', OriginatingTo: 'channel:C-RES',
+      MessageSidFull: '1786566667.695009', SenderId: 'U-JASON',
+      BodyForCommands: '<@BOT> (OpenClaw IG Bot) what are the next reservations?',
+      CommandAuthorized: true,
+    },
+    inboundAudio: false,
+    shouldRouteToOriginating: false,
+    shouldSendToolSummaries: true,
+    sendPolicy: 'allow',
+  }, {
+    dispatcher: {
+      sendFinalReply(payload) { sent.push(payload); counts.final += 1; return true; },
+      getQueuedCounts() { return { ...counts }; },
+    },
+    recordProcessed(outcome, details) { finalized = { outcome, details }; },
+    markIdle(reason) { idleReason = reason; },
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.queuedFinal, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workflow, 'ownerrez.occupancy.read');
+  assert.equal(calls[0].context.messageId, '1786566667.695009');
+  assert.equal(calls[0].context.actorUserId, 'U-JASON');
+  assert.equal(calls[0].context.channelId, 'C-RES');
+  assert.match(sent[0].text, /Sherry bachelor and bachelorette party/);
+  assert.equal(finalized.outcome, 'completed');
+  assert.equal(finalized.details.reason, 'reservation_workflow_reply_dispatch');
+  assert.equal(idleReason, 'message_completed');
+});
+
+test('reservations tool guard blocks shell bypass even when OpenClaw misses the channel allowlist', async () => {
+  const guard = createReservationToolGuard({
+    config: pluginConfig({ reservationsChannelIds: ['C-RES'] }),
+  });
+  assert.deepEqual(await guard({ toolName: 'exec', params: {} }, {
+    channelId: 'c-res',
+  }), {
+    block: true,
+    blockReason: '#reservations is restricted to the durable resort_workflow control plane.',
+  });
+  assert.equal(await guard({ toolName: 'resort_workflow', params: {} }, {
+    channelId: 'c-res',
+  }), undefined);
+  assert.equal(await guard({ toolName: 'exec', params: {} }, {
+    channelId: 'C-OTHER',
+  }), undefined);
 });
 
 test('reservation read claim fails closed when live OwnerRez is unavailable', async () => {
