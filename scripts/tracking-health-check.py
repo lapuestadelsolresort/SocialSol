@@ -20,10 +20,11 @@ from campaign_config import compare_brief_to_live  # noqa: E402
 from capi_health import meta_capi_delivery_health, meta_capi_failure_message  # noqa: E402
 from meta_campaign_control import fetch_live_configuration  # noqa: E402
 from job_health import record  # noqa: E402
+from runtime_paths import runtime_state_path  # noqa: E402
 
 DB_PATH = Path(os.environ.get("DB_PATH", ROOT / "crm/data/crm.db"))
-STATE_PATH = ROOT / "state/tracking-health.json"
-VERIFICATION_PATH = ROOT / "state/tracking-verification.json"
+STATE_PATH = runtime_state_path("tracking-health.json")
+VERIFICATION_PATH = runtime_state_path("tracking-verification.json")
 OPENCLAW = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
 CHANNEL = os.environ.get("TRACKING_QC_CHANNEL", "")
 SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "ig-drafts")

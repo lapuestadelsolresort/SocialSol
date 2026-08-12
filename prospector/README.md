@@ -8,10 +8,13 @@ Paulina is the resort's outbound lead-discovery and compliant email pipeline.
    addresses, and unknown verifier results before composition.
 3. `composer.js` creates persona-aware drafts only for pre-verified recipients
    and runs the compliance gate.
-4. `orchestrator.js` re-verifies approved recipients, adds unsubscribe artifacts,
-   enforces sending limits, sends through Resend, and records outcomes.
-5. `scripts/engagement-analysis.js` summarizes performance and maintains a
-   private iteration-state file.
+4. The durable `paulina.daily` graph invokes `orchestrator.js`, which re-verifies
+   approved recipients, adds unsubscribe artifacts, enforces sending limits,
+   sends through Resend, and records outcomes attributed to that workflow run.
+5. `scripts/performance-status.js` is the canonical read-only status report.
+   `scripts/engagement-analysis.js` uses engagement data to maintain a private
+   iteration-state file. The weekday preparation job is scheduled for migration
+   into its own durable graph; it is not the Resend sending authority.
 
 Copy `config.example.json` to ignored `config.json` and configure `.env` before
 running. Research runs, fetched-page cache, draft state, and recent-send logs
@@ -58,3 +61,42 @@ sender reputation have been investigated.
 
 Automation-facing commands reserve stdout for one JSON result. Diagnostics go
 to stderr and the Prospector log, so daily Slack counts reflect actual drafts.
+
+## Reporting contract
+
+Run `node prospector/scripts/performance-status.js` for all human-facing status
+and performance answers. `outreach_sends` is a workflow ledger, so `COUNT(*)`
+is not a sent-email metric: only rows with `sent_at IS NOT NULL` count as
+sends. The report keeps internal tests, non-Paulina campaigns, cancelled rows,
+and the global CRM contact pool separate from production planner outreach.
+
+Open and click metrics are configuration-gated. Open tracking additionally
+requires `reporting.open_tracking_enabled_at`; only messages sent on or after
+that timestamp enter its denominator because historical opens cannot be
+backfilled. When tracking is disabled or lacks a valid activation timestamp,
+the report returns opens as unavailable rather than zero. A delivery webhook
+means the receiving server accepted the message; it is not proof of inbox
+placement, sender reputation, or warmup health. Open pixels are approximate
+because image blocking, privacy features, and automated scanners can suppress
+or inflate counts. Report observed reply counts and rates without grading them
+unless an approved benchmark and adequate sample are available.
+
+### Resend open-tracking production configuration
+
+Paulina's Resend sending domain uses a dedicated, DNS-verified tracking host:
+
+- sending domain: `outreach.lapuestadelsolresort.com`
+- tracking host: `links.outreach.lapuestadelsolresort.com`
+- DNS: unproxied CNAME to `links1.resend-dns.com`
+- open tracking: enabled
+- click tracking: disabled (links remain unchanged)
+- activation boundary: `2026-08-10T00:03:04Z`
+- webhook: `https://webhook.lapuestadelsolresort.com/webhook/resend`, subscribed
+  to all Resend events including `email.opened`
+
+The CRM records only the first `email.opened` event in
+`outreach_sends.opened_at`. Keep the Resend activation boundary and
+`reporting.open_tracking_enabled_at` identical. If the tracking host or setting
+is replaced, record a new activation timestamp; never move it backward to make
+historical messages look tracking-eligible. The canonical status and daily
+engagement reports use the eligible delivered-message count as the denominator.

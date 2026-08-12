@@ -28,9 +28,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "automation"))
 from campaign_registry import fetch_live_snapshot, graph_api, load_meta_secrets, load_registry  # noqa: E402
 from job_health import record  # noqa: E402
+from runtime_paths import runtime_state_path  # noqa: E402
 
 DB_PATH = Path(os.environ.get("DB_PATH", ROOT / "crm/data/crm.db"))
-STATE_PATH = ROOT / "state/tracker-liveness.json"
+STATE_PATH = runtime_state_path("tracker-liveness.json")
 OPENCLAW = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
 CHANNEL = os.environ.get("TRACKING_QC_CHANNEL", "")
 SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "ig-drafts")

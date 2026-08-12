@@ -157,6 +157,7 @@ lp/variants/           Versioned landing-page copy
 campaigns/             Sanitized configuration templates
 launchagents/          Portable LaunchAgent plist templates
 memory/                Sync state files (not committed)
+runtime/state/          Generated health and tracking snapshots (not committed)
 ```
 
 ---
@@ -232,7 +233,7 @@ npm run check:stack
 Create runtime directories without committing them:
 
 ```bash
-mkdir -p crm/data logs secrets campaigns
+mkdir -p crm/data logs secrets campaigns runtime/state
 cp campaigns/active-campaigns.example.json campaigns/active-campaigns.json
 ```
 

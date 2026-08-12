@@ -12,11 +12,12 @@ from zoneinfo import ZoneInfo
 
 from campaign_measurement import crm_metrics, meta_metrics
 from campaign_registry import fetch_live_snapshot, group_registry, load_meta_secrets, load_registry
+from runtime_paths import runtime_state_path
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("DB_PATH", ROOT / "crm/data/crm.db"))
-HEALTH_PATH = ROOT / "state/tracking-health.json"
-VERIFICATION_PATH = ROOT / "state/tracking-verification.json"
+HEALTH_PATH = runtime_state_path("tracking-health.json")
+VERIFICATION_PATH = runtime_state_path("tracking-verification.json")
 MIN_VERIFIED_DAYS = 14
 
 
