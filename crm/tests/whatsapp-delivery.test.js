@@ -12,7 +12,7 @@ const createDBModule = require('@databases/sqlite');
 const createDB = createDBModule.default || createDBModule;
 const { sql } = require('@databases/sqlite');
 const { ensureSchemaAsync } = require('../lib/workflow-schema');
-const { sendWhatsApp } = require('../lib/twilio-whatsapp');
+const { MAX_MESSAGE_LENGTH, sendWhatsApp } = require('../lib/twilio-whatsapp');
 const { buildRouter } = require('../routes/whatsapp');
 const { queueWhatsAppInbound } = require('../scripts/workflow-worker');
 
@@ -104,6 +104,24 @@ test('Twilio transport ambiguity is marked non-retryable', async () => {
     },
     fetchImpl: async () => { throw new Error('connection reset'); },
   }), error => error.code === 'ambiguous_external_result' && error.retryable === false);
+});
+
+test('Twilio message length is rejected locally before the provider request', async () => {
+  let providerRequests = 0;
+  assert.equal(MAX_MESSAGE_LENGTH, 1600);
+  await assert.rejects(() => sendWhatsApp({
+    toPhone: '+14155550100',
+    message: 'x'.repeat(MAX_MESSAGE_LENGTH + 1),
+    secrets: {
+      account_sid: 'AC-TEST', api_key_sid: 'SK-TEST', api_key_secret: 'secret',
+      whatsapp_number: '+15550001111',
+    },
+    fetchImpl: async () => {
+      providerRequests += 1;
+      return { ok: true, status: 201, json: async () => ({ sid: 'SM-OUT', status: 'queued' }) };
+    },
+  }), /WhatsApp message is too long/);
+  assert.equal(providerRequests, 0);
 });
 
 test('legacy HTTP send endpoints cannot bypass the #whatsapp control plane', async () => {
