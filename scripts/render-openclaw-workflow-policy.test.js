@@ -78,18 +78,23 @@ test('reservations prompt requires live OwnerRez reads and preserves titled manu
   try {
     const patch = render({
       policy: {
-        shadow_mode: false,
+        shadow_mode: true,
+        live_workflows: [],
         channels: {
           CRESERVATIONS: { name: 'reservations', capabilities: ['ownerrez.read'] },
         },
       },
       currentConfig: { channels: { slack: { accounts: { 'test-account': {} } } } },
     });
-    const prompt = patch.channels.slack.accounts['test-account'].channels.CRESERVATIONS.systemPrompt;
+    const channel = patch.channels.slack.accounts['test-account'].channels.CRESERVATIONS;
+    const prompt = channel.systemPrompt;
     assert.match(prompt, /call ownerrez\.occupancy\.read/);
     assert.match(prompt, /use nextCalendarEntry/);
     assert.match(prompt, /not proof of owner use/);
     assert.match(prompt, /Never answer mutable booking facts from CRM rows, memory/);
+    assert.deepEqual(channel.tools.allow, ['resort_workflow']);
+    assert.deepEqual(channel.tools.alsoAllow, []);
+    assert.doesNotMatch(prompt, /^SHADOW MODE:/);
     assert.deepEqual(
       patch.plugins.entries['resort-workflows'].config.reservationsChannelIds,
       ['CRESERVATIONS'],

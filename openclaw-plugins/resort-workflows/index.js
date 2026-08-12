@@ -545,6 +545,7 @@ export function createReservationReadClaimHandler({
       };
     }
     try {
+      logger?.info?.(`resort-workflows claiming OwnerRez reservation read ${messageId} in ${channelId}`);
       const payload = await execute(config, {
         workflow: 'ownerrez.occupancy.read',
         input: { start: request.start, end: request.end },
@@ -567,6 +568,68 @@ export function createReservationReadClaimHandler({
         reply: { text: `The live OwnerRez calendar is temporarily unavailable (${error.code || 'workflow_error'}). No booking answer was generated from CRM data or memory; please retry or check #ops.` },
       };
     }
+  };
+}
+
+function reservationClaimEventFromFinalizedContext(ctx = {}) {
+  return {
+    channel: String(ctx.OriginatingChannel || ctx.Surface || ctx.Provider || '').toLowerCase(),
+    accountId: ctx.AccountId,
+    conversationId: String(ctx.OriginatingTo || ctx.To || ctx.From || '').replace(/^channel:/, ''),
+    messageId: ctx.MessageSidFull || ctx.MessageSid || ctx.MessageSidFirst || ctx.MessageSidLast,
+    senderId: ctx.SenderId,
+    senderName: ctx.SenderName,
+    senderUsername: ctx.SenderUsername,
+    threadId: ctx.MessageThreadId,
+    bodyForAgent: ctx.BodyForCommands || ctx.CommandBody || ctx.RawBody || ctx.Body || ctx.BodyForAgent || '',
+  };
+}
+
+export function createReservationReplyDispatchHandler(options = {}) {
+  const claim = createReservationReadClaimHandler(options);
+  const logger = options.logger || null;
+  return async (event, ctx) => {
+    if (event?.isTailDispatch) return undefined;
+    const inboundEvent = reservationClaimEventFromFinalizedContext(event?.ctx);
+    const result = await claim(inboundEvent, {
+      channelId: inboundEvent.channel,
+      accountId: inboundEvent.accountId,
+      conversationId: inboundEvent.conversationId,
+      messageId: inboundEvent.messageId,
+      senderId: inboundEvent.senderId,
+    });
+    if (!result?.handled) return undefined;
+
+    let queuedFinal = false;
+    if (!event.suppressUserDelivery && event.sendPolicy !== 'deny' && result.reply) {
+      try {
+        await ctx.onReplyStart?.();
+        queuedFinal = ctx.dispatcher.sendFinalReply(result.reply);
+      } catch (error) {
+        logger?.error?.(`resort-workflows deterministic reservation reply delivery failed: ${error.message}`);
+      }
+    }
+    ctx.recordProcessed?.('completed', { reason: 'reservation_workflow_reply_dispatch' });
+    ctx.markIdle?.('message_completed');
+    return {
+      handled: true,
+      queuedFinal,
+      counts: ctx.dispatcher.getQueuedCounts(),
+    };
+  };
+}
+
+export function createReservationToolGuard({ config } = {}) {
+  const reservations = new Set(
+    [...config.reservationsChannelIds].map(channelId => String(channelId).toLowerCase()),
+  );
+  return async (event, ctx) => {
+    const channelId = String(ctx?.channelId || '').replace(/^channel:/, '').toLowerCase();
+    if (!reservations.has(channelId) || event?.toolName === 'resort_workflow') return undefined;
+    return {
+      block: true,
+      blockReason: '#reservations is restricted to the durable resort_workflow control plane.',
+    };
   };
 }
 
@@ -877,6 +940,10 @@ const plugin = {
       if (!config.agentIds.has(ctx.agentId)) return null;
       return createWorkflowTool({ config, ctx });
     }, { name: 'resort_workflow' });
+    // OpenClaw 2026.5 invokes inbound_claim only for plugin-bound conversations.
+    // reply_dispatch is the terminal pre-model hook for ordinary Slack channels.
+    api.on('reply_dispatch', createReservationReplyDispatchHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
+    api.on('before_tool_call', createReservationToolGuard({ config }), { priority: 50, timeoutMs: 5_000 });
     api.on('inbound_claim', createReservationReadClaimHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('inbound_claim', createInboundClaimHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });
     api.on('inbound_claim', createOwnerRezClaimHandler({ config, logger: api.logger }), { priority: 210, timeoutMs: 70_000 });
