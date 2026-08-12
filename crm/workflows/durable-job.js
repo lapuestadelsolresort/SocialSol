@@ -52,6 +52,7 @@ function makeDurableJob(options) {
     notificationChannelName = null,
     shouldNotify = () => true,
     buildNotificationMessage = null,
+    mentionUsers = true,
   } = options;
   if (!name || !capability || !provider || typeof buildCommand !== 'function' || typeof verify !== 'function') {
     throw new Error('invalid durable job definition');
@@ -202,7 +203,9 @@ function makeDurableJob(options) {
           if (!notify) return { queued: 0, reason: 'verified no-op notification suppressed' };
           const targets = notificationTargets(run, definition);
           if (!targets.channels.length) return { queued: 0, reason: 'no notification channel configured' };
-          const mentions = targets.users.map(userId => `<@${userId}>`).join(' ');
+          const mentions = mentionUsers
+            ? targets.users.map(userId => `<@${userId}>`).join(' ')
+            : '';
           const detail = typeof buildNotificationMessage === 'function'
             ? await buildNotificationMessage({ run, state, name, provider })
             : `${name} wrote through ${provider} and was verified by readback. Workflow ${run.id}.`;

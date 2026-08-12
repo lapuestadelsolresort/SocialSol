@@ -69,6 +69,7 @@ async function postSlackMessage(channelId, message, opts = {}) {
 async function run() {
   const args = parseArgs(process.argv);
   const dryRun = Boolean(args['dry-run']);
+  const suppressRoutineSummary = process.env.REGINA_WORKFLOW_NO_SUMMARY === '1';
   hc.start(HC_KEY);
 
   let cfg, loaded, isoDate;
@@ -99,7 +100,7 @@ async function run() {
     if (ids.length === 0) {
       const msg = slackFmt.buildEmptyAnniversaryPost(isoDate);
       console.log('[regina/anniversary]', msg);
-      if (!dryRun) await postSlackMessage(channelId, msg);
+      if (!dryRun && !suppressRoutineSummary) await postSlackMessage(channelId, msg);
       hc.success(HC_KEY);
       return;
     }
@@ -213,21 +214,23 @@ async function run() {
           channelId,
         });
         if (sendResult.ok) {
-          const { topLevel, bodyOverflow } = slackFmt.buildAutoSentMessage({
-            campaignKind: campaign.campaign_kind,
-            contact: ctx.contact,
-            dossier: ctx.dossier,
-            draftText: draft.draft_text,
-            subject: sendResult.subject,
-            resendId: sendResult.resend_id,
-            maxChars: cfg.batch.max_message_chars,
-          });
-          const topResult = await postSlackMessage(channelId, topLevel);
-          if (topResult.ok && topResult.ts) {
-            if (bodyOverflow) await postSlackMessage(channelId, bodyOverflow, { threadTs: topResult.ts });
-            await db.query(sql`
-              UPDATE outreach_sends SET slack_thread_ts=${topResult.ts}, slack_channel_id=${channelId}, posted_at=${new Date().toISOString()} WHERE id=${sendId}
-            `);
+          if (!suppressRoutineSummary) {
+            const { topLevel, bodyOverflow } = slackFmt.buildAutoSentMessage({
+              campaignKind: campaign.campaign_kind,
+              contact: ctx.contact,
+              dossier: ctx.dossier,
+              draftText: draft.draft_text,
+              subject: sendResult.subject,
+              resendId: sendResult.resend_id,
+              maxChars: cfg.batch.max_message_chars,
+            });
+            const topResult = await postSlackMessage(channelId, topLevel);
+            if (topResult.ok && topResult.ts) {
+              if (bodyOverflow) await postSlackMessage(channelId, bodyOverflow, { threadTs: topResult.ts });
+              await db.query(sql`
+                UPDATE outreach_sends SET slack_thread_ts=${topResult.ts}, slack_channel_id=${channelId}, posted_at=${new Date().toISOString()} WHERE id=${sendId}
+              `);
+            }
           }
           sentCount++;
         } else {
@@ -264,14 +267,16 @@ async function run() {
       await postSlackMessage(channelId, `ℹ Anniversary skipped ${skipped.length}:\n${lines.join('\n')}`);
     }
 
-    if (postedCount > 0) {
+    if (!suppressRoutineSummary && postedCount > 0) {
       const summaryParts = [`📅 Anniversary ${isoDate} — ${postedCount} contact${postedCount === 1 ? '' : 's'} processed.`];
       if (sentCount > 0) summaryParts.push(`✅ ${sentCount} auto-sent via Resend`);
       if (manualCount > 0) summaryParts.push(`📩 ${manualCount} posted for manual send`);
       if (failedCount > 0) summaryParts.push(`⚠ ${failedCount} auto-send failed`);
       await postSlackMessage(channelId, summaryParts.join('\n'));
-    } else {
-      await postSlackMessage(channelId, `📅 Anniversary check — ${isoDate} — 0 drafts produced.`);
+    } else if (postedCount === 0) {
+      if (!suppressRoutineSummary) {
+        await postSlackMessage(channelId, `📅 Anniversary check — ${isoDate} — 0 drafts produced.`);
+      }
       // No-op if any prior anniversary sends reference this row.
       await deleteCampaignIfEmpty(db, campaignId);
     }

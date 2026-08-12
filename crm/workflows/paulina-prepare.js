@@ -57,6 +57,66 @@ function readJsonValue(value) {
   try { return JSON.parse(value); } catch { return null; }
 }
 
+function dispatchSummary(stateJson) {
+  const state = readJsonValue(stateJson);
+  const summary = state?.verify_readback?.summary;
+  return summary && typeof summary === 'object' ? summary : null;
+}
+
+async function paulinaDispatchDigest(db, run) {
+  const upperBound = run.started_at || new Date().toISOString();
+  const [previousSummary] = await db.query(sql`SELECT started_at
+    FROM workflow_runs
+    WHERE workflow_name='paulina.prepare_daily'
+      AND id <> ${run.id}
+      AND status='completed'
+      AND started_at IS NOT NULL
+      AND started_at < ${upperBound}
+    ORDER BY started_at DESC LIMIT 1`);
+  const fallback = new Date(new Date(upperBound).getTime() - 24 * 60 * 60_000).toISOString();
+  const lowerBound = previousSummary?.started_at || fallback;
+  const rows = await db.query(sql`SELECT id, status, state_json, completed_at
+    FROM workflow_runs
+    WHERE workflow_name='paulina.daily'
+      AND completed_at IS NOT NULL
+      AND completed_at >= ${lowerBound}
+      AND completed_at < ${upperBound}
+    ORDER BY completed_at, id`);
+  const digest = {
+    from: lowerBound,
+    to: upperBound,
+    verifiedRuns: 0,
+    workflowFailures: 0,
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    queueReady: 0,
+  };
+  for (const row of rows) {
+    if (row.status === 'failed') {
+      digest.workflowFailures += 1;
+      continue;
+    }
+    const summary = dispatchSummary(row.state_json);
+    if (row.status !== 'completed' || !summary) continue;
+    digest.verifiedRuns += 1;
+    digest.processed += Number(summary.processed || 0);
+    digest.sent += Number(summary.sent || 0);
+    digest.failed += Number(summary.failed || 0);
+    digest.queueReady = Number(summary.queueReady || 0);
+  }
+  digest.hasActivity = digest.sent > 0 || digest.failed > 0 || digest.workflowFailures > 0;
+  return digest;
+}
+
+function formatDispatchDigest(digest) {
+  const runs = `${digest.verifiedRuns} CRM-verified run${digest.verifiedRuns === 1 ? '' : 's'}`;
+  const workflowFailures = digest.workflowFailures > 0
+    ? ` ${digest.workflowFailures} additional dispatch workflow${digest.workflowFailures === 1 ? '' : 's'} failed before CRM verification.`
+    : '';
+  return `Send digest: processed ${digest.processed}, sent ${digest.sent}, failed ${digest.failed} across ${runs}; latest verified queue ready ${digest.queueReady}.${workflowFailures}`;
+}
+
 async function runVerifiedCommand(context, {
   provider,
   operation,
@@ -147,7 +207,7 @@ async function runVerifiedCommand(context, {
 
 const definition = {
   name: 'paulina.prepare_daily',
-  version: 1,
+  version: 2,
   capability: 'paulina.prepare',
   mutates: true,
   autonomous: true,
@@ -372,8 +432,10 @@ const definition = {
       effectClass: 'internal_notification',
       maxAttempts: 2,
       async run({ db, run, state, store }) {
-        if (state.preflight.skipped || state.preflight.dryRun) {
-          return { queued: 0, reason: state.preflight.reason || 'dry_run' };
+        if (state.preflight.dryRun) return { queued: 0, reason: 'dry_run' };
+        const digest = await paulinaDispatchDigest(db, run);
+        if (state.preflight.skipped && !digest.hasActivity) {
+          return { queued: 0, reason: state.preflight.reason || 'skipped_without_send_activity', digest };
         }
         const targets = notificationTargets(run, definition);
         if (!targets.channels.length) return { queued: 0, reason: 'no notification channel configured' };
@@ -382,9 +444,12 @@ const definition = {
         const verified = state.verify_queue?.summary;
         const composed = state.compose?.summary;
         const hypothesis = analysis?.hypothesis;
-        const message = state.capacity.batchSize === 0
-          ? `Paulina preparation verified: research imported ${Number(research?.inserted || 0)}, attached ${Number(state.attach_contacts?.attached || 0)}, and no new drafts were needed because today's capacity was already committed. Workflow ${run.id}.`
-          : `Paulina preparation verified: research imported ${Number(research?.inserted || 0)}, attached ${Number(state.attach_contacts?.attached || 0)}, verifier checked ${Number(verified?.checked || 0)} with ${Number(verified?.verified_available_after ?? verified?.verified_available_before ?? 0)} ready, and composed ${Number(composed?.composed?.length || 0)} new drafts (${Number(composed?.failed?.length || 0)} failures). The canonical ${Number(analysis?.recent?.window_days || 14)}-day report records ${Number(analysis?.recent?.production_sent || 0)} production sends and ${Number(analysis?.recent?.external_replies || 0)} external replies.${hypothesis ? ` Hypothesis: ${hypothesis.hypothesis} Test: ${hypothesis.test} Win condition: ${hypothesis.success_metric}` : ''} Workflow ${run.id}.`;
+        const preparation = state.preflight.skipped
+          ? `Preparation skipped (${state.preflight.reason}).`
+          : state.capacity.batchSize === 0
+            ? `Preparation verified: research imported ${Number(research?.inserted || 0)}, attached ${Number(state.attach_contacts?.attached || 0)}, and no new drafts were needed because today's capacity was already committed.`
+            : `Preparation verified: research imported ${Number(research?.inserted || 0)}, attached ${Number(state.attach_contacts?.attached || 0)}, verifier checked ${Number(verified?.checked || 0)} with ${Number(verified?.verified_available_after ?? verified?.verified_available_before ?? 0)} ready, and composed ${Number(composed?.composed?.length || 0)} new drafts (${Number(composed?.failed?.length || 0)} failures). The canonical ${Number(analysis?.recent?.window_days || 14)}-day report records ${Number(analysis?.recent?.production_sent || 0)} production sends and ${Number(analysis?.recent?.external_replies || 0)} external replies.${hypothesis ? ` Hypothesis: ${hypothesis.hypothesis} Test: ${hypothesis.test} Win condition: ${hypothesis.success_metric}` : ''}`;
+        const message = `Paulina daily summary. ${formatDispatchDigest(digest)} ${preparation} Workflow ${run.id}.`;
         for (const channelId of targets.channels) {
           await store.enqueueOutbox(db, {
             runId: run.id,
@@ -393,7 +458,7 @@ const definition = {
             payload: { channelId, message },
           });
         }
-        return { queued: targets.channels.length, channels: targets.channels };
+        return { queued: targets.channels.length, channels: targets.channels, digest };
       },
     },
   ],
@@ -413,4 +478,11 @@ const definition = {
   },
 };
 
-module.exports = { definition, localDay, runVerifiedCommand, validate };
+module.exports = {
+  definition,
+  formatDispatchDigest,
+  localDay,
+  paulinaDispatchDigest,
+  runVerifiedCommand,
+  validate,
+};

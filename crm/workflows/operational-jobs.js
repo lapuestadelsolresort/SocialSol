@@ -30,19 +30,12 @@ function parseRequiredJson(command, label) {
 
 const paulinaDaily = makeDurableJob({
   name: 'paulina.daily',
+  version: 3,
   capability: 'paulina.send',
   provider: 'resend',
   operation: 'paulina.orchestrate',
   autonomous: true,
-  notificationChannelName: 'prospector-paulina',
-  shouldNotify: ({ state }) => {
-    const summary = state.verify_readback?.summary || {};
-    return Number(summary.sent || 0) > 0 || Number(summary.failed || 0) > 0;
-  },
-  buildNotificationMessage: ({ run, state }) => {
-    const summary = state.verify_readback?.summary || {};
-    return `Paulina run verified by CRM readback: processed ${Number(summary.processed || 0)}, sent ${Number(summary.sent || 0)}, failed ${Number(summary.failed || 0)}, verified queue ready ${Number(summary.queueReady || 0)}. Workflow ${run.id}.`;
-  },
+  notifyOnWrite: false,
   requestSummary: () => ({ campaignScope: 'configured_active_campaign', autonomous: true }),
   buildCommand: ({ run, shadowMode }) => nodeCommand('prospector/orchestrator.js', shadowMode ? ['--dry-run'] : [], {
     timeoutMs: 15 * 60_000,
@@ -102,7 +95,80 @@ function validateReginaCampaign(input) {
   }
 }
 
-function reginaVerification(campaignSlug) {
+function parseWorkflowState(value) {
+  if (!value) return {};
+  try { return JSON.parse(value); } catch { return {}; }
+}
+
+function addReginaDigestRun(digest, summary, campaignSlug) {
+  digest.verifiedRuns += 1;
+  digest.created += Number(summary.created || 0);
+  digest.sent += Number(summary.sent || 0);
+  digest.failed += Number(summary.failed || 0);
+  const slug = campaignSlug || summary.campaignSlug || 'unknown';
+  digest.campaigns[slug] = (digest.campaigns[slug] || 0) + 1;
+}
+
+async function reginaRunDigest(db, run, currentSummary, currentCampaignSlug) {
+  const upperBound = run.started_at || new Date().toISOString();
+  const [previousSummary] = await db.query(sql`SELECT id, started_at
+    FROM workflow_runs
+    WHERE workflow_name='regina.daily'
+      AND id <> ${run.id}
+      AND status='completed'
+      AND started_at IS NOT NULL
+      AND started_at < ${upperBound}
+    ORDER BY started_at DESC LIMIT 1`);
+  const fallback = new Date(new Date(upperBound).getTime() - 24 * 60 * 60_000).toISOString();
+  const lowerBound = previousSummary?.started_at || fallback;
+  const rows = await db.query(sql`SELECT id, workflow_name, status, input_json, state_json, completed_at
+    FROM workflow_runs
+    WHERE workflow_name IN ('regina.daily', 'regina.campaign')
+      AND completed_at IS NOT NULL
+      AND completed_at >= ${lowerBound}
+      AND completed_at < ${upperBound}
+    ORDER BY completed_at, id`);
+  const digest = {
+    from: lowerBound,
+    to: upperBound,
+    verifiedRuns: 0,
+    workflowFailures: 0,
+    created: 0,
+    sent: 0,
+    failed: 0,
+    campaigns: {},
+  };
+  for (const row of rows) {
+    if (row.id === previousSummary?.id) continue;
+    if (row.status === 'failed') {
+      digest.workflowFailures += 1;
+      continue;
+    }
+    const summary = parseWorkflowState(row.state_json)?.verify_readback?.summary;
+    if (row.status !== 'completed' || !summary) continue;
+    const input = parseWorkflowState(row.input_json);
+    const campaignSlug = summary.campaignSlug
+      || input.campaignSlug
+      || (row.workflow_name === 'regina.daily' ? 'anniversary' : null);
+    addReginaDigestRun(digest, summary, campaignSlug);
+  }
+  addReginaDigestRun(digest, currentSummary, currentCampaignSlug);
+  return digest;
+}
+
+function formatReginaDigest(digest) {
+  const runs = `${digest.verifiedRuns} CRM-verified run${digest.verifiedRuns === 1 ? '' : 's'}`;
+  const campaigns = Object.entries(digest.campaigns)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([slug, count]) => `${slug} ${count}`)
+    .join(', ');
+  const workflowFailures = digest.workflowFailures > 0
+    ? ` ${digest.workflowFailures} additional workflow${digest.workflowFailures === 1 ? '' : 's'} failed before CRM verification.`
+    : '';
+  return `Send digest: created ${digest.created}, sent ${digest.sent}, failed ${digest.failed} across ${runs}. Campaign runs: ${campaigns || 'none'}.${workflowFailures}`;
+}
+
+function reginaVerification(campaignSlug, { includeDigest = false } = {}) {
   return async ({ db, run, state }) => {
     const [row] = await db.query(sql`SELECT
       COUNT(*) AS created,
@@ -110,40 +176,56 @@ function reginaVerification(campaignSlug) {
       SUM(CASE WHEN status IN ('failed','send_failed') THEN 1 ELSE 0 END) AS failed
       FROM outreach_sends WHERE workflow_run_id=${run.id}`);
     if (state.execute.exitCode !== 0) return { verified: false, reason: 'Regina process did not exit cleanly' };
+    const summary = {
+      campaignSlug,
+      created: Number(row?.created || 0),
+      sent: Number(row?.sent || 0),
+      failed: Number(row?.failed || 0),
+    };
+    const digest = includeDigest
+      ? await reginaRunDigest(db, run, summary, campaignSlug)
+      : null;
     return {
       verified: true,
       source: 'crm.outreach_sends',
       sourceRef: campaignSlug,
       providerStatus: 'crm_readback_verified',
       evidence: { campaignSlug, since: run.started_at, ...row, commandOutput: state.execute.stdout },
-      summary: { created: row?.created || 0, sent: row?.sent || 0, failed: row?.failed || 0 },
+      summary,
+      ...(digest ? { digest } : {}),
     };
   };
 }
 
 const reginaDaily = makeDurableJob({
   name: 'regina.daily',
+  version: 3,
   capability: 'regina.send',
   provider: 'resend',
   operation: 'regina.anniversary',
   autonomous: true,
   notificationChannelName: 'reengager-regina',
+  mentionUsers: false,
   requestSummary: () => ({ campaignSlug: 'anniversary', autonomous: true }),
   buildCommand: ({ run, shadowMode }) => nodeCommand('regina/scripts/anniversary-cron.js', shadowMode ? ['--dry-run'] : [], {
     timeoutMs: 15 * 60_000,
-    env: { WORKFLOW_RUN_ID: run.id },
+    env: { WORKFLOW_RUN_ID: run.id, REGINA_WORKFLOW_NO_SUMMARY: '1' },
   }),
-  verify: reginaVerification('anniversary'),
-  summarize: ({ verification }) => ({ report: verification.summary }),
+  verify: reginaVerification('anniversary', { includeDigest: true }),
+  buildNotificationMessage: ({ run, state }) => (
+    `Regina daily summary. ${formatReginaDigest(state.verify_readback.digest)} Workflow ${run.id}.`
+  ),
+  summarize: ({ verification }) => ({ report: verification.summary, digest: verification.digest }),
 });
 
 const reginaCampaign = makeDurableJob({
   name: 'regina.campaign',
+  version: 3,
   capability: 'regina.send',
   provider: 'resend',
   operation: 'regina.batch',
   validate: validateReginaCampaign,
-  notificationChannelName: 'reengager-regina',
+  notifyOnWrite: false,
   requestSummary: input => ({ campaignSlug: input.campaignSlug, count: input.count || null }),
   buildCommand: ({ input, run, shadowMode }) => {
     const args = ['--campaign-slug', input.campaignSlug];
@@ -151,7 +233,7 @@ const reginaCampaign = makeDurableJob({
     if (shadowMode) args.push('--dry-run');
     return nodeCommand('regina/scripts/batch.js', args, {
       timeoutMs: 20 * 60_000,
-      env: { WORKFLOW_RUN_ID: run.id },
+      env: { WORKFLOW_RUN_ID: run.id, REGINA_WORKFLOW_NO_SUMMARY: '1' },
     });
   },
   verify: async context => reginaVerification(context.input.campaignSlug)(context),
