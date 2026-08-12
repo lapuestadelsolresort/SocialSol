@@ -6,6 +6,7 @@ import {
   createMetaDmClaimHandler,
   createManualReviewClaimHandler,
   createOwnerRezClaimHandler,
+  createReceiptConfirmClaimHandler,
   createReceiptHandler,
   createWorkflowTool,
   formatWorkflowReply,
@@ -13,6 +14,7 @@ import {
   parseMetaDmCommand,
   parseManualReviewCommand,
   parseOwnerRezConfirmCommand,
+  parseReceiptConfirmCommand,
   pluginConfig,
 } from './index.js';
 
@@ -58,6 +60,24 @@ test('parses only exact OwnerRez confirmation commands', () => {
   assert.deepEqual(parseOwnerRezConfirmCommand('!ownerrez delete everything'), { error: 'invalid_confirmation' });
 });
 
+test('parses only exact owner-expense confirmation commands', () => {
+  const id = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  assert.deepEqual(
+    parseReceiptConfirmCommand(`!receipt confirm ${id} 2026-08-06 MXN 4700 maintenance | AC Ignacio Rubio | Compressor work`),
+    {
+      receiptId: id,
+      transactionDate: '2026-08-06',
+      currency: 'MXN',
+      amount: 4700,
+      categoryKey: 'maintenance',
+      vendor: 'AC Ignacio Rubio',
+      description: 'Compressor work',
+    },
+  );
+  assert.deepEqual(parseReceiptConfirmCommand('Please post George expense'), null);
+  assert.deepEqual(parseReceiptConfirmCommand(`!receipt confirm ${id} tomorrow`), { error: 'invalid_receipt_confirmation' });
+});
+
 test('receipt hook binds channel, sender, and Slack file ids from the trusted event', async () => {
   const config = pluginConfig({
     receiptChannelIds: ['C123RECEIPT'], slackAccountId: 'ig-drafts', shadowMode: false,
@@ -80,6 +100,53 @@ test('receipt hook binds channel, sender, and Slack file ids from the trusted ev
   assert.equal(calls[0].context.actorUserId, 'U-WORKER');
   assert.deepEqual(calls[0].input.fileRefs, [{ id: 'F-1', name: 'receipt.jpg', mimetype: 'image/jpeg', size: 100 }]);
   assert.equal(calls[0].idempotencyKey, 'slack:C123RECEIPT:171.25:receipt.ingest');
+});
+
+test('owner-expense receipt hook selects the guarded workflow', async () => {
+  const config = pluginConfig({
+    receiptChannelIds: ['C123OWNER'], ownerExpenseChannelIds: ['C123OWNER'],
+    slackAccountId: 'ig-drafts', shadowMode: true,
+    liveWorkflowNames: ['receipt.owner_expense.ingest'],
+  });
+  const calls = [];
+  await createReceiptHandler({
+    config,
+    execute: async (_config, request) => { calls.push(request); return COMPLETED; },
+  })({
+    content: 'George paid 1,250 MXN for materials', messageId: '171.26', senderId: 'U-GEORGE',
+    metadata: { channelId: 'C123OWNER' },
+  }, {
+    channelId: 'slack', accountId: 'ig-drafts', conversationId: 'C123OWNER',
+    messageId: '171.26', senderId: 'U-GEORGE',
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workflow, 'receipt.owner_expense.ingest');
+  assert.equal(calls[0].idempotencyKey, 'slack:C123OWNER:171.26:receipt.owner_expense.ingest');
+  assert.equal(calls[0].context.entrypoint, 'slack_receipt_hook');
+});
+
+test('owner-expense confirmation binds trusted Slack identity and stays command-only', async () => {
+  const id = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  const config = pluginConfig({
+    ownerExpenseChannelIds: ['C123OWNER'], shadowMode: true,
+    liveWorkflowNames: ['receipt.owner_expense.confirm'],
+  });
+  const calls = [];
+  const result = await createReceiptConfirmClaimHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'run-confirm', status: 'completed', output: { status: 'queued' } } };
+    },
+  })({
+    channel: 'slack', conversationId: 'C123OWNER', messageId: '2001.1', senderId: 'U-JASON',
+    bodyForAgent: `!receipt confirm ${id} 2026-08-06 MXN 4700 maintenance | AC Ignacio Rubio | Compressor work`,
+  }, {});
+  assert.equal(result.handled, true);
+  assert.equal(calls[0].workflow, 'receipt.owner_expense.confirm');
+  assert.equal(calls[0].context.actorUserId, 'U-JASON');
+  assert.equal(calls[0].context.entrypoint, 'slack_receipt_confirm_command');
+  assert.match(result.reply.text, /queued for durable processing and QBO readback/);
 });
 
 test('reports provider acceptance without claiming delivery', () => {
@@ -223,6 +290,10 @@ test('model-facing tool cannot invoke command-only WhatsApp sends', async () => 
   await assert.rejects(() => tool.execute('tool-call-2', {
     workflow: 'meta.dm.reply',
     input: { dmId: 42, message: 'Hello' },
+  }), error => error.code === 'workflow_command_required');
+  await assert.rejects(() => tool.execute('tool-call-3', {
+    workflow: 'receipt.owner_expense.confirm',
+    input: {},
   }), error => error.code === 'workflow_command_required');
   delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
 });

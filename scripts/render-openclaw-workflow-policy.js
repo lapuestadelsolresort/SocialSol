@@ -40,6 +40,10 @@ function receiptPrompt(name) {
   return `This is the scoped ${name} receipt channel. Channel members may submit or amend this channel's receipts and read only this channel's receipt ledger through resort_workflow. Cross-channel accounting data is not available here.`;
 }
 
+function ownerExpensePrompt(name) {
+  return `This is the scoped ${name} owner-expense channel. Receipt and invoice uploads are captured automatically, acknowledged in-thread, and posted only through the fixed owner-liability workflow after extraction or explicit !receipt confirmation. Do not invoke a generic QBO write or infer that an entry posted without a workflow and QBO readback id.`;
+}
+
 function noAuthorityPrompt(name) {
   return `This is the ${name} operations conversation channel. It has no business-system capability in the resort workflow policy. Do not read or mutate CRM, OwnerRez, accounting, messaging, or marketing systems from this channel; direct the user to the authorized domain channel.`;
 }
@@ -74,14 +78,17 @@ function render({ policy, currentConfig, pluginIds = [] }) {
   const liveWorkflows = new Set(Array.isArray(policy.live_workflows) ? policy.live_workflows : []);
   for (const [channelId, channel] of Object.entries(policy.channels || {})) {
     const receipt = channel.capabilities.includes('accounting.read_scoped');
+    const ownerExpense = channel.capabilities.includes('qbo.owner_expense.write');
     const hasCapabilities = channel.capabilities.length > 0;
     const prompt = PROMPTS[channel.name]
-      || (receipt ? receiptPrompt(channel.name)
+      || (ownerExpense ? ownerExpensePrompt(channel.name)
+        : receipt ? receiptPrompt(channel.name)
         : hasCapabilities ? 'Use resort_workflow for durable, channel-authorized resort operations.'
           : noAuthorityPrompt(channel.name));
     const namedMutations = CHANNEL_MUTATION_WORKFLOWS[channel.name] || [];
     const hasLiveMutation = namedMutations.some(workflow => liveWorkflows.has(workflow))
-      || (receipt && ['receipt.ingest', 'receipt.annotate']
+      || (receipt && ['receipt.ingest', 'receipt.annotate',
+        'receipt.owner_expense.ingest', 'receipt.owner_expense.process', 'receipt.owner_expense.confirm']
         .some(workflow => liveWorkflows.has(workflow)));
     channels[channelId] = {
       enabled: true,
@@ -105,6 +112,9 @@ function render({ policy, currentConfig, pluginIds = [] }) {
   ])].sort();
   const receiptChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.capabilities.includes('accounting.read_scoped'))
+    .map(([id]) => id);
+  const ownerExpenseChannelIds = Object.entries(policy.channels || {})
+    .filter(([, channel]) => channel.capabilities.includes('qbo.owner_expense.write'))
     .map(([id]) => id);
   const whatsappChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.name === 'whatsapp')
@@ -147,6 +157,7 @@ function render({ policy, currentConfig, pluginIds = [] }) {
             socialChannelIds,
             ownerrezChannelIds,
             receiptChannelIds,
+            ownerExpenseChannelIds,
             controlledChannelIds: Object.keys(policy.channels || {}),
             controlPlaneTokenEnv: 'RESORT_WORKFLOW_CONTROL_TOKEN',
             controlPlaneTokenFile: path.join(
@@ -190,5 +201,6 @@ module.exports = {
   loadedPluginIds,
   noAuthorityPrompt,
   receiptPrompt,
+  ownerExpensePrompt,
   render,
 };

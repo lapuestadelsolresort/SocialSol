@@ -154,6 +154,17 @@ const SCHEMA_STATEMENTS = [
     transaction_date TEXT,
     currency TEXT,
     amount REAL,
+    description TEXT,
+    category_key TEXT,
+    category_name TEXT,
+    extraction_confidence REAL,
+    review_reason TEXT,
+    amount_usd REAL,
+    fx_rate REAL,
+    qbo_entity_type TEXT,
+    qbo_entity_id TEXT,
+    qbo_request_id TEXT,
+    posted_at TEXT,
     extraction_json TEXT,
     workflow_run_id TEXT REFERENCES workflow_runs(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -333,6 +344,20 @@ const WORKFLOW_OUTBOX_COLUMNS = [
   'lease_version INTEGER NOT NULL DEFAULT 0',
 ];
 
+const ACCOUNTING_RECEIPT_COLUMNS = [
+  'description TEXT',
+  'category_key TEXT',
+  'category_name TEXT',
+  'extraction_confidence REAL',
+  'review_reason TEXT',
+  'amount_usd REAL',
+  'fx_rate REAL',
+  'qbo_entity_type TEXT',
+  'qbo_entity_id TEXT',
+  'qbo_request_id TEXT',
+  'posted_at TEXT',
+];
+
 function ensureColumnsBetterSqlite(db, table, specs) {
   const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
   for (const spec of specs) {
@@ -360,6 +385,9 @@ function ensureSchemaBetterSqlite(db) {
   ensureColumnsBetterSqlite(db, 'workflow_effects', WORKFLOW_EFFECT_COLUMNS);
   ensureColumnsBetterSqlite(db, 'workflow_manual_reviews', WORKFLOW_MANUAL_REVIEW_COLUMNS);
   ensureColumnsBetterSqlite(db, 'workflow_outbox', WORKFLOW_OUTBOX_COLUMNS);
+  ensureColumnsBetterSqlite(db, 'accounting_receipts', ACCOUNTING_RECEIPT_COLUMNS);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_qbo_entity
+    ON accounting_receipts(qbo_entity_type, qbo_entity_id) WHERE qbo_entity_id IS NOT NULL`);
   const columns = new Set(db.prepare('PRAGMA table_info(meta_messages)').all().map(row => row.name));
   if (columns.size > 0) {
     for (const spec of META_MESSAGE_COLUMNS) {
@@ -398,6 +426,9 @@ async function ensureSchemaAsync(db, sql) {
   await ensureColumnsAsync(db, sql, 'workflow_effects', WORKFLOW_EFFECT_COLUMNS);
   await ensureColumnsAsync(db, sql, 'workflow_manual_reviews', WORKFLOW_MANUAL_REVIEW_COLUMNS);
   await ensureColumnsAsync(db, sql, 'workflow_outbox', WORKFLOW_OUTBOX_COLUMNS);
+  await ensureColumnsAsync(db, sql, 'accounting_receipts', ACCOUNTING_RECEIPT_COLUMNS);
+  await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_qbo_entity
+    ON accounting_receipts(qbo_entity_type, qbo_entity_id) WHERE qbo_entity_id IS NOT NULL`);
   const columns = new Set((await db.query(sql`PRAGMA table_info(meta_messages)`)).map(row => row.name));
   if (columns.size > 0) {
     for (const spec of META_MESSAGE_COLUMNS) {

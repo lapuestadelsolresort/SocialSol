@@ -1,7 +1,7 @@
 {
   "version": 1,
   "shadow_mode": true,
-  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "ownerrez.mutation.confirm"],
+  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "ownerrez.mutation.confirm", "receipt.owner_expense.ingest", "receipt.owner_expense.process", "receipt.owner_expense.confirm"],
   "always_on_effects": ["whatsapp.inbound.process:send_conversion"],
   "channels": {
     "REPLACE_WITH_WHATSAPP_CHANNEL_ID": {
@@ -23,6 +23,10 @@
     "REPLACE_WITH_RESERVATIONS_CHANNEL_ID": {
       "name": "reservations",
       "capabilities": ["ownerrez.read", "reservations.read", "ownerrez.write"]
+    },
+    "REPLACE_WITH_OWNER_EXPENSE_CHANNEL_ID": {
+      "name": "receipt-owner",
+      "capabilities": ["receipts.submit", "receipts.write", "accounting.read_scoped", "qbo.owner_expense.write"]
     }
   },
   "restricted_capabilities": {

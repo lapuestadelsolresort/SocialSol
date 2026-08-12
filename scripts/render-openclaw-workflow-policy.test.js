@@ -11,11 +11,12 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   const patch = render({
     policy: {
       shadow_mode: true,
-      live_workflows: ['meta.dm.reply'],
+      live_workflows: ['meta.dm.reply', 'receipt.owner_expense.ingest'],
       channels: {
         CWA123: { name: 'whatsapp', capabilities: ['whatsapp.read', 'whatsapp.send'] },
         CSOCIAL1: { name: 'social-sol', capabilities: ['social.write'] },
         CRECEIPT1: { name: 'receipt-daniel', capabilities: ['receipts.submit', 'accounting.read_scoped'] },
+        COWNER1: { name: 'receipt-jorge', capabilities: ['receipts.submit', 'accounting.read_scoped', 'qbo.owner_expense.write'] },
       },
     },
     currentConfig: {
@@ -27,11 +28,13 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   const account = patch.channels.slack.accounts['test-account'];
   assert.equal(account.groupPolicy, 'allowlist');
   assert.equal(Object.hasOwn(account, 'groupAllowFrom'), false);
-  assert.deepEqual(Object.keys(account.channels).sort(), ['CRECEIPT1', 'CSOCIAL1', 'CWA123']);
+  assert.deepEqual(Object.keys(account.channels).sort(), ['COWNER1', 'CRECEIPT1', 'CSOCIAL1', 'CWA123']);
   assert.equal(Object.hasOwn(account.channels.CWA123, 'users'), false);
   assert.deepEqual(account.channels.CWA123.tools.alsoAllow, ['resort_workflow']);
   assert.equal(patch.plugins.entries['resort-workflows'].config.shadowMode, true);
-  assert.deepEqual(patch.plugins.entries['resort-workflows'].config.receiptChannelIds, ['CRECEIPT1']);
+  assert.deepEqual(patch.plugins.entries['resort-workflows'].config.receiptChannelIds, ['CRECEIPT1', 'COWNER1']);
+  assert.deepEqual(patch.plugins.entries['resort-workflows'].config.ownerExpenseChannelIds, ['COWNER1']);
+  assert.match(account.channels.COWNER1.systemPrompt, /owner-expense channel/);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.socialChannelIds, ['CSOCIAL1']);
   assert.deepEqual(account.channels.CSOCIAL1.tools.allow, ['resort_workflow']);
   assert.equal(patch.plugins.allow.includes('resort-workflows'), true);

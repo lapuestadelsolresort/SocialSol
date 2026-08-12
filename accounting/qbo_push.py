@@ -332,11 +332,28 @@ class QBOClient:
         result = self._api_call("POST", "transfer", transfer, request_id=request_id)
         return result.get('Transfer', result)
 
+    def create_journal_entry(self, journal_entry: Dict, request_id: str = None) -> Dict:
+        """Create a JournalEntry with a stable provider request id."""
+        result = self._api_call(
+            "POST", "journalentry", journal_entry, request_id=request_id
+        )
+        return result.get('JournalEntry', result)
+
     def read_entity(self, entity_type: str, entity_id: str) -> Dict:
         """Read a just-written entity back from QBO."""
         result = self._api_call("GET", f"{entity_type}/{entity_id}")
-        key = {'purchase': 'Purchase', 'deposit': 'Deposit', 'transfer': 'Transfer'}[entity_type]
+        key = {
+            'purchase': 'Purchase',
+            'deposit': 'Deposit',
+            'transfer': 'Transfer',
+            'journalentry': 'JournalEntry',
+            'account': 'Account',
+        }[entity_type]
         return result.get(key, result)
+
+    def read_account(self, account_id: str) -> Dict:
+        """Read a QBO account by id for a live posting preflight."""
+        return self.read_entity('account', str(account_id))
 
     def _resolve_account_id(self, category_key: str) -> Optional[str]:
         """Look up QBO account ID from config category key."""
