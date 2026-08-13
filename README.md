@@ -224,9 +224,10 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   `#receipt-jorge` channel uses the guarded owner-liability workflow.
   Sol cross-references these with bank statement transactions for
   classification context. Annotated reimbursements receive an itemized Slack
-  thread reply with a stable Kapital payment concept; exact reference + amount
-  + currency reconciliation then preserves receipt-level category splits in
-  QBO. Unknown transactions are escalated to the configured payment approver.
+  thread reply with a stable, alphanumeric-only Kapital payment concept; exact
+  reference + amount + currency reconciliation then preserves receipt-level
+  category splits in QBO. Unknown transactions are escalated to the configured
+  payment approver.
   Weekly automated tests (7 checks) run Monday 8am PT and post to
   `#accounting`. See `accounting/README.md` for the full spec.
 

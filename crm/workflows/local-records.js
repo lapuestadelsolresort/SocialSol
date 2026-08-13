@@ -6,11 +6,27 @@ const { callOne } = require('../lib/voice-service');
 const { loadPolicy } = require('../lib/channel-policy');
 const { loadAccountingConfig } = require('../lib/accounting-config');
 
-const PAYMENT_REFERENCE_RE = /\bLPDS-R-[A-F0-9]{16}\b/g;
+const PAYMENT_REFERENCE_RE = /\b(?:LPDSR|LPDS-R-)[A-F0-9]{16}\b/g;
+const KAPITAL_SAFE_PAYMENT_REFERENCE_RE = /^LPDSR[A-F0-9]{16}$/;
+const LEGACY_PAYMENT_REFERENCE_RE = /^LPDS-R-[A-F0-9]{16}$/;
 
 function receiptPaymentReference(receiptId) {
   const digest = crypto.createHash('sha256').update(String(receiptId)).digest('hex').slice(0, 16).toUpperCase();
-  return `LPDS-R-${digest}`;
+  return `LPDSR${digest}`;
+}
+
+function kapitalSafePaymentReference(existingReference, receiptId) {
+  const existing = String(existingReference || '').toUpperCase();
+  if (!existing) return { paymentReference: receiptPaymentReference(receiptId), migrated: false };
+  if (KAPITAL_SAFE_PAYMENT_REFERENCE_RE.test(existing)) {
+    return { paymentReference: existing, migrated: false };
+  }
+  if (LEGACY_PAYMENT_REFERENCE_RE.test(existing)) {
+    return { paymentReference: existing.replaceAll('-', ''), migrated: true };
+  }
+  const error = new Error('receipt payment reference is not Kapital-compatible');
+  error.code = 'receipt_payment_reference_invalid';
+  throw error;
 }
 
 function paymentReferencesIn(...values) {
@@ -24,7 +40,9 @@ function formatReceiptMoney(amount, currency) {
   })}`;
 }
 
-function buildReceiptPaymentInstruction({ receipt, items, approverUserIds }) {
+function buildReceiptPaymentInstruction({
+  receipt, items, approverUserIds, paymentReferenceMigrated = false,
+}) {
   const currency = String(receipt.currency).toUpperCase();
   const recipient = `<@${receipt.reimbursement_recipient_user_id}>`;
   const approvers = approverUserIds.map(userId => `<@${userId}>`).join(' ');
@@ -36,7 +54,12 @@ function buildReceiptPaymentInstruction({ receipt, items, approverUserIds }) {
     })
     : [`1. ${formatReceiptMoney(receipt.amount, currency)} · ${receipt.category_name || receipt.category_key || 'Unclassified'}`];
   return [
-    '🧾 *Reimbursement ready for confirmation*',
+    paymentReferenceMigrated
+      ? '⚠️ *Corrected Kapital-compatible reimbursement instruction*'
+      : '🧾 *Reimbursement ready for confirmation*',
+    ...(paymentReferenceMigrated
+      ? ['The earlier hyphenated code is not accepted by Kapital. Use the corrected letters-and-numbers-only code below.', '']
+      : []),
     `${recipient}, please confirm the receipt amounts and categories below:`,
     ...lines,
     `*Total: ${formatReceiptMoney(receipt.amount, currency)}*`,
@@ -44,7 +67,7 @@ function buildReceiptPaymentInstruction({ receipt, items, approverUserIds }) {
     `${approvers} *Kapital payment instruction*`,
     `• Reimburse: ${recipient}`,
     `• Send one transfer for: *${formatReceiptMoney(receipt.amount, currency)}*`,
-    `• Concept/description — copy exactly: \`${receipt.payment_reference}\``,
+    `• Kapital description (letters and numbers only) — copy exactly: \`${receipt.payment_reference}\``,
     'Keep that code unchanged. Reconciliation requires the exact code, amount, and currency; a missing or mismatched code will not auto-match.',
   ].join('\n');
 }
@@ -353,7 +376,7 @@ function normalizeReceiptItems(input) {
 
 const receiptAnnotate = {
   name: 'receipt.annotate',
-  version: 4,
+  version: 5,
   capability: 'receipts.write',
   mutates: true,
   validate: validateReceiptAnnotation,
@@ -392,7 +415,9 @@ const receiptAnnotate = {
           || !/^U[A-Z0-9]+$/.test(request.reimbursementRecipientUserId)) {
         throw new Error('receipt submitter cannot be resolved as the reimbursement recipient');
       }
-      const paymentReference = receipt.payment_reference || receiptPaymentReference(receipt.id);
+      const previousPaymentReference = receipt.payment_reference || null;
+      const normalizedReference = kapitalSafePaymentReference(previousPaymentReference, receipt.id);
+      const paymentReference = normalizedReference.paymentReference;
       const attachedFileIds = new Set((() => {
         try { return JSON.parse(receipt.file_refs_json || '[]'); } catch { return []; }
       })().map(file => String(file?.id || '')).filter(Boolean));
@@ -464,6 +489,8 @@ const receiptAnnotate = {
         receiptId: input.receiptId, effectId: effect.id, evidenceId: evidence.id,
         receiptStatus: readback.status, itemCount: itemReadback.length,
         paymentReference: readback.payment_reference,
+        previousPaymentReference,
+        paymentReferenceMigrated: normalizedReference.migrated,
       };
     },
   }, {
@@ -482,7 +509,12 @@ const receiptAnnotate = {
         error.code = 'receipt_payment_approver_unavailable';
         throw error;
       }
-      const message = buildReceiptPaymentInstruction({ receipt, items, approverUserIds });
+      const message = buildReceiptPaymentInstruction({
+        receipt,
+        items,
+        approverUserIds,
+        paymentReferenceMigrated: state.write_annotation.paymentReferenceMigrated,
+      });
       const instructionHash = store.sha256({
         receiptId: receipt.id,
         paymentReference: receipt.payment_reference,
@@ -502,7 +534,7 @@ const receiptAnnotate = {
       });
       await db.query(sql`UPDATE accounting_receipts SET
         payment_instruction_hash=${instructionHash},
-        payment_instruction_queued_at=COALESCE(payment_instruction_queued_at, datetime('now')),
+        payment_instruction_queued_at=datetime('now'),
         updated_at=datetime('now') WHERE id=${receipt.id}`);
       return {
         outboxId: outbox.id,
@@ -518,7 +550,7 @@ const receiptAnnotate = {
 
 const receiptReconcile = {
   name: 'receipt.reconcile',
-  version: 2,
+  version: 3,
   capability: 'accounting.write',
   mutates: true,
   autonomous: true,
@@ -623,6 +655,7 @@ const receiptReconcile = {
 module.exports = {
   buildReceiptPaymentInstruction,
   guestReplyDraft,
+  kapitalSafePaymentReference,
   paymentReferencesIn,
   receiptAnnotate,
   receiptIngest,

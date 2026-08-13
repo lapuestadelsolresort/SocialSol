@@ -51,7 +51,8 @@ where to look for context on ambiguous transactions.
 
 Normal reimbursement posts are annotated as a single bundle with one child
 item per attached receipt. Annotation replies in the original Slack thread
-with the itemized total and a stable `LPDS-R-…` Kapital concept for the
+with the itemized total and a stable, alphanumeric-only `LPDSR…` Kapital
+concept for the
 configured payment approver to copy exactly. New referenced reimbursements
 reconcile on that exact concept plus amount and currency; the legacy ±3-day
 rule is used only for older receipts that have no payment reference. A matched

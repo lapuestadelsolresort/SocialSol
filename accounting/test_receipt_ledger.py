@@ -29,7 +29,7 @@ class ReceiptLedgerTests(unittest.TestCase):
             );
             INSERT INTO accounting_receipts VALUES (
                 'receipt-1', 'matched', 'MXN', 2105, 'maintenance', 'Maintenance',
-                'Five petty-cash receipts', 'LPDS-R-A1B2C3D4E5F60718'
+                'Five petty-cash receipts', 'LPDSRA1B2C3D4E5F60718'
             );
             INSERT INTO accounting_reconciliations VALUES ('receipt-1', 'matched');
             INSERT INTO accounting_receipt_items VALUES
@@ -46,7 +46,7 @@ class ReceiptLedgerTests(unittest.TestCase):
 
     def test_exact_reconciled_reference_promotes_split_bundle_to_auto(self):
         transaction = {
-            'description': 'Envio SPEI | LPDS-R-A1B2C3D4E5F60718 | KAPITAL',
+            'description': 'Envio SPEI | LPDSRA1B2C3D4E5F60718 | KAPITAL',
             'reference': 'Clave: 123', 'amount': 2105, 'currency': 'MXN',
             'confidence': 'guess', 'category': 'maintenance',
         }
@@ -62,7 +62,7 @@ class ReceiptLedgerTests(unittest.TestCase):
 
     def test_unmatched_or_wrong_amount_reference_fails_closed(self):
         transaction = {
-            'description': 'LPDS-R-A1B2C3D4E5F60718', 'amount': 2000,
+            'description': 'LPDSRA1B2C3D4E5F60718', 'amount': 2000,
             'currency': 'MXN', 'confidence': 'auto', 'category': 'maintenance',
         }
         results = apply_receipt_ledger(
@@ -73,7 +73,11 @@ class ReceiptLedgerTests(unittest.TestCase):
 
     def test_reference_extraction_is_exact_and_case_insensitive(self):
         self.assertEqual(
-            payment_references({'description': 'pay lpds-r-a1b2c3d4e5f60718 now'}),
+            payment_references({'description': 'pay lpdsra1b2c3d4e5f60718 now'}),
+            ['LPDSRA1B2C3D4E5F60718'],
+        )
+        self.assertEqual(
+            payment_references({'description': 'legacy lpds-r-a1b2c3d4e5f60718'}),
             ['LPDS-R-A1B2C3D4E5F60718'],
         )
 
