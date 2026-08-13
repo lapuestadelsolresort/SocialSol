@@ -76,10 +76,24 @@ function cronWriteArgs(contract, agentId) {
     '--session', contract.sessionTarget,
     '--message', contract.message,
     '--timeout-seconds', String(contract.timeoutSeconds),
-    '--announce',
+    '--no-deliver',
     '--channel', contract.delivery.channel,
     '--account', contract.delivery.accountId,
     '--to', contract.delivery.to,
+  ];
+}
+
+function cronFailureAlertArgs(contract) {
+  return [
+    '--failure-alert',
+    '--failure-alert-after', String(contract.failureAlert.after),
+    '--failure-alert-channel', contract.failureAlert.channel,
+    '--failure-alert-to', contract.failureAlert.to,
+    '--failure-alert-account-id', contract.failureAlert.accountId,
+    '--failure-alert-mode', contract.failureAlert.mode,
+    '--failure-alert-cooldown', `${contract.failureAlert.cooldownMs}ms`,
+    ...(contract.failureAlert.includeSkipped
+      ? ['--failure-alert-include-skipped'] : ['--failure-alert-exclude-skipped']),
   ];
 }
 
@@ -211,13 +225,21 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     }
     if (plan.cronChanged) {
       if (plan.cronJob) {
-        command(['cron', 'edit', plan.cronJob.id, ...cronWriteArgs(plan.monitorCron, settings.agentId)], dependencies);
+        command([
+          'cron', 'edit', plan.cronJob.id,
+          ...cronWriteArgs(plan.monitorCron, settings.agentId),
+          ...cronFailureAlertArgs(plan.monitorCron),
+        ], dependencies);
         if (!plan.cronJob.enabled) command(['cron', 'enable', plan.cronJob.id], dependencies);
       } else {
         const created = openClawJson([
           'cron', 'add', ...cronWriteArgs(plan.monitorCron, settings.agentId), '--json',
         ], dependencies);
         createdCronId = created.id || '';
+        if (!createdCronId) throw new Error('Paloma monitor cron creation returned no job id');
+        command([
+          'cron', 'edit', createdCronId, ...cronFailureAlertArgs(plan.monitorCron),
+        ], dependencies);
       }
     }
     if (plan.legacyHeartbeatPresent) {
@@ -268,6 +290,7 @@ if (require.main === module) {
 module.exports = {
   accountChannelPath,
   configure,
+  cronFailureAlertArgs,
   cronWriteArgs,
   expandHome,
   monitoringSettings,
