@@ -238,11 +238,20 @@ function validateReceiptAnnotation(input) {
   if (input.transactionDate && !/^\d{4}-\d{2}-\d{2}$/.test(String(input.transactionDate))) {
     throw new Error('transactionDate must be YYYY-MM-DD');
   }
+  const description = String(input.description || '').trim();
+  const categoryKey = String(input.categoryKey || '').trim();
+  const categoryName = String(input.categoryName || '').trim();
+  if (description.length > 2000) throw new Error('description is too long');
+  if ((categoryKey || categoryName) && (!categoryKey || !categoryName)) {
+    throw new Error('categoryKey and categoryName must be supplied together');
+  }
+  if (categoryKey && !/^[a-z0-9_]{1,80}$/.test(categoryKey)) throw new Error('invalid categoryKey');
+  if (categoryName.length > 160) throw new Error('categoryName is too long');
 }
 
 const receiptAnnotate = {
   name: 'receipt.annotate',
-  version: 1,
+  version: 2,
   capability: 'receipts.write',
   mutates: true,
   validate: validateReceiptAnnotation,
@@ -264,6 +273,9 @@ const receiptAnnotate = {
         transactionDate: input.transactionDate || null,
         currency: String(input.currency).toUpperCase(),
         amount: Number(input.amount),
+        description: String(input.description || '').trim() || null,
+        categoryKey: String(input.categoryKey || '').trim() || null,
+        categoryName: String(input.categoryName || '').trim() || null,
       };
       const effect = await store.createEffect(db, {
         runId: run.id, stepKey, effectType: 'local_record_write', provider: 'sqlite',
@@ -272,12 +284,16 @@ const receiptAnnotate = {
       });
       await db.query(sql`UPDATE accounting_receipts SET vendor=${request.vendor},
         transaction_date=${request.transactionDate}, currency=${request.currency}, amount=${request.amount},
+        description=${request.description}, category_key=${request.categoryKey}, category_name=${request.categoryName},
         extraction_json=${JSON.stringify({ source: 'channel_member', actorUserId: run.actor_user_id })},
         status='extracted', workflow_run_id=${run.id}, updated_at=datetime('now')
         WHERE id=${input.receiptId}`);
-      const [readback] = await db.query(sql`SELECT id, vendor, transaction_date, currency, amount, status
+      const [readback] = await db.query(sql`SELECT id, vendor, transaction_date, currency, amount,
+        description, category_key, category_name, status
         FROM accounting_receipts WHERE id=${input.receiptId}`);
-      if (!readback || Number(readback.amount) !== request.amount || readback.currency !== request.currency) {
+      if (!readback || Number(readback.amount) !== request.amount || readback.currency !== request.currency
+        || readback.description !== request.description || readback.category_key !== request.categoryKey
+        || readback.category_name !== request.categoryName) {
         throw new Error('receipt annotation readback mismatch');
       }
       const evidence = await store.createEvidence(db, {

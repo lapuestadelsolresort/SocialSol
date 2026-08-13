@@ -256,10 +256,22 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     const annotated = await startGraph(db, annotate, {
       idempotencyKey: 'slack:RECEIPT-A:171.3:receipt.annotate',
       triggerType: 'slack', channelId: 'RECEIPT-A', actorUserId: 'TEST-WORKER',
-      input: { receiptId: first.output.receiptId, amount: 1250, currency: 'MXN', transactionDate: '2026-08-10', vendor: 'Hardware' },
+      input: {
+        receiptId: first.output.receiptId, amount: 1250, currency: 'MXN',
+        transactionDate: '2026-08-10', vendor: 'Hardware',
+        categoryKey: 'maintenance', categoryName: 'Maintenance',
+        description: 'Replacement hardware for villa doors',
+      },
     });
     assert.equal(annotated.status, 'completed', annotated.error_message);
     assert.equal(annotated.output.receiptStatus, 'extracted');
+    const [receipt] = await db.query(sql`SELECT description, category_key, category_name
+      FROM accounting_receipts WHERE id=${first.output.receiptId}`);
+    assert.deepEqual(receipt, {
+      description: 'Replacement hardware for villa doors',
+      category_key: 'maintenance',
+      category_name: 'Maintenance',
+    });
 
     const denied = await startGraph(db, annotate, {
       idempotencyKey: 'slack:RECEIPT-B:171.4:receipt.annotate',

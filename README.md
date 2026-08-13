@@ -219,7 +219,8 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   `#property-receipts`, `#cleaning-receipts`, `#sergio-receipts`,
   `#group-expenses`, `#temo-receipts`, `#daniel-invoices`,
   `#sergio-mayela-invoices`, `#misc-receipts`, `#new-receipts`) where the
-  team posts expense receipts, SPEI confirmations, and salary invoices.
+  team posts expense receipts, SPEI confirmations, and salary invoices. The
+  same scoped intake is also enabled for `#receipts-pettycash`.
   Sol cross-references these with bank statement transactions for
   classification context. Unknown transactions are escalated to Mayela.
   Weekly automated tests (7 checks) run Monday 8am PT and post to
