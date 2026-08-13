@@ -81,6 +81,30 @@ class ReceiptLedgerTests(unittest.TestCase):
             ['LPDS-R-A1B2C3D4E5F60718'],
         )
 
+    def test_uncoded_same_payee_and_amount_is_held_as_possible_duplicate(self):
+        coded = {
+            'date': '2026-08-13', 'amount': 2105, 'currency': 'MXN',
+            'description': 'LPDSRA1B2C3D4E5F60718',
+            'spei': {'payee': 'SERGIO GRACIA'},
+            'confidence': 'guess', 'category': 'maintenance',
+        }
+        uncoded = {
+            'date': '2026-08-06', 'amount': 2105, 'currency': 'MXN',
+            'description': 'REIMBURSEMENT PETTY CASH SERGIO',
+            'spei': {'payee': 'SERGIO GRACIA'},
+            'confidence': 'guess', 'category': 'maintenance',
+        }
+        results = apply_receipt_ledger(
+            {'auto': [], 'guess': [uncoded, coded], 'unknown': []}, str(self.database)
+        )
+        self.assertEqual(len(results['auto']), 1)
+        self.assertEqual(len(results['unknown']), 1)
+        held = results['unknown'][0]
+        self.assertEqual(
+            held['possible_duplicate_payment_reference'], 'LPDSRA1B2C3D4E5F60718'
+        )
+        self.assertIn('Possible duplicate', held['reason'])
+
 
 if __name__ == '__main__':
     unittest.main()

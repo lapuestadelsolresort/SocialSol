@@ -469,6 +469,30 @@ async function projectReceiptQboWrites(db, runId, receiptWrites) {
   return true;
 }
 
+function buildQboNotificationMessage({ run, state }) {
+  const summary = state.verify_readback?.summary || {};
+  const reviewDetails = Array.isArray(summary.reviewDetails) ? summary.reviewDetails : [];
+  const lines = [
+    `Kapital statement processed and verified in QBO. Workflow ${run.id}.`,
+    `• Principal transactions written: ${summary.principalWritten || 0}`,
+    `• SPEI fee records written: ${summary.feeRecordsWritten || 0}`,
+    `• Existing transactions skipped: ${summary.dedupSkipped || 0}`,
+    `• Held for review: ${summary.reviewRequired || 0}`,
+  ];
+  if (reviewDetails.length) {
+    lines.push('Held transactions:');
+    for (const detail of reviewDetails.slice(0, 10)) {
+      const amount = Number(detail.amount || 0).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      lines.push(`• ${detail.date || 'unknown date'} ${detail.currency || 'MXN'} ${amount} — ${detail.reason}`);
+    }
+    if (reviewDetails.length > 10) lines.push(`• ${reviewDetails.length - 10} additional held transaction(s)`);
+  }
+  return lines.join('\n');
+}
+
 const qboWrite = makeDurableJob({
   name: 'qbo.write',
   capability: 'qbo.write',
@@ -476,6 +500,7 @@ const qboWrite = makeDurableJob({
   operation: 'kapital_transactions.write',
   autonomous: true,
   notificationChannelName: 'accounting',
+  buildNotificationMessage: buildQboNotificationMessage,
   validate: input => { safeAccountingCsv(input); },
   requestSummary: input => ({ csv: path.basename(safeAccountingCsv(input)), classificationTier: 'auto_only' }),
   buildCommand: ({ input, shadowMode }) => pythonCommand(
@@ -488,6 +513,7 @@ const qboWrite = makeDurableJob({
     if (invalid) return invalid;
     const summary = state.execute.parsed;
     const written = (summary.expenses_pushed || 0) + (summary.income_pushed || 0) + (summary.transfers_pushed || 0);
+    const principalWritten = (summary.details || []).filter(row => row.status === 'PUSHED').length;
     const unverified = (summary.details || []).filter(row => row.status === 'PUSHED' && row.verified_by_readback !== true);
     if ((summary.errors || []).length || unverified.length) {
       return { verified: false, reason: 'one or more QBO writes failed provider readback' };
@@ -504,9 +530,13 @@ const qboWrite = makeDurableJob({
       evidence: summary,
       summary: {
         written,
+        principalWritten,
+        feeRecordsWritten: Math.max(0, written - principalWritten),
         dedupSkipped: summary.dedup_skipped || 0,
         skipped: summary.skipped || 0,
         receiptsPosted: receiptWrites.length,
+        reviewRequired: summary.review_required || 0,
+        reviewDetails: summary.review_details || [],
       },
     };
   },
@@ -515,6 +545,7 @@ const qboWrite = makeDurableJob({
 
 module.exports = {
   accountingClassify,
+  buildQboNotificationMessage,
   crmSync,
   ownerrezCrmSync,
   paulinaDaily,

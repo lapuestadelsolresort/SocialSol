@@ -2,16 +2,52 @@
 
 import re
 import sqlite3
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List
 
 
 PAYMENT_REFERENCE_RE = re.compile(r"\b(?:LPDSR|LPDS-R-)[A-F0-9]{16}\b", re.IGNORECASE)
+POSSIBLE_DUPLICATE_WINDOW_DAYS = 30
 
 
 def payment_references(transaction: Dict) -> List[str]:
     text = f"{transaction.get('description') or ''} {transaction.get('reference') or ''}"
     return list(dict.fromkeys(match.upper() for match in PAYMENT_REFERENCE_RE.findall(text)))
+
+
+def _date_value(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _possible_duplicate_reference(transaction: Dict, referenced: List[Dict]):
+    """Find a same-payee/amount payment near an exact referenced reimbursement."""
+    if payment_references(transaction):
+        return None
+    payee = str((transaction.get('spei') or {}).get('payee') or '').strip().upper()
+    transaction_date = _date_value(transaction.get('date'))
+    if not payee or transaction_date is None:
+        return None
+    currency = str(transaction.get('currency') or 'MXN').upper()
+    tolerance = 1 if currency == 'MXN' else 0.01
+    for candidate in referenced:
+        candidate_payee = str((candidate.get('spei') or {}).get('payee') or '').strip().upper()
+        candidate_date = _date_value(candidate.get('date'))
+        references = payment_references(candidate)
+        if (candidate_payee != payee or candidate_date is None or len(references) != 1
+                or str(candidate.get('currency') or 'MXN').upper() != currency
+                or abs(float(candidate.get('amount') or 0) - float(transaction.get('amount') or 0)) > tolerance
+                or abs((candidate_date - transaction_date).days) > POSSIBLE_DUPLICATE_WINDOW_DAYS):
+            continue
+        return references[0]
+    return None
 
 
 def _matched_receipt(connection: sqlite3.Connection, payment_reference: str):
@@ -144,13 +180,39 @@ def apply_receipt_ledger(results: Dict[str, List[Dict]], database_path: str) -> 
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
+        referenced_matches = {}
+        matched_reference_transactions = []
         for bucket in ('auto', 'guess', 'unknown'):
             for transaction in results.get(bucket, []):
-                if not payment_references(transaction):
+                if payment_references(transaction):
+                    enriched_transaction = _enrich(transaction, connection)
+                    referenced_matches[id(transaction)] = enriched_transaction
+                    if enriched_transaction.get('confidence') == 'auto':
+                        matched_reference_transactions.append(enriched_transaction)
+        for bucket in ('auto', 'guess', 'unknown'):
+            for transaction in results.get(bucket, []):
+                if payment_references(transaction):
+                    receipt_transaction = referenced_matches[id(transaction)]
+                    enriched[receipt_transaction['confidence']].append(receipt_transaction)
+                    continue
+                duplicate_reference = _possible_duplicate_reference(
+                    transaction, matched_reference_transactions
+                )
+                if not duplicate_reference:
                     enriched[bucket].append(transaction)
                     continue
-                receipt_transaction = _enrich(transaction, connection)
-                enriched[receipt_transaction['confidence']].append(receipt_transaction)
+                duplicate = dict(transaction)
+                duplicate.update({
+                    'confidence': 'unknown',
+                    'category': None,
+                    'category_name': None,
+                    'reason': (
+                        'Possible duplicate of referenced reimbursement '
+                        f'{duplicate_reference}; manual review required'
+                    ),
+                    'possible_duplicate_payment_reference': duplicate_reference,
+                })
+                enriched['unknown'].append(duplicate)
     finally:
         connection.close()
     return enriched

@@ -6,18 +6,13 @@ exist (same date + amount + Kapital reference). Prevents double-counting
 when overlapping CSVs are uploaded.
 """
 
-import json
 import re
-import urllib.request
-from datetime import date
-from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set, Tuple
 
 
 def check_for_duplicates(
     transactions: List[Dict],
-    token: str,
-    base_url: str,
+    query_qbo: Callable[[str], dict],
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Split transactions into (new, already_exists).
@@ -27,8 +22,8 @@ def check_for_duplicates(
 
     Args:
         transactions: classified transactions with fx applied
-        token: QBO access token
-        base_url: QBO API base
+        query_qbo: authenticated QBO query function. The caller owns OAuth
+            refresh and must raise when QBO cannot be queried.
 
     Returns:
         (new_transactions, duplicates)
@@ -52,7 +47,7 @@ def check_for_duplicates(
         f"AND TxnDate <= '{max_date.isoformat()}' "
         f"MAXRESULTS 500"
     )
-    existing = _qbo_query(token, base_url, sql)
+    existing = _qbo_query(query_qbo, sql)
 
     # Also check deposits and transfers
     for entity_type in ('Deposit', 'Transfer'):
@@ -64,10 +59,11 @@ def check_for_duplicates(
             f"AND TxnDate <= '{max_date.isoformat()}' "
             f"MAXRESULTS 200"
         )
-        existing.extend(_qbo_query(token, base_url, sql2))
+        existing.extend(_qbo_query(query_qbo, sql2))
 
     # Build set of existing Kapital references (Clave)
     existing_refs: Set[str] = set()
+    existing_mxn_fingerprints: Set[str] = set()
     existing_fingerprints: Set[str] = set()
 
     for e in existing:
@@ -76,6 +72,17 @@ def check_for_duplicates(
         ref_match = re.search(r'Clave:\s*(136-[\d/\-]+)', note)
         if ref_match:
             existing_refs.add(ref_match.group(1))
+
+        # Prefer the original MXN amount embedded by SocialSol. This remains
+        # stable even if an old QBO entity used a different cached FX rate.
+        original_mxn_match = re.search(
+            r'\borig(?:inal)?\s*:?\s*\$?([\d,]+(?:\.\d+)?)\s*MXN\b',
+            note,
+            re.IGNORECASE,
+        )
+        if original_mxn_match:
+            original_mxn = float(original_mxn_match.group(1).replace(',', ''))
+            existing_mxn_fingerprints.add(f"{e.get('TxnDate', '')}|{original_mxn:.2f}")
 
         # Also build date+amount fingerprint as fallback
         txn_date = e.get('TxnDate', '')
@@ -97,7 +104,16 @@ def check_for_duplicates(
             dupes.append(txn)
             continue
 
-        # Fallback: date + USD amount
+        # Fallback: date + original MXN amount, then date + converted USD.
+        # The MXN fingerprint catches records created through another guarded
+        # workflow, such as an owner-liability repayment.
+        if txn.get('date') and txn.get('amount'):
+            mxn_fp = f"{txn['date'].isoformat()}|{float(txn['amount']):.2f}"
+            if mxn_fp in existing_mxn_fingerprints:
+                txn['_dedup_reason'] = f'Date+MXN fingerprint already in QBO: {mxn_fp}'
+                dupes.append(txn)
+                continue
+
         if txn.get('date') and txn.get('amount_usd'):
             fp = f"{txn['date'].isoformat()}|{txn['amount_usd']:.2f}"
             if fp in existing_fingerprints:
@@ -110,21 +126,20 @@ def check_for_duplicates(
     return new_txns, dupes
 
 
-def _qbo_query(token: str, base: str, sql: str) -> list:
-    import urllib.parse
-    encoded = urllib.parse.quote(sql)
-    url = f"{base}/query?query={encoded}&minorversion=75"
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-        qr = data.get('QueryResponse', {})
-        for key in ('Purchase', 'Deposit', 'Transfer'):
-            if key in qr:
-                return qr[key]
-    except Exception:
-        pass
+def _qbo_query(query_qbo: Callable[[str], dict], sql: str) -> list:
+    """Query through the refresh-aware client and reject unverifiable reads."""
+    data = query_qbo(sql)
+    if not isinstance(data, dict):
+        raise RuntimeError('QBO duplicate query returned a non-object response')
+    if data.get('Fault'):
+        raise RuntimeError(f"QBO duplicate query returned a fault: {data['Fault']}")
+    response = data.get('QueryResponse')
+    if not isinstance(response, dict):
+        raise RuntimeError('QBO duplicate query returned no QueryResponse')
+    for key in ('Purchase', 'Deposit', 'Transfer'):
+        rows = response.get(key)
+        if rows is not None:
+            if not isinstance(rows, list):
+                raise RuntimeError(f'QBO duplicate query returned invalid {key} rows')
+            return rows
     return []
