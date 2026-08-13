@@ -41,10 +41,25 @@ Agent configuration is handled the same way:
 cp prospector/config.example.json prospector/config.json
 cp regina/config.example.json regina/config.json
 cp sarah-coach/config.example.json sarah-coach/config.json
+cp paloma/config.example.json paloma/config.json
 ```
 
 The live files are ignored because they contain Slack identifiers, sender
 details, and operational settings.
+
+Paloma's runtime config also identifies her dedicated OpenClaw Slack account
+and agent. Preview and apply the all-membership event policy, managed SOUL
+contract, and ten-minute reconciliation heartbeat with:
+
+```bash
+npm run configure:paloma-monitoring
+npm run configure:paloma-monitoring -- --confirm-production
+```
+
+The production command discovers current Slack membership, adds stable channel
+ID rules with `requireMention: false`, and keeps the recovery scan dynamic for
+future joined channels. It backs up the OpenClaw config and Paloma SOUL file
+under ignored `runtime/config-backups/` before changing either one.
 
 The same rule applies to sender warmup:
 

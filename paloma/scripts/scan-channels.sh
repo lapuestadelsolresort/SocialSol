@@ -1,59 +1,15 @@
 #!/usr/bin/env bash
-# Paloma 🕊️ — Channel task scanner
-# Scans #mantenimiento and #limpieza for new tasks since last scan.
-# Intended to run every 4 hours via LaunchAgent.
-#
-# This script reads new messages, sends them to the OpenClaw agent for
-# AI-powered task detection, and logs genuine tasks to the SQLite DB.
+# Paloma 🕊️ — All-membership reconciliation scanner
+# Real-time Slack delivery is the primary path. This manual/LaunchAgent entry
+# point provides an independent reconciliation pass across every channel the
+# Paloma Slack account has joined.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PALOMA_DIR="$(dirname "$SCRIPT_DIR")"
-DB="$PALOMA_DIR/data/tasks.db"
-CONFIG="${PALOMA_CONFIG_PATH:-$PALOMA_DIR/config.json}"
-
-# Stable Slack identities are a runtime authorization/configuration boundary.
-MAINT_CHANNEL="$(jq -er '.channels.maintenance' "$CONFIG")"
-CLEAN_CHANNEL="$(jq -er '.channels.cleaning' "$CONFIG")"
-TRACKER_CHANNEL="$(jq -er '.channels.tracker' "$CONFIG")"
-SERGIO="$(jq -er '.users.sergio' "$CONFIG")"
-DANIEL="$(jq -er '.users.daniel' "$CONFIG")"
-MAYELA="$(jq -er '.users.mayela' "$CONFIG")"
-JASON="$(jq -er '.users.jason' "$CONFIG")"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
-# Initialize scan state if needed
-for ch in "$MAINT_CHANNEL" "$CLEAN_CHANNEL"; do
-  exists=$(sqlite3 "$DB" "SELECT COUNT(*) FROM scan_state WHERE channel_id='$ch';")
-  if [ "$exists" -eq 0 ]; then
-    # Start scanning from now (don't backfill the entire history on first run)
-    sqlite3 "$DB" "INSERT INTO scan_state (channel_id, last_scanned_ts) VALUES ('$ch', '$(date -u +%Y-%m-%dT%H:%M:%SZ)');"
-    log "Initialized scan state for $ch"
-  fi
-done
-
-log "Paloma task scan starting..."
-
-# The actual task detection is delegated to the OpenClaw agent via
-# the paloma-scan automation prompt. This script is the LaunchAgent
-# entry point that triggers it.
-
-# Send scan trigger to the OpenClaw agent
-openclaw run --prompt "You are Paloma 🕊️, the resort task tracker. Run a task scan now:
-
-1. Read the last 20 messages from channel $MAINT_CHANNEL (#mantenimiento)
-2. Read the last 20 messages from channel $CLEAN_CHANNEL (#limpieza)
-3. For each message, determine if it's a TASK (something broken, needs repair, cleaning job, or action item)
-4. For genuine tasks: check if source_ts already exists in paloma/data/tasks.db — skip if so
-5. For NEW tasks: insert into the tasks table with description_es (original Spanish), description_en (English translation), source_channel, source_ts, assigned_to (Sergio for maintenance, Daniel for cleaning), reporter info, status
-6. Post a bilingual acknowledgment in the original message thread
-7. Log what you found to #paloma-tracker ($TRACKER_CHANNEL)
-
-Use sqlite3 $DB for database operations. Assign maintenance to $SERGIO and cleaning to $DANIEL; manager=$MAYELA and owner=$JASON.
-All posts must be bilingual (Spanish first, then English).
-Be selective — only log genuine action items, not casual chat." \
-  --timeout 120 2>&1 || log "Scan completed (or timed out)"
-
-log "Paloma task scan finished."
+log "Paloma all-channel reconciliation starting..."
+node "$SCRIPT_DIR/run-channel-monitor.js"
+log "Paloma all-channel reconciliation finished."
