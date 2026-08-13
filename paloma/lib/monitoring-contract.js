@@ -4,6 +4,26 @@ const path = require('node:path');
 
 const SOUL_BLOCK_START = '<!-- PALOMA_ALL_CHANNEL_MONITORING:START -->';
 const SOUL_BLOCK_END = '<!-- PALOMA_ALL_CHANNEL_MONITORING:END -->';
+const CHECKPOINT_GUARD_NAMES = [
+  'paloma_scan_state_no_future_insert',
+  'paloma_scan_state_no_future_update',
+];
+
+function checkpointGuardSql(names = CHECKPOINT_GUARD_NAMES) {
+  const [insertName, updateName] = names;
+  return `CREATE TRIGGER IF NOT EXISTS ${insertName}
+BEFORE INSERT ON scan_state
+WHEN CAST(NEW.last_scanned_ts AS REAL) > CAST(strftime('%s','now') AS REAL) + 5
+BEGIN
+  SELECT RAISE(ABORT, 'Paloma scan checkpoint cannot be in the future');
+END;
+CREATE TRIGGER IF NOT EXISTS ${updateName}
+BEFORE UPDATE OF last_scanned_ts ON scan_state
+WHEN CAST(NEW.last_scanned_ts AS REAL) > CAST(strftime('%s','now') AS REAL) + 5
+BEGIN
+  SELECT RAISE(ABORT, 'Paloma scan checkpoint cannot be in the future');
+END;`;
+}
 
 function requiredString(value, label) {
   const normalized = String(value || '').trim();
@@ -62,12 +82,12 @@ This is Paloma's periodic reconciliation backstop. Real-time Slack events are th
    openclaw directory groups list --channel slack --account ${account} --json --limit 500
    Scan every non-archived channel where raw.is_member (or is_member) is true. Never rely on a static channel list and never skip a joined channel because it is unfamiliar or not named in SOUL.md.
 2. Run openclaw directory self --channel slack --account ${account} --json and ignore messages authored by Paloma herself or by other bots. Ignore Slack system subtypes such as channel renames.
-3. Use ${database} and its existing tasks, task_updates, and scan_state schema. For a channel with no scan_state row, begin ${lookback} minutes before the scan start so the initial run reconciles recent work without backfilling the full channel history.
+3. Run date +%s at scan start and copy its stdout exactly as scan_start_ts; never derive the current epoch from conversational context. Use ${database} and its existing tasks, task_updates, and scan_state schema. For a channel with no scan_state row, begin ${lookback} minutes before scan_start_ts so the initial run reconciles recent work without backfilling the full channel history.
 4. Read every message newer than that channel's checkpoint with openclaw message read --channel slack --account ${account} --target channel:<CHANNEL_ID> --after <SLACK_TS> --limit 100 --json. Process messages oldest first. If payload.hasMore is true, page until every message after the checkpoint has been inspected.
 5. Treat every human-authored message in every joined channel as a classification candidate. A genuine task includes a report of work needed, a request to fix/clean/buy/check/do something, or one person assigning or asking another person to act. A direct @mention followed by an imperative request is a task candidate even when Paloma is not mentioned. This rule applies in villa, housekeeper, maintenance, general, tracker, and any future joined channels.
 6. Before inserting, check tasks.source_ts for exact idempotency. For each new task, use the database's exact current column names, preserve the original Spanish, add an English translation, record source_channel/source_ts/thread_ts and reporter, assign the explicitly mentioned staff member when present, and use open status unless the message itself proves completion. Post exactly one brief bilingual acknowledgment in the original Slack thread. Do not acknowledge duplicates.
 7. Also reconcile human thread replies that clearly change an existing task's status, recording task_updates. Do not turn greetings, thanks, ordinary discussion, or acknowledgments into tasks, and do not post on non-task chatter.
-8. Advance a channel's scan_state.last_scanned_ts to the greatest fully inspected Slack timestamp only after all messages through that timestamp were processed successfully. Upsert updated_at=datetime('now'). On any read, database, or Slack-write failure, leave the affected checkpoint unchanged so the next scan retries safely.
+8. Advance a channel's scan_state.last_scanned_ts only after successful processing. Use the greatest exact Slack ts inspected, or scan_start_ts when a successful read returned no newer messages. Never invent a timestamp, add the lookback interval, or use a conversationally supplied clock. Before every upsert, run date +%s again and refuse any checkpoint greater than that stdout; the database also rejects future checkpoints. Upsert updated_at=datetime('now'). On any read, database, validation, or Slack-write failure, leave the affected checkpoint unchanged so the next scan retries safely.
 9. When every joined channel was inspected successfully, finish with exactly NO_REPLY. On a partial failure, send exactly one concise alert to channel:${tracker} with openclaw message send --channel slack --account ${account} --target channel:${tracker} --message <FAILURE_SUMMARY>, naming the failing channel and operation, then finish with exactly NO_REPLY. Never claim a clean scan after a partial failure.`;
 }
 
@@ -169,8 +189,10 @@ function mergeSoulMonitoringBlock(current, block) {
 }
 
 module.exports = {
+  CHECKPOINT_GUARD_NAMES,
   SOUL_BLOCK_END,
   SOUL_BLOCK_START,
+  checkpointGuardSql,
   cronMatches,
   durationMilliseconds,
   joinedChannels,

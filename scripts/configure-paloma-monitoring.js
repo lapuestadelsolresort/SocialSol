@@ -9,6 +9,8 @@ const { spawnSync } = require('node:child_process');
 const { isDeepStrictEqual } = require('node:util');
 const { ROOT } = require('../lib/runtime-paths');
 const {
+  CHECKPOINT_GUARD_NAMES,
+  checkpointGuardSql,
   cronMatches,
   mergeSoulMonitoringBlock,
   monitorCronConfig,
@@ -30,6 +32,24 @@ function runOpenClaw(args, { binary = process.env.OPENCLAW_BIN || 'openclaw' } =
     throw new Error(`openclaw ${args[0]} failed: ${(result.stderr || result.stdout || '').trim()}`);
   }
   return result.stdout.trim();
+}
+
+function runSqlite(databasePath, sql, { sqliteBinary = process.env.SQLITE3_BIN || 'sqlite3' } = {}) {
+  const result = spawnSync(sqliteBinary, [databasePath, sql], {
+    encoding: 'utf8', maxBuffer: 20 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`sqlite3 failed: ${(result.stderr || result.stdout || '').trim()}`);
+  }
+  return result.stdout.trim();
+}
+
+function installedCheckpointGuards(databasePath, dependencies = {}) {
+  const quote = value => `'${String(value).replaceAll("'", "''")}'`;
+  const sql = `SELECT name FROM sqlite_master WHERE type='trigger' AND name IN (${CHECKPOINT_GUARD_NAMES.map(quote).join(',')}) ORDER BY name;`;
+  const output = (dependencies.runSqlite || runSqlite)(databasePath, sql, dependencies);
+  return new Set(String(output || '').split(/\r?\n/).filter(Boolean));
 }
 
 function openClawJson(args, dependencies) {
@@ -110,7 +130,9 @@ function monitoringSettings(config, args) {
   };
 }
 
-function planMonitoring({ config, account, agents, cronJobs, groups, soul, root, settings }) {
+function planMonitoring({
+  config, account, agents, cronJobs, groups, soul, root, settings, checkpointGuards = [],
+}) {
   if (!account || account.enabled === false) throw new Error('Paloma Slack account is missing or disabled');
   const agentIndex = agents.findIndex(agent => agent.id === settings.agentId);
   if (agentIndex === -1) throw new Error(`OpenClaw agent ${settings.agentId} was not found`);
@@ -144,6 +166,8 @@ function planMonitoring({ config, account, agents, cronJobs, groups, soul, root,
     joined: channelPlan.joined,
     channels: channelPlan.channels,
     changedChannelIds,
+    missingCheckpointGuards: CHECKPOINT_GUARD_NAMES
+      .filter(name => !new Set(checkpointGuards).has(name)),
     cronChanged: !cronMatches(cronJob, monitorCron, settings.agentId),
     legacyHeartbeatPresent: Boolean(agents[agentIndex].heartbeat),
     soulChanged: soul !== nextSoul,
@@ -159,6 +183,8 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   const settings = monitoringSettings(config, args);
   if (!settings.accountId) throw new Error('Paloma monitoring.slack_account or --account is required');
+  const databasePath = path.join(root, 'paloma', 'data', 'tasks.db');
+  const checkpointGuards = installedCheckpointGuards(databasePath, dependencies);
 
   const groups = openClawJson([
     'directory', 'groups', 'list', '--channel', 'slack', '--account', settings.accountId,
@@ -175,8 +201,10 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
   const soul = fs.readFileSync(soulPath, 'utf8');
   const plan = planMonitoring({
     config, account, agents, cronJobs: cronPayload.jobs || [], groups, soul, root, settings,
+    checkpointGuards,
   });
   const changed = plan.changedChannelIds.length > 0 || plan.cronChanged
+    || plan.missingCheckpointGuards.length > 0
     || plan.legacyHeartbeatPresent || plan.soulChanged;
   const command = dependencies.runOpenClaw || runOpenClaw;
   const summary = {
@@ -188,6 +216,7 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     joinedChannelCount: plan.joined.length,
     joinedChannelNames: plan.joined.map(channel => channel.name),
     realtimeChannelUpdates: plan.changedChannelIds.length,
+    checkpointGuardInstall: plan.missingCheckpointGuards.length > 0,
     monitorEvery: plan.monitorCron.every,
     monitorTarget: plan.monitorCron.delivery.to,
     cronChanged: plan.cronChanged,
@@ -217,6 +246,9 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
   try {
     // Put the behavioral contract in place before widening real-time event delivery.
     if (plan.soulChanged) writeAtomic(soulPath, plan.nextSoul);
+    if (plan.missingCheckpointGuards.length) {
+      (dependencies.runSqlite || runSqlite)(databasePath, checkpointGuardSql(), dependencies);
+    }
     for (const channelId of plan.changedChannelIds) {
       command([
         'config', 'set', accountChannelPath(settings.accountId, channelId),
@@ -262,6 +294,10 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     if (verifiedAgents[plan.agentIndex]?.heartbeat) {
       throw new Error('verification failed while retiring unsupported Paloma heartbeat configuration');
     }
+    const verifiedCheckpointGuards = installedCheckpointGuards(databasePath, dependencies);
+    if (CHECKPOINT_GUARD_NAMES.some(name => !verifiedCheckpointGuards.has(name))) {
+      throw new Error('verification failed for Paloma checkpoint database guards');
+    }
     if (verifiedCronJobs.length !== 1
         || !cronMatches(verifiedCronJobs[0], plan.monitorCron, settings.agentId)) {
       throw new Error('verification failed for Paloma monitor cron configuration');
@@ -275,6 +311,11 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     }
     fs.copyFileSync(configBackup, openClawConfigPath);
     fs.copyFileSync(soulBackup, soulPath);
+    if (plan.missingCheckpointGuards.length) {
+      const rollbackSql = plan.missingCheckpointGuards
+        .map(name => `DROP TRIGGER IF EXISTS ${name};`).join('\n');
+      try { (dependencies.runSqlite || runSqlite)(databasePath, rollbackSql, dependencies); } catch {}
+    }
     throw new Error(`Paloma monitoring cutover rolled back: ${error.message}`);
   }
   return { ...summary, configBackup, soulBackup };
@@ -297,4 +338,6 @@ module.exports = {
   option,
   planMonitoring,
   runOpenClaw,
+  runSqlite,
+  installedCheckpointGuards,
 };

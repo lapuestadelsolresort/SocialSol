@@ -3,6 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+  CHECKPOINT_GUARD_NAMES,
+  checkpointGuardSql,
   cronMatches,
   joinedChannels,
   mergeSoulMonitoringBlock,
@@ -57,6 +59,8 @@ test('monitor cron is isolated, success-silent, failure-routed, dynamic, and che
   assert.match(monitor.message, /every non-archived channel/);
   assert.match(monitor.message, /direct @mention followed by an imperative request is a task candidate/);
   assert.match(monitor.message, /leave the affected checkpoint unchanged/);
+  assert.match(monitor.message, /copy its stdout exactly as scan_start_ts/);
+  assert.match(monitor.message, /refuse any checkpoint greater than that stdout/);
   assert.match(monitor.message, /send exactly one concise alert to channel:CPALOMA01/);
   assert.match(monitor.message, /exactly NO_REPLY/);
   assert.ok(cronMatches({
@@ -78,6 +82,15 @@ test('monitor cron is isolated, success-silent, failure-routed, dynamic, and che
     '--failure-alert-cooldown', '600000ms',
     '--failure-alert-exclude-skipped',
   ]);
+});
+
+test('database guards reject future scan checkpoints on insert and update', () => {
+  const sql = checkpointGuardSql();
+  for (const name of CHECKPOINT_GUARD_NAMES) assert.match(sql, new RegExp(name));
+  assert.match(sql, /BEFORE INSERT ON scan_state/);
+  assert.match(sql, /BEFORE UPDATE OF last_scanned_ts ON scan_state/);
+  assert.match(sql, /strftime\('%s','now'\)/);
+  assert.match(sql, /RAISE\(ABORT, 'Paloma scan checkpoint cannot be in the future'\)/);
 });
 
 test('managed SOUL block is idempotent and applies task detection to every joined channel', () => {
@@ -115,11 +128,13 @@ test('cutover plan targets the requested agent without replacing its Slack accou
       lookbackMinutes: 60,
       trackerChannelId: 'CPALOMA01',
     },
+    checkpointGuards: CHECKPOINT_GUARD_NAMES,
   });
   assert.equal(plan.agentIndex, 1);
   assert.deepEqual(plan.changedChannelIds, ['CJOINED02']);
   assert.equal(plan.monitorCron.delivery.to, 'channel:CPALOMA01');
   assert.equal(plan.cronChanged, true);
+  assert.deepEqual(plan.missingCheckpointGuards, []);
   assert.equal(accountChannelPath('paloma-test', 'CJOINED02'),
     'channels.slack.accounts["paloma-test"].channels["CJOINED02"]');
 });
