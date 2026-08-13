@@ -144,6 +144,12 @@ async function collectReceipts({ db, input, run }, forceScoped = false) {
     FROM accounting_receipts
     WHERE (${channelFilter} IS NULL OR slack_channel_id=${channelFilter})
     ORDER BY submitted_at DESC LIMIT ${limit}`, []);
+  for (const receipt of rows) {
+    receipt.items = await queryIfTable(db, 'accounting_receipt_items', sql`SELECT
+      item_index, file_ref_id, vendor, transaction_date, currency, amount,
+      description, category_key, category_name, extraction_confidence
+      FROM accounting_receipt_items WHERE receipt_id=${receipt.id} ORDER BY item_index`, []);
+  }
   return { source: 'sqlite.accounting_receipts', sourceRef: channelFilter, payload: { receipts: rows, scopedToChannel: channelFilter } };
 }
 

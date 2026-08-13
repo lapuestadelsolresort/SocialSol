@@ -247,11 +247,65 @@ function validateReceiptAnnotation(input) {
   }
   if (categoryKey && !/^[a-z0-9_]{1,80}$/.test(categoryKey)) throw new Error('invalid categoryKey');
   if (categoryName.length > 160) throw new Error('categoryName is too long');
+  normalizeReceiptItems(input);
+}
+
+function normalizeReceiptItems(input) {
+  if (input.items === undefined) return [];
+  if (!Array.isArray(input.items) || input.items.length === 0) {
+    throw new Error('items must be a non-empty array when supplied');
+  }
+  if (input.items.length > 20) throw new Error('too many receipt items');
+  const parentCurrency = String(input.currency || '').toUpperCase();
+  const seenFileRefs = new Set();
+  const items = input.items.map((raw, offset) => {
+    const item = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const currency = String(item.currency || parentCurrency).toUpperCase();
+    if (!['MXN', 'USD'].includes(currency)) throw new Error(`item ${offset + 1} currency must be MXN or USD`);
+    if (currency !== parentCurrency) throw new Error(`item ${offset + 1} currency must match the receipt currency`);
+    const amount = Number(item.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error(`item ${offset + 1} requires a positive amount`);
+    const transactionDate = item.transactionDate || input.transactionDate || null;
+    if (transactionDate && !/^\d{4}-\d{2}-\d{2}$/.test(String(transactionDate))) {
+      throw new Error(`item ${offset + 1} transactionDate must be YYYY-MM-DD`);
+    }
+    const fileRefId = String(item.fileRefId || '').trim().slice(0, 160) || null;
+    if (fileRefId && seenFileRefs.has(fileRefId)) throw new Error(`item ${offset + 1} repeats fileRefId`);
+    if (fileRefId) seenFileRefs.add(fileRefId);
+    const vendor = String(item.vendor || '').trim().slice(0, 300) || null;
+    const description = String(item.description || '').trim();
+    const itemCategoryKey = String(item.categoryKey || '').trim();
+    const itemCategoryName = String(item.categoryName || '').trim();
+    if (description.length > 1000) throw new Error(`item ${offset + 1} description is too long`);
+    if ((itemCategoryKey || itemCategoryName) && (!itemCategoryKey || !itemCategoryName)) {
+      throw new Error(`item ${offset + 1} categoryKey and categoryName must be supplied together`);
+    }
+    if (itemCategoryKey && !/^[a-z0-9_]{1,80}$/.test(itemCategoryKey)) {
+      throw new Error(`item ${offset + 1} has invalid categoryKey`);
+    }
+    if (itemCategoryName.length > 160) throw new Error(`item ${offset + 1} categoryName is too long`);
+    return {
+      itemIndex: offset + 1,
+      fileRefId,
+      vendor,
+      transactionDate,
+      currency,
+      amount,
+      description: description || null,
+      categoryKey: itemCategoryKey || null,
+      categoryName: itemCategoryName || null,
+    };
+  });
+  const total = items.reduce((sum, item) => sum + item.amount, 0);
+  if (Math.abs(total - Number(input.amount)) > 0.005) {
+    throw new Error(`receipt item total ${total.toFixed(2)} does not equal receipt amount ${Number(input.amount).toFixed(2)}`);
+  }
+  return items;
 }
 
 const receiptAnnotate = {
   name: 'receipt.annotate',
-  version: 2,
+  version: 3,
   capability: 'receipts.write',
   mutates: true,
   validate: validateReceiptAnnotation,
@@ -276,18 +330,44 @@ const receiptAnnotate = {
         description: String(input.description || '').trim() || null,
         categoryKey: String(input.categoryKey || '').trim() || null,
         categoryName: String(input.categoryName || '').trim() || null,
+        items: normalizeReceiptItems(input),
       };
+      const attachedFileIds = new Set((() => {
+        try { return JSON.parse(receipt.file_refs_json || '[]'); } catch { return []; }
+      })().map(file => String(file?.id || '')).filter(Boolean));
+      for (const item of request.items) {
+        if (item.fileRefId && !attachedFileIds.has(item.fileRefId)) {
+          throw new Error(`receipt item ${item.itemIndex} fileRefId is not attached to the source message`);
+        }
+      }
       const effect = await store.createEffect(db, {
         runId: run.id, stepKey, effectType: 'local_record_write', provider: 'sqlite',
         operation: 'accounting_receipt.annotate', idempotencyKey: `${run.id}:sqlite:accounting_receipt.annotate`,
         request, target: { receiptId: input.receiptId },
       });
-      await db.query(sql`UPDATE accounting_receipts SET vendor=${request.vendor},
-        transaction_date=${request.transactionDate}, currency=${request.currency}, amount=${request.amount},
-        description=${request.description}, category_key=${request.categoryKey}, category_name=${request.categoryName},
-        extraction_json=${JSON.stringify({ source: 'channel_member', actorUserId: run.actor_user_id })},
-        status='extracted', workflow_run_id=${run.id}, updated_at=datetime('now')
-        WHERE id=${input.receiptId}`);
+      await db.tx(async tx => {
+        await tx.query(sql`UPDATE accounting_receipts SET vendor=${request.vendor},
+          transaction_date=${request.transactionDate}, currency=${request.currency}, amount=${request.amount},
+          description=${request.description}, category_key=${request.categoryKey}, category_name=${request.categoryName},
+          extraction_json=${JSON.stringify({
+            source: 'channel_member', actorUserId: run.actor_user_id,
+            itemCount: input.items === undefined ? null : request.items.length,
+          })}, status='extracted', workflow_run_id=${run.id}, updated_at=datetime('now')
+          WHERE id=${input.receiptId}`);
+        if (input.items !== undefined) {
+          await tx.query(sql`DELETE FROM accounting_receipt_items WHERE receipt_id=${input.receiptId}`);
+          for (const item of request.items) {
+            await tx.query(sql`INSERT INTO accounting_receipt_items (
+              id, receipt_id, item_index, file_ref_id, vendor, transaction_date, currency,
+              amount, description, category_key, category_name, extraction_confidence
+            ) VALUES (
+              ${crypto.randomUUID()}, ${input.receiptId}, ${item.itemIndex}, ${item.fileRefId},
+              ${item.vendor}, ${item.transactionDate}, ${item.currency}, ${item.amount},
+              ${item.description}, ${item.categoryKey}, ${item.categoryName}, 1
+            )`);
+          }
+        }
+      });
       const [readback] = await db.query(sql`SELECT id, vendor, transaction_date, currency, amount,
         description, category_key, category_name, status
         FROM accounting_receipts WHERE id=${input.receiptId}`);
@@ -296,14 +376,28 @@ const receiptAnnotate = {
         || readback.category_name !== request.categoryName) {
         throw new Error('receipt annotation readback mismatch');
       }
+      const itemReadback = await db.query(sql`SELECT item_index, file_ref_id, vendor, transaction_date,
+        currency, amount, description, category_key, category_name
+        FROM accounting_receipt_items WHERE receipt_id=${input.receiptId} ORDER BY item_index`);
+      if (input.items !== undefined && (
+        itemReadback.length !== request.items.length
+        || itemReadback.some((item, index) => Number(item.amount) !== request.items[index].amount
+          || item.currency !== request.items[index].currency
+          || item.file_ref_id !== request.items[index].fileRefId
+          || item.category_key !== request.items[index].categoryKey)
+      )) throw new Error('receipt item annotation readback mismatch');
       const evidence = await store.createEvidence(db, {
-        runId: run.id, stepKey, source: 'sqlite.accounting_receipts', sourceRef: input.receiptId, payload: readback,
+        runId: run.id, stepKey, source: 'sqlite.accounting_receipts', sourceRef: input.receiptId,
+        payload: { receipt: readback, items: itemReadback },
       });
       await store.transitionEffect(db, {
         effectId: effect.id, providerRef: input.receiptId, status: 'verified_by_readback',
         providerStatus: 'annotation_readback_verified', response: { evidenceId: evidence.id },
       });
-      return { receiptId: input.receiptId, effectId: effect.id, evidenceId: evidence.id, receiptStatus: readback.status };
+      return {
+        receiptId: input.receiptId, effectId: effect.id, evidenceId: evidence.id,
+        receiptStatus: readback.status, itemCount: itemReadback.length,
+      };
     },
   }],
   output({ state }) { return { ...state.write_annotation, status: 'verified_by_readback' }; },
@@ -368,6 +462,7 @@ module.exports = {
   socialContentUpsert,
   validateGuestDraft,
   validateReceiptAnnotation,
+  normalizeReceiptItems,
   validateReceipt,
   validateSocialContent,
 };
