@@ -61,7 +61,7 @@ class QBOIntegrityTests(unittest.TestCase):
         transaction = {
             'date': '2026-08-20', 'amount': 2105, 'amount_usd': 118.53,
             'category': 'receipt_bundle', 'vendor_key': 'sergio_gracia',
-            'description': 'LPDS-R-A1B2C3D4E5F60718', 'payment_reference': 'LPDS-R-A1B2C3D4E5F60718',
+            'description': 'LPDSRA1B2C3D4E5F60718', 'payment_reference': 'LPDSRA1B2C3D4E5F60718',
             'receipt_items': [
                 {'item_index': 1, 'amount': 1405, 'category_key': 'maintenance', 'vendor': 'Hardware'},
                 {'item_index': 2, 'amount': 700, 'category_key': 'cleaning_services', 'vendor': 'Cleaner'},
@@ -73,7 +73,7 @@ class QBOIntegrityTests(unittest.TestCase):
         self.assertEqual([line['AccountBasedExpenseLineDetail']['AccountRef']['value']
                           for line in purchase['Line']], ['10', '11'])
         self.assertEqual(round(sum(line['Amount'] for line in purchase['Line']), 2), 118.53)
-        self.assertIn('LPDS-R-A1B2C3D4E5F60718', purchase['PrivateNote'])
+        self.assertIn('LPDSRA1B2C3D4E5F60718', purchase['PrivateNote'])
 
     def test_provider_request_id_is_sent_on_create(self):
         seen = []

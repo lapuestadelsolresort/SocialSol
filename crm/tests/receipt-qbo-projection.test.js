@@ -26,7 +26,7 @@ test('verified QBO receipt writes project the purchase onto receipt and reconcil
       id, slack_channel_id, slack_message_id, submitted_at, source_hash, status,
       transaction_date, currency, amount, payment_reference
     ) VALUES (${receiptId}, 'C-RECEIPT', '171.2', '2026-08-13T12:00:00Z', 'hash',
-      'matched', '2026-08-13', 'MXN', 2105, 'LPDS-R-A1B2C3D4E5F60718')`);
+      'matched', '2026-08-13', 'MXN', 2105, 'LPDSRA1B2C3D4E5F60718')`);
     await db.query(sql`INSERT INTO accounting_reconciliations (
       id, receipt_id, bank_reference, status
     ) VALUES ('reconciliation-1', ${receiptId}, 'bank-1', 'matched')`);

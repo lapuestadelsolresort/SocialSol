@@ -297,7 +297,7 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     assert.equal(receipt.description, 'Replacement hardware for villa doors');
     assert.equal(receipt.category_key, 'maintenance');
     assert.equal(receipt.category_name, 'Maintenance');
-    assert.match(receipt.payment_reference, /^LPDS-R-[A-F0-9]{16}$/);
+    assert.match(receipt.payment_reference, /^LPDSR[A-F0-9]{16}$/);
     assert.equal(receipt.reimbursement_recipient_user_id, 'UTESTWORKER');
     assert.ok(receipt.payment_instruction_queued_at);
     assert.equal(annotated.output.paymentReference, receipt.payment_reference);
@@ -320,6 +320,27 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
       { item_index: 2, file_ref_id: null, amount: 250, category_key: 'cleaning_services' },
     ]);
 
+    await db.query(sql`UPDATE accounting_receipts
+      SET payment_reference='LPDS-R-A1B2C3D4E5F60718'
+      WHERE id=${first.output.receiptId}`);
+    const corrected = await startGraph(db, annotate, {
+      idempotencyKey: 'slack:RECEIPT-A:171.3:receipt.annotate:kapital-safe',
+      triggerType: 'slack', channelId: 'RECEIPT-A', actorUserId: 'UTESTWORKER',
+      input: {
+        receiptId: first.output.receiptId, amount: 1250, currency: 'MXN',
+        transactionDate: '2026-08-10', vendor: 'Hardware',
+        categoryKey: 'maintenance', categoryName: 'Maintenance',
+        description: 'Replacement hardware for villa doors',
+      },
+    });
+    assert.equal(corrected.status, 'completed', corrected.error_message);
+    assert.equal(corrected.output.paymentReference, 'LPDSRA1B2C3D4E5F60718');
+    assert.equal(corrected.output.paymentReferenceMigrated, true);
+    const [correctedInstruction] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${corrected.output.outboxId}`);
+    assert.match(JSON.parse(correctedInstruction.payload_json).message,
+      /Corrected Kapital-compatible reimbursement instruction/);
+
     assert.throws(() => annotate.validate({
       receiptId: first.output.receiptId, amount: 1250, currency: 'MXN',
       items: [{ amount: 1200, currency: 'MXN' }],
@@ -338,7 +359,7 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
 test('receipt reconciliation uses an exact payment reference before the legacy date window', async () => {
   await withDb(async db => {
     const receipts = [
-      ['11111111-1111-4111-8111-111111111111', 'LPDS-R-A1B2C3D4E5F60718', 2105, '2026-08-06'],
+      ['11111111-1111-4111-8111-111111111111', 'LPDSRA1B2C3D4E5F60718', 2105, '2026-08-06'],
       ['22222222-2222-4222-8222-222222222222', 'LPDS-R-B1C2D3E4F5061728', 3086, '2026-08-13'],
       ['33333333-3333-4333-8333-333333333333', null, 500, '2026-08-10'],
     ];
@@ -350,7 +371,7 @@ test('receipt reconciliation uses an exact payment reference before the legacy d
         ${transactionDate}, 'MXN', ${amount}, ${reference})`);
     }
     const bankRows = [
-      ['bank-ref-match', '2026-08-20', 'Reembolso LPDS-R-A1B2C3D4E5F60718', 2105],
+      ['bank-ref-match', '2026-08-20', 'Reembolso LPDSRA1B2C3D4E5F60718', 2105],
       ['bank-ref-wrong-amount', '2026-08-13', 'LPDS-R-B1C2D3E4F5061728', 3000],
       ['bank-date-only-decoy', '2026-08-13', 'Other payment', 3086],
       ['bank-legacy', '2026-08-11', 'Legacy reimbursement', 500],

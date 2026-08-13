@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List
 
 
-PAYMENT_REFERENCE_RE = re.compile(r"\bLPDS-R-[A-F0-9]{16}\b", re.IGNORECASE)
+PAYMENT_REFERENCE_RE = re.compile(r"\b(?:LPDSR|LPDS-R-)[A-F0-9]{16}\b", re.IGNORECASE)
 
 
 def payment_references(transaction: Dict) -> List[str]:
