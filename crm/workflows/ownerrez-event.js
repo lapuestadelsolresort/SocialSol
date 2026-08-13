@@ -41,6 +41,25 @@ function eventNotification(eventType, event) {
   return [];
 }
 
+function messageThreadIds(event = {}) {
+  const candidates = [
+    event.thread_id,
+    event.thread?.id,
+    event.entity?.thread_id,
+    event.entity?.thread?.id,
+    ...(Array.isArray(event.thread_ids) ? event.thread_ids : []),
+    ...(Array.isArray(event.entity?.thread_ids) ? event.entity.thread_ids : []),
+  ];
+  return [...new Set(candidates.map(value => Number.parseInt(value, 10))
+    .filter(value => Number.isSafeInteger(value) && value > 0))];
+}
+
+function messageEntityId(event = {}) {
+  const value = event.entity?.id || event.entity_id;
+  const id = Number.parseInt(value, 10);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 const definition = {
   name: 'ownerrez.webhook.process',
   version: 2,
@@ -90,12 +109,25 @@ const definition = {
           throw error;
         }
         let messageIngest = null;
-        if (String(event.event_type).includes('message')) {
-          const ingest = await services.runCommand(nodeCommand('crm/scripts/ownerrez-message-ingest.js', [], {
-            timeoutMs: 20 * 60_000,
-          }));
-          messageIngest = lastJson(ingest.stdout);
-          if (!messageIngest) throw new Error('OwnerRez message ingest did not emit a verifiable summary');
+        const threadIds = messageThreadIds(event.event);
+        if (String(event.event_type).includes('message') || threadIds.length) {
+          const summaries = [];
+          const targets = threadIds.length ? threadIds : [null];
+          const exactMessageId = String(event.event_type).includes('message')
+            ? messageEntityId(event.event) : null;
+          for (const threadId of targets) {
+            const args = [
+              ...(threadId ? ['--thread', String(threadId)] : []),
+              ...(exactMessageId ? ['--message-id', String(exactMessageId)] : []),
+            ];
+            const ingest = await services.runCommand(nodeCommand('crm/scripts/ownerrez-message-ingest.js', args, {
+              timeoutMs: 20 * 60_000,
+            }));
+            const parsed = lastJson(ingest.stdout);
+            if (!parsed) throw new Error('OwnerRez message ingest did not emit a verifiable summary');
+            summaries.push(parsed);
+          }
+          messageIngest = summaries.length === 1 ? summaries[0] : { threadRuns: summaries };
         }
         const evidence = await store.createEvidence(db, {
           runId: run.id, stepKey, source: 'ownerrez.api+crm.readback',
@@ -141,4 +173,6 @@ const definition = {
   },
 };
 
-module.exports = { definition, eventNotification, lastJson, validate };
+module.exports = {
+  definition, eventNotification, lastJson, messageEntityId, messageThreadIds, validate,
+};

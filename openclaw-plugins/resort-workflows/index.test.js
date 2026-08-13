@@ -100,7 +100,7 @@ test('email reply commands bind the trusted Slack user, message, channel, and th
     bodyForAgent: '!email reply 10339 | bypass',
   }, {});
   assert.equal(topLevel.handled, true);
-  assert.match(topLevel.reply.text, /original draft thread/);
+  assert.match(topLevel.reply.text, /original message thread/);
 });
 
 test('email reply dispatch claims ordinary Slack commands before the model runs', async () => {

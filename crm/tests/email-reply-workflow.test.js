@@ -27,7 +27,13 @@ async function withDb(run) {
       id INTEGER PRIMARY KEY, name TEXT, email TEXT, status TEXT,
       email_status TEXT, do_not_contact INTEGER DEFAULT 0,
       do_not_contact_reason TEXT, reply_status TEXT, lead_quality TEXT,
-      updated_at TEXT
+      updated_at TEXT, dedup_key TEXT UNIQUE, source TEXT, context_source TEXT,
+      relationship_type TEXT, contact_provenance TEXT, preferred_channel TEXT,
+      addressable INTEGER, notes TEXT
+    )`);
+    await db.query(sql`CREATE TABLE leads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT DEFAULT (datetime('now')),
+      name TEXT, email TEXT, source TEXT, status TEXT, inquiry_message TEXT, notes TEXT
     )`);
     await db.query(sql`CREATE TABLE outreach_campaigns (
       id INTEGER PRIMARY KEY, slug TEXT, name TEXT
@@ -145,7 +151,7 @@ test('re-observation repairs this classifier\'s exact collapsed-quote false nega
     assert.equal(suppressionCount, 0);
     const [outbox] = await db.query(sql`SELECT * FROM workflow_outbox WHERE run_id=${run.id}`);
     assert.equal(outbox.idempotency_key,
-      `email-thread:${event.id}:classification:ambiguous:no_deterministic_signal:v3:slack`);
+      `email-thread:${event.id}:classification:ambiguous:no_deterministic_signal:v4:slack`);
     const payload = JSON.parse(outbox.payload_json);
     assert.equal(payload.threadTs, '1786549495.693669');
     assert.match(payload.message, /classification corrected/i);
@@ -198,7 +204,7 @@ test('re-observation corrects a stale reason in the original Slack thread', asyn
     assert.equal(contact.do_not_contact, 1);
     const [outbox] = await db.query(sql`SELECT * FROM workflow_outbox WHERE run_id=${run.id}`);
     assert.equal(outbox.idempotency_key,
-      `email-thread:${event.id}:classification:not_interested:retiring:v3:slack`);
+      `email-thread:${event.id}:classification:not_interested:retiring:v4:slack`);
     const payload = JSON.parse(outbox.payload_json);
     assert.equal(payload.threadTs, '1786549495.693669');
     assert.match(payload.message, /Previous classification: \*not_interested\* \(unsubscribe\)/);
@@ -363,5 +369,119 @@ test('a delayed Gmail Sent readback retries without sending the email twice', as
     assert.equal(completed.status, 'completed', completed.error_message);
     assert.equal(sends, 1);
     assert.equal(reads, 2);
+  });
+});
+
+test('new direct Gmail mail creates one CRM inquiry and a dedicated Slack conversation root', async () => {
+  await withDb(async db => {
+    const [event] = await db.query(sql`INSERT INTO email_threads (
+      direction, subject, body_text, raw_body_text, from_address, sender_name,
+      to_address, received_at, provider, provider_message_id, provider_thread_id,
+      processing_status, slack_channel_id
+    ) VALUES (
+      'inbound', 'Wedding availability', 'Do you host 40-person weddings?',
+      'Do you host 40-person weddings?', 'guest@example.net', 'Taylor Guest',
+      'sarah@example.com', '2026-08-13T18:00:00Z', 'gmail', 'gmail-direct-1',
+      'gmail-direct-thread', 'pending', 'CEMAIL'
+    ) RETURNING *`);
+    const run = await startGraph(db, observeDefinition, {
+      idempotencyKey: 'email:gmail:gmail-direct-1:observe:v4',
+      triggerType: 'system', triggerRef: `email-thread:${event.id}`,
+      input: { emailThreadId: event.id },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    const [projected] = await db.query(sql`SELECT contact_id, crm_lead_id FROM email_threads WHERE id=${event.id}`);
+    assert.ok(projected.contact_id);
+    assert.ok(projected.crm_lead_id);
+    const [outbox] = await db.query(sql`SELECT payload_json FROM workflow_outbox WHERE run_id=${run.id}`);
+    const payload = JSON.parse(outbox.payload_json);
+    assert.equal(payload.channelId, 'CEMAIL');
+    assert.equal(payload.threadTs, null);
+    assert.deepEqual(payload.emailConversation, { provider: 'gmail', providerThreadId: 'gmail-direct-thread' });
+    assert.match(payload.message, /CRM lead/);
+    assert.match(payload.message, /!email reply/);
+  });
+});
+
+test('Gmail Spam remains visible without creating a CRM inquiry', async () => {
+  await withDb(async db => {
+    const [event] = await db.query(sql`INSERT INTO email_threads (
+      direction, subject, body_text, raw_body_text, from_address, sender_name,
+      to_address, received_at, provider, provider_message_id, provider_thread_id,
+      provider_metadata_json, processing_status, slack_channel_id
+    ) VALUES (
+      'inbound', 'Urgent offer', 'Click this questionable link',
+      'Click this questionable link', 'promoter@example.net', 'Promoter',
+      'sarah@example.com', '2026-08-13T18:01:00Z', 'gmail', 'gmail-spam-1',
+      'gmail-spam-thread', '{"labelIds":["SPAM"]}', 'pending', 'CEMAIL'
+    ) RETURNING *`);
+    const run = await startGraph(db, observeDefinition, {
+      idempotencyKey: 'email:gmail:gmail-spam-1:observe:v4',
+      triggerType: 'system', triggerRef: `email-thread:${event.id}`,
+      input: { emailThreadId: event.id },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    const [projected] = await db.query(sql`SELECT contact_id, crm_lead_id FROM email_threads WHERE id=${event.id}`);
+    assert.equal(projected.contact_id, null);
+    assert.equal(projected.crm_lead_id, null);
+    const [outbox] = await db.query(sql`SELECT payload_json FROM workflow_outbox WHERE run_id=${run.id}`);
+    const payload = JSON.parse(outbox.payload_json);
+    assert.match(payload.message, /Visibility only/);
+    assert.match(payload.message, /!email reply/);
+  });
+});
+
+test('OwnerRez replies use the same proposal protocol with provider readback and one send', async () => {
+  await withDb(async db => {
+    await db.query(sql`INSERT INTO email_threads (
+      direction, subject, body_text, raw_body_text, from_address, sender_name,
+      to_address, received_at, provider, provider_message_id, provider_thread_id,
+      provider_metadata_json, processing_status, slack_channel_id, slack_thread_ts,
+      slack_message_ts
+    ) VALUES (
+      'inbound', 'Vrbo guest conversation', 'Is the villa available in October?',
+      'Is the villa available in October?', 'ownerrez:guest:42', 'Morgan Guest',
+      'ownerrez:host', '2026-08-13T18:05:00Z', 'ownerrez', '112025557', '884422',
+      '{"channel":"vrbo"}', 'processed', 'CEMAIL', '300.1', '300.1'
+    )`);
+    const proposed = await startGraph(db, proposeDefinition, {
+      idempotencyKey: 'slack:CEMAIL:300.2:email.reply.propose',
+      triggerType: 'slack_email_reply_command', triggerRef: '300.2',
+      channelId: 'CEMAIL', actorUserId: 'U-SARAH',
+      input: { threadTs: '300.1', message: 'Yes—please share your preferred October dates.' },
+    });
+    assert.equal(proposed.status, 'completed', proposed.error_message);
+    assert.equal(proposed.output.provider, 'ownerrez');
+    let sends = 0;
+    const confirmed = await startGraph(db, confirmDefinition, {
+      idempotencyKey: 'slack:CEMAIL:300.3:email.reply.confirm',
+      triggerType: 'slack_email_confirm_command', triggerRef: '300.3',
+      channelId: 'CEMAIL', actorUserId: 'U-SARAH',
+      input: {
+        proposalId: proposed.output.proposalId,
+        acceptanceHash: proposed.output.confirmationCommand.split(' ').at(-1),
+        threadTs: '300.1',
+      },
+    }, {
+      sendOwnerRezMessage: async input => {
+        sends += 1;
+        assert.equal(input.threadId, '884422');
+        return { id: '112025999', threadId: '884422', body: input.body,
+          internalDate: '2026-08-13T18:06:00Z', fromRole: 'owner', isDraft: false, removedAt: null };
+      },
+      readOwnerRezMessage: async (messageId, threadId) => ({
+        id: messageId, threadId, body: 'Yes—please share your preferred October dates.',
+        internalDate: '2026-08-13T18:06:00Z', fromRole: 'owner', isDraft: false, removedAt: null,
+      }),
+    });
+    assert.equal(confirmed.status, 'completed', confirmed.error_message);
+    assert.equal(confirmed.output.provider, 'ownerrez');
+    assert.equal(sends, 1);
+    assert.equal(confirmed.effects[0].provider, 'ownerrez');
+    assert.equal(confirmed.effects[0].status, 'verified_by_readback');
+    const [projection] = await db.query(sql`SELECT * FROM email_threads
+      WHERE provider='ownerrez' AND provider_message_id='112025999'`);
+    assert.equal(projection.direction, 'outbound');
+    assert.equal(projection.slack_thread_ts, '300.1');
   });
 });

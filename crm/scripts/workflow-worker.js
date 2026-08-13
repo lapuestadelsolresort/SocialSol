@@ -18,6 +18,7 @@ const { runCommand } = require('../lib/workflow-command');
 const { fetchSlackReceiptSource } = require('../lib/slack-receipt-source');
 const { extractOwnerExpense } = require('../lib/receipt-extraction');
 const { sendGmailReply, readSentMessage } = require('../lib/gmail-client');
+const { sendOwnerRezMessage, readOwnerRezMessage } = require('../lib/ownerrez-messages');
 const { authorize, loadPolicy } = require('../lib/channel-policy');
 const { effectClass, policySnapshot, reviewChannelId } = require('../lib/workflow-execution-policy');
 const { getDefinition } = require('../workflows/registry');
@@ -41,6 +42,8 @@ function executionServices() {
     extractOwnerExpense: params => extractOwnerExpense(params),
     sendEmail: params => sendGmailReply(params),
     readEmail: messageId => readSentMessage(messageId),
+    sendOwnerRezMessage: params => sendOwnerRezMessage(params),
+    readOwnerRezMessage: (messageId, threadId) => readOwnerRezMessage(messageId, threadId),
   };
 }
 

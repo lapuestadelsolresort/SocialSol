@@ -4,6 +4,35 @@
 // domain tables; these tables record orchestration state, evidence, effects,
 // retries, and notifications without treating an LLM context window as state.
 
+const EMAIL_REPLY_PROPOSALS_CREATE = `CREATE TABLE IF NOT EXISTS email_reply_proposals (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL DEFAULT 'gmail',
+  outreach_send_id INTEGER REFERENCES outreach_sends(id),
+  contact_id INTEGER REFERENCES contacts(id),
+  inbound_email_thread_id INTEGER NOT NULL REFERENCES email_threads(id),
+  to_address TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body_text TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  acceptance_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  proposed_by TEXT NOT NULL,
+  confirmed_by TEXT,
+  slack_channel_id TEXT NOT NULL,
+  slack_thread_ts TEXT NOT NULL,
+  proposal_run_id TEXT REFERENCES workflow_runs(id),
+  confirmation_run_id TEXT REFERENCES workflow_runs(id),
+  provider_message_id TEXT,
+  provider_thread_id TEXT,
+  workflow_effect_id TEXT REFERENCES workflow_effects(id),
+  processing_error TEXT,
+  expires_at TEXT NOT NULL,
+  confirmed_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS workflow_runs (
     id TEXT PRIMARY KEY,
@@ -229,6 +258,7 @@ const SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     contact_id INTEGER REFERENCES contacts(id),
+    crm_lead_id INTEGER REFERENCES leads(id),
     outreach_send_id INTEGER REFERENCES outreach_sends(id),
     direction TEXT NOT NULL,
     subject TEXT,
@@ -236,6 +266,7 @@ const SCHEMA_STATEMENTS = [
     body_html TEXT,
     resend_email_id TEXT,
     from_address TEXT,
+    sender_name TEXT,
     to_address TEXT,
     received_at TEXT,
     sentiment TEXT,
@@ -244,6 +275,7 @@ const SCHEMA_STATEMENTS = [
     provider TEXT NOT NULL DEFAULT 'gmail',
     provider_message_id TEXT,
     provider_thread_id TEXT,
+    provider_metadata_json TEXT,
     rfc_message_id TEXT,
     in_reply_to TEXT,
     references_header TEXT,
@@ -260,33 +292,7 @@ const SCHEMA_STATEMENTS = [
     workflow_run_id TEXT REFERENCES workflow_runs(id),
     workflow_effect_id TEXT REFERENCES workflow_effects(id)
   )`,
-  `CREATE TABLE IF NOT EXISTS email_reply_proposals (
-    id TEXT PRIMARY KEY,
-    outreach_send_id INTEGER NOT NULL REFERENCES outreach_sends(id),
-    contact_id INTEGER NOT NULL REFERENCES contacts(id),
-    inbound_email_thread_id INTEGER NOT NULL REFERENCES email_threads(id),
-    to_address TEXT NOT NULL,
-    subject TEXT NOT NULL,
-    body_text TEXT NOT NULL,
-    request_hash TEXT NOT NULL,
-    acceptance_hash TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    proposed_by TEXT NOT NULL,
-    confirmed_by TEXT,
-    slack_channel_id TEXT NOT NULL,
-    slack_thread_ts TEXT NOT NULL,
-    proposal_run_id TEXT REFERENCES workflow_runs(id),
-    confirmation_run_id TEXT REFERENCES workflow_runs(id),
-    provider_message_id TEXT,
-    provider_thread_id TEXT,
-    workflow_effect_id TEXT REFERENCES workflow_effects(id),
-    processing_error TEXT,
-    expires_at TEXT NOT NULL,
-    confirmed_at TEXT,
-    completed_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`,
+  EMAIL_REPLY_PROPOSALS_CREATE,
   `CREATE TABLE IF NOT EXISTS processed_gmail_replies (
     message_id TEXT PRIMARY KEY,
     forwarded_at TEXT NOT NULL,
@@ -445,9 +451,11 @@ const OUTREACH_SEND_COLUMNS = [
 ];
 
 const EMAIL_THREAD_COLUMNS = [
+  'crm_lead_id INTEGER',
   "provider TEXT NOT NULL DEFAULT 'gmail'",
   'provider_message_id TEXT',
   'provider_thread_id TEXT',
+  'provider_metadata_json TEXT',
   'rfc_message_id TEXT',
   'in_reply_to TEXT',
   'references_header TEXT',
@@ -458,11 +466,26 @@ const EMAIL_THREAD_COLUMNS = [
   "processing_status TEXT NOT NULL DEFAULT 'pending'",
   'processing_error TEXT',
   'processed_at TEXT',
+  'sender_name TEXT',
   'slack_channel_id TEXT',
   'slack_thread_ts TEXT',
   'slack_message_ts TEXT',
   'workflow_run_id TEXT',
   'workflow_effect_id TEXT',
+];
+
+const EMAIL_REPLY_PROPOSAL_COLUMNS = [
+  "provider TEXT NOT NULL DEFAULT 'gmail'",
+];
+
+const EMAIL_REPLY_PROPOSAL_COPY_COLUMNS = [
+  'id', 'outreach_send_id', 'contact_id', 'inbound_email_thread_id',
+  'to_address', 'subject', 'body_text', 'request_hash', 'acceptance_hash',
+  'status', 'proposed_by', 'confirmed_by', 'slack_channel_id',
+  'slack_thread_ts', 'proposal_run_id', 'confirmation_run_id',
+  'provider_message_id', 'provider_thread_id', 'workflow_effect_id',
+  'processing_error', 'expires_at', 'confirmed_at', 'completed_at',
+  'created_at', 'updated_at',
 ];
 
 const WORKFLOW_RUN_COLUMNS = [
@@ -516,6 +539,30 @@ function ensureColumnsBetterSqlite(db, table, specs) {
   }
 }
 
+function proposalTableNeedsRebuild(columns) {
+  const byName = new Map(columns.map(column => [column.name, column]));
+  return Number(byName.get('outreach_send_id')?.notnull || 0) === 1
+    || Number(byName.get('contact_id')?.notnull || 0) === 1;
+}
+
+function rebuildEmailReplyProposalsBetterSqlite(db) {
+  const columns = db.prepare('PRAGMA table_info(email_reply_proposals)').all();
+  if (!proposalTableNeedsRebuild(columns)) {
+    ensureColumnsBetterSqlite(db, 'email_reply_proposals', EMAIL_REPLY_PROPOSAL_COLUMNS);
+    return false;
+  }
+  const copy = EMAIL_REPLY_PROPOSAL_COPY_COLUMNS.join(', ');
+  db.exec('DROP INDEX IF EXISTS idx_email_reply_proposals_status');
+  db.exec('ALTER TABLE email_reply_proposals RENAME TO email_reply_proposals_legacy_020');
+  db.exec(EMAIL_REPLY_PROPOSALS_CREATE);
+  db.exec(`INSERT INTO email_reply_proposals (provider, ${copy})
+    SELECT 'gmail', ${copy} FROM email_reply_proposals_legacy_020`);
+  db.exec('DROP TABLE email_reply_proposals_legacy_020');
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_email_reply_proposals_status
+    ON email_reply_proposals(status, expires_at)`);
+  return true;
+}
+
 async function ensureColumnsAsync(db, sql, table, specs) {
   const columns = new Set((await db.query(sql.__dangerous__rawValue(`PRAGMA table_info(${table})`))).map(row => row.name));
   for (const spec of specs) {
@@ -526,8 +573,29 @@ async function ensureColumnsAsync(db, sql, table, specs) {
   }
 }
 
+async function rebuildEmailReplyProposalsAsync(db, sql) {
+  const columns = await db.query(sql`PRAGMA table_info(email_reply_proposals)`);
+  if (!proposalTableNeedsRebuild(columns)) {
+    await ensureColumnsAsync(db, sql, 'email_reply_proposals', EMAIL_REPLY_PROPOSAL_COLUMNS);
+    return false;
+  }
+  const copy = EMAIL_REPLY_PROPOSAL_COPY_COLUMNS.join(', ');
+  await db.tx(async tx => {
+    await tx.query(sql`DROP INDEX IF EXISTS idx_email_reply_proposals_status`);
+    await tx.query(sql`ALTER TABLE email_reply_proposals RENAME TO email_reply_proposals_legacy_020`);
+    await tx.query(sql.__dangerous__rawValue(EMAIL_REPLY_PROPOSALS_CREATE));
+    await tx.query(sql.__dangerous__rawValue(`INSERT INTO email_reply_proposals (provider, ${copy})
+      SELECT 'gmail', ${copy} FROM email_reply_proposals_legacy_020`));
+    await tx.query(sql`DROP TABLE email_reply_proposals_legacy_020`);
+    await tx.query(sql`CREATE INDEX IF NOT EXISTS idx_email_reply_proposals_status
+      ON email_reply_proposals(status, expires_at)`);
+  });
+  return true;
+}
+
 function ensureSchemaBetterSqlite(db) {
   for (const statement of SCHEMA_STATEMENTS) db.exec(statement);
+  rebuildEmailReplyProposalsBetterSqlite(db);
   ensureColumnsBetterSqlite(db, 'workflow_runs', WORKFLOW_RUN_COLUMNS);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_serialization
     ON workflow_runs(serialization_key) WHERE serialization_key IS NOT NULL`);
@@ -577,6 +645,7 @@ async function ensureSchemaAsync(db, sql) {
   for (const statement of SCHEMA_STATEMENTS) {
     await db.query(sql.__dangerous__rawValue(statement));
   }
+  await rebuildEmailReplyProposalsAsync(db, sql);
   await ensureColumnsAsync(db, sql, 'workflow_runs', WORKFLOW_RUN_COLUMNS);
   await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_serialization
     ON workflow_runs(serialization_key) WHERE serialization_key IS NOT NULL`);
@@ -636,6 +705,7 @@ async function ensureSchemaAsync(db, sql) {
 module.exports = {
   META_MESSAGE_COLUMNS,
   EMAIL_THREAD_COLUMNS,
+  EMAIL_REPLY_PROPOSAL_COLUMNS,
   OWNERREZ_EVENT_COLUMNS,
   OUTREACH_SEND_COLUMNS,
   SCHEMA_STATEMENTS,
@@ -646,4 +716,7 @@ module.exports = {
   WORKFLOW_STEP_COLUMNS,
   ensureSchemaAsync,
   ensureSchemaBetterSqlite,
+  proposalTableNeedsRebuild,
+  rebuildEmailReplyProposalsAsync,
+  rebuildEmailReplyProposalsBetterSqlite,
 };

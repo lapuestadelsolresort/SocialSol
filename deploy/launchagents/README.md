@@ -15,3 +15,8 @@ npm run render:launchagents
 Generated files go to ignored `deploy/launchagents/generated/`. Rendering does
 not install or load them. Compare generated definitions with currently loaded
 jobs before any cutover.
+
+The five-minute Gmail reply forwarder is also the complete Sarah mailbox
+ledger once the `sarah-email` policy channel exists. The former 15-minute
+`inbound-email-scanner` LaunchAgent is retired by the guarded Sarah email
+cutover and has no committed template.

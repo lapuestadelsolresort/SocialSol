@@ -33,6 +33,8 @@ const runtimeValues = {
   '__SQUARESPACE_SLACK_ENABLED__': process.env.SQUARESPACE_SLACK_ENABLED || '0',
   '__PROSPECTOR_SLACK_CHANNEL__': process.env.PROSPECTOR_SLACK_CHANNEL
     || policyChannel('prospector-paulina') || prospectorConfig.channel_id || '',
+  '__SARAH_EMAIL_SLACK_CHANNEL__': process.env.SARAH_EMAIL_SLACK_CHANNEL
+    || policyChannel('sarah-email') || '',
   '__OPENCLAW_SLACK_ACCOUNT__': process.env.OPENCLAW_SLACK_ACCOUNT || '',
   '__RESORT_OPS_ALERTS_CHANNEL__': process.env.RESORT_OPS_ALERTS_CHANNEL || '',
   '__TRACKING_QC_CHANNEL__': process.env.TRACKING_QC_CHANNEL || localTargets.tracking_qc || '',
