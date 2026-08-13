@@ -17,6 +17,7 @@ const { requestOwnerRez } = require('../lib/ownerrez-api');
 const { runCommand } = require('../lib/workflow-command');
 const { fetchSlackReceiptSource } = require('../lib/slack-receipt-source');
 const { extractOwnerExpense } = require('../lib/receipt-extraction');
+const { sendGmailReply, readSentMessage } = require('../lib/gmail-client');
 const { authorize, loadPolicy } = require('../lib/channel-policy');
 const { effectClass, policySnapshot, reviewChannelId } = require('../lib/workflow-execution-policy');
 const { getDefinition } = require('../workflows/registry');
@@ -38,6 +39,8 @@ function executionServices() {
     runCommand,
     fetchSlackReceipt: params => fetchSlackReceiptSource(params),
     extractOwnerExpense: params => extractOwnerExpense(params),
+    sendEmail: params => sendGmailReply(params),
+    readEmail: messageId => readSentMessage(messageId),
   };
 }
 
@@ -54,7 +57,7 @@ function authorizeSystemRun(definition) {
 
 async function resumeDueRuns(db) {
   const now = new Date().toISOString();
-  const rows = await db.query(sql`SELECT DISTINCT r.id, r.workflow_name
+  const rows = await db.query(sql`SELECT DISTINCT r.id, r.workflow_name, r.input_json
     FROM workflow_runs r
     JOIN workflow_steps s ON s.run_id=r.id
     WHERE r.status='retry' AND s.status='retry' AND s.available_at <= ${now}
@@ -69,7 +72,8 @@ async function resumeDueRuns(db) {
       continue;
     }
     try {
-      await executeGraph(db, definition, row.id, executionServices());
+      const result = await executeGraph(db, definition, row.id, executionServices());
+      await projectEmailRunFailure(db, row, result);
       resumed += 1;
     } catch (error) {
       failed += 1;
@@ -128,6 +132,42 @@ async function queueWhatsAppInbound(db) {
     queued += 1;
   }
   return { candidates: rows.length, queued };
+}
+
+async function queueEmailEvents(db) {
+  const rows = await db.query(sql`SELECT id, provider, provider_message_id FROM email_threads
+    WHERE processing_status='pending'
+    ORDER BY COALESCE(received_at, created_at), id LIMIT 25`);
+  if (!rows.length) return { candidates: 0, queued: 0 };
+  const definition = getDefinition('email.message.observe');
+  if (!definition) return { candidates: rows.length, queued: 0, unsupported: rows.length };
+  const { snapshot } = authorizeSystemRun(definition);
+  let queued = 0;
+  for (const row of rows) {
+    const created = await createRun(db, {
+      definition,
+      idempotencyKey: `email:${row.provider || 'unknown'}:${row.provider_message_id || row.id}:observe`,
+      triggerType: 'system',
+      triggerRef: `email-thread:${row.id}`,
+      input: { emailThreadId: row.id },
+      policySnapshot: snapshot,
+    });
+    await db.query(sql`UPDATE email_threads SET processing_status='queued',
+      workflow_run_id=${created.run.id}, processing_error=NULL, updated_at=datetime('now')
+      WHERE id=${row.id} AND processing_status='pending'`);
+    queued += 1;
+  }
+  return { candidates: rows.length, queued };
+}
+
+async function projectEmailRunFailure(db, row, result) {
+  if (row.workflow_name !== 'email.message.observe' || result?.status !== 'failed') return;
+  const input = workflowStore.parseJson(row.input_json, {});
+  const eventId = Number.parseInt(input.emailThreadId, 10);
+  if (!Number.isSafeInteger(eventId) || eventId <= 0) return;
+  await db.query(sql`UPDATE email_threads SET processing_status='failed',
+    processing_error=${String(result.error_message || 'email observation failed').slice(0, 1000)},
+    updated_at=datetime('now') WHERE id=${eventId} AND processing_status <> 'processed'`);
 }
 
 async function recoverStaleRuns(db) {
@@ -199,7 +239,7 @@ async function recoverStaleRuns(db) {
 }
 
 async function resumeQueuedRuns(db) {
-  const rows = await db.query(sql`SELECT DISTINCT r.id, r.workflow_name
+  const rows = await db.query(sql`SELECT DISTINCT r.id, r.workflow_name, r.input_json
     FROM workflow_runs r JOIN workflow_steps s ON s.run_id=r.id
     WHERE r.status IN ('queued','running') AND s.status='pending'
       AND NOT EXISTS (SELECT 1 FROM workflow_steps active
@@ -212,7 +252,8 @@ async function resumeQueuedRuns(db) {
     const definition = getDefinition(row.workflow_name);
     if (!definition) { unsupported += 1; continue; }
     try {
-      await executeGraph(db, definition, row.id, executionServices());
+      const result = await executeGraph(db, definition, row.id, executionServices());
+      await projectEmailRunFailure(db, row, result);
       resumed += 1;
     } catch (error) {
       failed += 1;
@@ -238,10 +279,11 @@ async function tick(db) {
     const recovery = await isolate('recovery', () => recoverStaleRuns(db));
     const ownerrez = await isolate('ownerrez-ingress', () => queueOwnerRezEvents(db));
     const whatsapp = await isolate('whatsapp-ingress', () => queueWhatsAppInbound(db));
+    const email = await isolate('email-ingress', () => queueEmailEvents(db));
     const queued = await isolate('queued-runs', () => resumeQueuedRuns(db));
     const workflows = await isolate('retry-runs', () => resumeDueRuns(db));
     const outbox = await isolate('outbox', () => drainOutbox(db, { limit: 100, workerId }));
-    return { recovery, ownerrez, whatsapp, queued, workflows, outbox };
+    return { recovery, ownerrez, whatsapp, email, queued, workflows, outbox };
   } finally {
     running = false;
   }
@@ -278,6 +320,8 @@ if (require.main === module) {
 module.exports = {
   queueOwnerRezEvents,
   queueWhatsAppInbound,
+  queueEmailEvents,
+  projectEmailRunFailure,
   recoverStaleRuns,
   resumeDueRuns,
   resumeQueuedRuns,

@@ -2,7 +2,7 @@
   "id": "resort-workflows",
   "name": "Resort Workflows",
   "description": "Channel-authorized tools and deterministic Slack command handlers for the durable resort workflow control plane.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "activation": {
     "onStartup": true
   },
@@ -30,6 +30,10 @@
         "items": { "type": "string", "minLength": 1 }
       },
       "socialChannelIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "emailChannelIds": {
         "type": "array",
         "items": { "type": "string", "minLength": 1 }
       },

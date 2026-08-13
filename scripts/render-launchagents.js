@@ -13,8 +13,12 @@ const nodeBin = path.resolve(process.env.NODE_BIN || process.execPath);
 const pythonBin = path.resolve(process.env.PYTHON_BIN || '/opt/homebrew/bin/python3');
 const policy = loadPolicy();
 let localTargets = {};
+let prospectorConfig = {};
 try {
   localTargets = JSON.parse(fs.readFileSync(path.join(root, 'paloma', 'config.json'), 'utf8')).channels || {};
+} catch {}
+try {
+  prospectorConfig = JSON.parse(fs.readFileSync(path.join(root, 'prospector', 'config.json'), 'utf8'));
 } catch {}
 function policyChannel(name) {
   return Object.entries(policy.channels || {}).find(([, channel]) => channel.name === name)?.[0] || '';
@@ -27,11 +31,13 @@ const runtimeValues = {
   '__RESORT_RESERVATIONS_CHANNEL__': process.env.RESORT_RESERVATIONS_CHANNEL || policyChannel('reservations'),
   '__RESORT_HOUSEKEEPING_CHANNEL__': process.env.RESORT_HOUSEKEEPING_CHANNEL || policyChannel('receipt-housekeeper'),
   '__SQUARESPACE_SLACK_ENABLED__': process.env.SQUARESPACE_SLACK_ENABLED || '0',
-  '__PROSPECTOR_SLACK_CHANNEL__': process.env.PROSPECTOR_SLACK_CHANNEL || '',
+  '__PROSPECTOR_SLACK_CHANNEL__': process.env.PROSPECTOR_SLACK_CHANNEL
+    || policyChannel('prospector-paulina') || prospectorConfig.channel_id || '',
   '__OPENCLAW_SLACK_ACCOUNT__': process.env.OPENCLAW_SLACK_ACCOUNT || '',
   '__RESORT_OPS_ALERTS_CHANNEL__': process.env.RESORT_OPS_ALERTS_CHANNEL || '',
   '__TRACKING_QC_CHANNEL__': process.env.TRACKING_QC_CHANNEL || localTargets.tracking_qc || '',
-  '__GMAIL_IMPERSONATE_USER__': process.env.GMAIL_IMPERSONATE_USER || '',
+  '__GMAIL_IMPERSONATE_USER__': process.env.GMAIL_IMPERSONATE_USER
+    || prospectorConfig.sender_reply_to || '',
   '__POSTIZ_INTEGRATION_ID__': process.env.POSTIZ_INTEGRATION_ID || '',
   '__GTKU_GOOGLE_ACCOUNT__': process.env.GTKU_GOOGLE_ACCOUNT || '',
 };

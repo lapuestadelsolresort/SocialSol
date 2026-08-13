@@ -72,6 +72,31 @@ test('narrow live workflow cutovers remove the shadow-only prompt for their owni
   }
 });
 
+test('Prospector rendering exposes only thread-bound email commands to the trusted adapter', () => {
+  const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
+  process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';
+  try {
+    const patch = render({
+      policy: {
+        shadow_mode: true,
+        live_workflows: ['email.reply.propose', 'email.reply.confirm', 'email.message.classify'],
+        channels: {
+          CPAULINA: { name: 'prospector-paulina', capabilities: ['paulina.read', 'email.read', 'email.send'] },
+        },
+      },
+      currentConfig: { channels: { slack: { accounts: { 'test-account': {} } } } },
+    });
+    assert.deepEqual(patch.plugins.entries['resort-workflows'].config.emailChannelIds, ['CPAULINA']);
+    const channel = patch.channels.slack.accounts['test-account'].channels.CPAULINA;
+    assert.match(channel.systemPrompt, /same thread sends through Gmail/);
+    assert.match(channel.systemPrompt, /top-level email commands never send/);
+    assert.deepEqual(channel.tools.allow, ['resort_workflow']);
+  } finally {
+    if (previousAccount === undefined) delete process.env.OPENCLAW_SLACK_ACCOUNT;
+    else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;
+  }
+});
+
 test('reservations prompt requires live OwnerRez reads and preserves titled manual entries', () => {
   const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
   process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';

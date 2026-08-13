@@ -78,6 +78,10 @@ async function deliverSlackNotification(db, row, payload, services = {}) {
     await db.query(sql`UPDATE meta_messages SET slack_thread_ts=${result.ts}
       WHERE id=${Number(payload.metaMessageId)}`);
   }
+  if (payload.emailThreadId && result.ts) {
+    await db.query(sql`UPDATE email_threads SET slack_message_ts=${result.ts},
+      updated_at=datetime('now') WHERE id=${Number(payload.emailThreadId)}`);
+  }
   return result;
 }
 

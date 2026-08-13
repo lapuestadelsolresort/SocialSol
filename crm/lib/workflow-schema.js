@@ -224,6 +224,75 @@ const SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  `CREATE TABLE IF NOT EXISTS email_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    contact_id INTEGER REFERENCES contacts(id),
+    outreach_send_id INTEGER REFERENCES outreach_sends(id),
+    direction TEXT NOT NULL,
+    subject TEXT,
+    body_text TEXT,
+    body_html TEXT,
+    resend_email_id TEXT,
+    from_address TEXT,
+    to_address TEXT,
+    received_at TEXT,
+    sentiment TEXT,
+    sentiment_notes TEXT,
+    forwarded_to TEXT,
+    provider TEXT NOT NULL DEFAULT 'gmail',
+    provider_message_id TEXT,
+    provider_thread_id TEXT,
+    rfc_message_id TEXT,
+    in_reply_to TEXT,
+    references_header TEXT,
+    raw_body_text TEXT,
+    actor_user_id TEXT,
+    classification_source TEXT,
+    classified_at TEXT,
+    processing_status TEXT NOT NULL DEFAULT 'pending',
+    processing_error TEXT,
+    processed_at TEXT,
+    slack_channel_id TEXT,
+    slack_thread_ts TEXT,
+    slack_message_ts TEXT,
+    workflow_run_id TEXT REFERENCES workflow_runs(id),
+    workflow_effect_id TEXT REFERENCES workflow_effects(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS email_reply_proposals (
+    id TEXT PRIMARY KEY,
+    outreach_send_id INTEGER NOT NULL REFERENCES outreach_sends(id),
+    contact_id INTEGER NOT NULL REFERENCES contacts(id),
+    inbound_email_thread_id INTEGER NOT NULL REFERENCES email_threads(id),
+    to_address TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    acceptance_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    proposed_by TEXT NOT NULL,
+    confirmed_by TEXT,
+    slack_channel_id TEXT NOT NULL,
+    slack_thread_ts TEXT NOT NULL,
+    proposal_run_id TEXT REFERENCES workflow_runs(id),
+    confirmation_run_id TEXT REFERENCES workflow_runs(id),
+    provider_message_id TEXT,
+    provider_thread_id TEXT,
+    workflow_effect_id TEXT REFERENCES workflow_effects(id),
+    processing_error TEXT,
+    expires_at TEXT NOT NULL,
+    confirmed_at TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS processed_gmail_replies (
+    message_id TEXT PRIMARY KEY,
+    forwarded_at TEXT NOT NULL,
+    send_id INTEGER,
+    matched INTEGER NOT NULL DEFAULT 0
+  )`,
   `CREATE TABLE IF NOT EXISTS ownerrez_mutation_proposals (
     id TEXT PRIMARY KEY,
     operation_id TEXT NOT NULL,
@@ -333,6 +402,11 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_accounting_reconciliations_status ON accounting_reconciliations(status, updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_accounting_bank_txn_match ON accounting_bank_transactions(transaction_date, amount, currency)`,
   `CREATE INDEX IF NOT EXISTS idx_social_content_status ON social_content(status, scheduled_for)`,
+  `CREATE INDEX IF NOT EXISTS idx_email_threads_contact ON email_threads(contact_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_email_threads_received ON email_threads(received_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_email_reply_proposals_status
+     ON email_reply_proposals(status, expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_pgr_forwarded_at ON processed_gmail_replies(forwarded_at)`,
   `CREATE INDEX IF NOT EXISTS idx_ownerrez_proposals_status
      ON ownerrez_mutation_proposals(status, expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_marketing_change_status
@@ -368,6 +442,27 @@ const OWNERREZ_EVENT_COLUMNS = [
 
 const OUTREACH_SEND_COLUMNS = [
   'workflow_run_id TEXT',
+];
+
+const EMAIL_THREAD_COLUMNS = [
+  "provider TEXT NOT NULL DEFAULT 'gmail'",
+  'provider_message_id TEXT',
+  'provider_thread_id TEXT',
+  'rfc_message_id TEXT',
+  'in_reply_to TEXT',
+  'references_header TEXT',
+  'raw_body_text TEXT',
+  'actor_user_id TEXT',
+  'classification_source TEXT',
+  'classified_at TEXT',
+  "processing_status TEXT NOT NULL DEFAULT 'pending'",
+  'processing_error TEXT',
+  'processed_at TEXT',
+  'slack_channel_id TEXT',
+  'slack_thread_ts TEXT',
+  'slack_message_ts TEXT',
+  'workflow_run_id TEXT',
+  'workflow_effect_id TEXT',
 ];
 
 const WORKFLOW_RUN_COLUMNS = [
@@ -468,6 +563,14 @@ function ensureSchemaBetterSqlite(db) {
     }
     db.exec('CREATE INDEX IF NOT EXISTS idx_outreach_sends_workflow_run ON outreach_sends(workflow_run_id)');
   }
+  const emailThreadColumns = new Set(db.prepare('PRAGMA table_info(email_threads)').all().map(row => row.name));
+  if (emailThreadColumns.size > 0) {
+    ensureColumnsBetterSqlite(db, 'email_threads', EMAIL_THREAD_COLUMNS);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_email_threads_provider_message
+      ON email_threads(provider, provider_message_id) WHERE provider_message_id IS NOT NULL`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_email_threads_processing ON email_threads(processing_status, received_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_email_threads_outreach_send ON email_threads(outreach_send_id, received_at)');
+  }
 }
 
 async function ensureSchemaAsync(db, sql) {
@@ -518,10 +621,21 @@ async function ensureSchemaAsync(db, sql) {
     await db.query(sql`CREATE INDEX IF NOT EXISTS idx_outreach_sends_workflow_run
       ON outreach_sends(workflow_run_id)`);
   }
+  const emailThreadColumns = new Set((await db.query(sql`PRAGMA table_info(email_threads)`)).map(row => row.name));
+  if (emailThreadColumns.size > 0) {
+    await ensureColumnsAsync(db, sql, 'email_threads', EMAIL_THREAD_COLUMNS);
+    await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_email_threads_provider_message
+      ON email_threads(provider, provider_message_id) WHERE provider_message_id IS NOT NULL`);
+    await db.query(sql`CREATE INDEX IF NOT EXISTS idx_email_threads_processing
+      ON email_threads(processing_status, received_at)`);
+    await db.query(sql`CREATE INDEX IF NOT EXISTS idx_email_threads_outreach_send
+      ON email_threads(outreach_send_id, received_at)`);
+  }
 }
 
 module.exports = {
   META_MESSAGE_COLUMNS,
+  EMAIL_THREAD_COLUMNS,
   OWNERREZ_EVENT_COLUMNS,
   OUTREACH_SEND_COLUMNS,
   SCHEMA_STATEMENTS,

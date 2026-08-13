@@ -22,6 +22,12 @@ Paulina is the resort's outbound lead-discovery and compliant email pipeline.
    the prior interval had sends or failures. This preparation graph is not the
    Resend sending authority; `paulina.daily` remains the five-minute dispatch
    graph.
+6. The Gmail conversation poller captures matched Inbox replies and Sarah Sent
+   replies into the durable `email_threads` ledger. `email.message.observe`
+   updates reply state, classifies only the unquoted reply body, and appends the
+   interaction to the original Slack draft thread. Slack sending is an explicit
+   same-user/same-thread `email.reply.propose` → `email.reply.confirm` flow with
+   Gmail Sent-folder readback.
 
 Copy `config.example.json` to ignored `config.json` and configure `.env` before
 running. Research runs, fetched-page cache, draft state, and recent-send logs

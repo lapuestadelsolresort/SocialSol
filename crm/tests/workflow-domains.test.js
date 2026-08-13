@@ -79,6 +79,7 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
     'guest.reply.draft', 'crm.sync', 'crm.pipeline.read',
     'ownerrez.occupancy.read', 'squarespace.summary.read',
     'ownerrez.mutation.propose', 'ownerrez.mutation.confirm',
+    'email.message.observe', 'email.reply.propose', 'email.reply.confirm', 'email.message.classify',
     'qbo.write', 'qbo.bank_balances.read', 'qbo.report.read', 'business.snapshot.read',
   ]) assert.equal(definitions.has(expected), true, expected);
   assert.equal(definitions.get('business.snapshot.read').mutates, false);

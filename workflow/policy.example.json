@@ -1,7 +1,7 @@
 {
   "version": 1,
   "shadow_mode": true,
-  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "marketing.change.confirm", "meta.campaign.autonomous", "marketing.report.daily", "meta.audience.sync", "ownerrez.mutation.confirm", "receipt.owner_expense.ingest", "receipt.owner_expense.process", "receipt.owner_expense.confirm"],
+  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "email.reply.propose", "email.reply.confirm", "email.message.classify", "marketing.change.confirm", "meta.campaign.autonomous", "marketing.report.daily", "meta.audience.sync", "ownerrez.mutation.confirm", "receipt.owner_expense.ingest", "receipt.owner_expense.process", "receipt.owner_expense.confirm"],
   "always_on_effects": ["whatsapp.inbound.process:send_conversion"],
   "channels": {
     "REPLACE_WITH_WHATSAPP_CHANNEL_ID": {
@@ -11,6 +11,10 @@
     "REPLACE_WITH_SOCIAL_CHANNEL_ID": {
       "name": "social-sol",
       "capabilities": ["social.read", "social.write", "social.publish", "marketing.read", "marketing.write", "crm.read", "crm.write"]
+    },
+    "REPLACE_WITH_PROSPECTOR_CHANNEL_ID": {
+      "name": "prospector-paulina",
+      "capabilities": ["paulina.read", "paulina.run", "paulina.send", "email.read", "email.send", "crm.read", "crm.write"]
     },
     "REPLACE_WITH_BUSINESS_INTEL_CHANNEL_ID": {
       "name": "business-intel",
@@ -35,10 +39,14 @@
     },
     "marketing.write": {
       "users": ["REPLACE_WITH_AUTHORIZED_SLACK_USER_ID"]
+    },
+    "email.send": {
+      "users": ["REPLACE_WITH_AUTHORIZED_SLACK_USER_ID"]
     }
   },
   "autonomous_workflows": [
     "whatsapp.inbound.process",
+    "email.message.observe",
     "paulina.daily",
     "paulina.prepare_daily",
     "regina.daily",

@@ -13,6 +13,7 @@ const readModels = require('./read-models');
 const { proposeDefinition: ownerrezMutationPropose, confirmDefinition: ownerrezMutationConfirm } = require('./ownerrez-mutation');
 const ownerExpense = require('./owner-expense');
 const marketing = require('./marketing');
+const emailReply = require('./email-reply');
 
 const DEFINITIONS = new Map([
   [whatsappReply.name, whatsappReply],
@@ -37,6 +38,9 @@ const DEFINITIONS = new Map([
     .filter(value => value && typeof value === 'object' && value.name && Array.isArray(value.steps))
     .map(definition => [definition.name, definition]),
   ...Object.values(marketing)
+    .filter(value => value && typeof value === 'object' && value.name && Array.isArray(value.steps))
+    .map(definition => [definition.name, definition]),
+  ...Object.values(emailReply)
     .filter(value => value && typeof value === 'object' && value.name && Array.isArray(value.steps))
     .map(definition => [definition.name, definition]),
 ]);

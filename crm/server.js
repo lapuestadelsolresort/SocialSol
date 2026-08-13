@@ -17,6 +17,7 @@ const { Webhook } = require('svix');
 const rateLimit = require('express-rate-limit');
 const { verifyCalSignature, verifyMetaSignature } = require('./lib/webhook-auth');
 const { addSuppression } = require('./lib/suppressions');
+const { ingestEmailEvent } = require('./lib/email-conversations');
 const unsubscribeLib = require('./lib/unsubscribe');
 const { postToChannel: slackPostToChannel } = require('../prospector/research/scripts/lib/slack');
 
@@ -2277,80 +2278,46 @@ app.post('/api/drafts/sweep-stale', async (req, res) => {
 // require the inbound payload to include `outreach_send_id` in a `tags` field
 // (Resend Inbound supports tag echo) OR fall back to matching by From.
 //
-// On success we update outreach_sends.reply_detected_at, run the auto-classify
-// keyword check from slack-interaction.md §6.2, and post the formatted reply
-// notification to #prospector-paulina with the three classify buttons.
+// The endpoint only persists a deduplicated ingress record. The durable
+// email.message.observe graph owns matching, classification, CRM projection,
+// and the Slack-thread notification.
 app.post('/webhook/resend-reply', requireLoopback, async (req, res) => {
   const payload = req.body || {};
   const fromEmail = (payload.from?.address || payload.from || '').toLowerCase().trim();
   const replyText = String(payload.text || payload.body_text || payload.body || '').trim();
-  const replyPreview = replyText.slice(0, 500);
   const tagSendId = payload.tags?.outreach_send_id || payload.tag_outreach_send_id || null;
-
-  // Resolve outreach_send_id either via tag echo or via from-address lookup.
-  let send = null;
-  if (tagSendId) {
-    const [row] = await db.query(sql`SELECT * FROM outreach_sends WHERE id = ${parseInt(tagSendId)}`);
-    if (row) send = row;
-  }
-  if (!send && fromEmail) {
-    const rows = await db.query(sql`
-      SELECT os.* FROM outreach_sends os
-      JOIN contacts c ON c.id = os.contact_id
-      WHERE LOWER(c.email) = ${fromEmail}
-        AND os.status IN ('sent','delivered','opened','clicked')
-        AND os.reply_detected_at IS NULL
-      ORDER BY os.sent_at DESC LIMIT 1
-    `);
-    send = rows[0] || null;
-  }
-  if (!send) {
-    console.warn('[resend-reply] Could not match reply to a send. From:', fromEmail, 'tag:', tagSendId);
-    return res.status(202).json({ ok: false, matched: false });
-  }
-
-  const now = new Date().toISOString();
-  await db.query(sql`UPDATE outreach_sends SET reply_detected_at = ${now} WHERE id = ${send.id}`);
-
-  // Auto-classification per slack-interaction.md §6.2.
-  const lower = replyText.toLowerCase();
-  const NOT_INTERESTED = ['unsubscribe', 'not interested', 'remove me', 'stop emailing', 'wrong person', 'no thanks'];
-  const HOT = ['available dates', 'tell me more', 'send pricing', 'interested', 'would love to', 'sounds great', "let's chat"];
-  const suggestion = NOT_INTERESTED.some((p) => lower.includes(p)) ? 'not_interested'
-    : HOT.some((p) => lower.includes(p)) ? 'hot'
-    : 'ambiguous';
-
-  const [contact] = await db.query(sql`SELECT id, name, email FROM contacts WHERE id = ${send.contact_id}`);
-  const [campaign] = await db.query(sql`SELECT slug, name FROM outreach_campaigns WHERE id = ${send.campaign_id || -1}`);
-  const campaignLabel = campaign?.slug || campaign?.name || 'unknown';
-
-  const message = [
-    `📬 Reply from ${contact?.name || ''} <${fromEmail}>`,
-    `   Original: Draft #${send.id} sent ${send.sent_at || '(unknown)'} (campaign: ${campaignLabel})`,
-    '',
-    '──────────────────────────────────────',
-    `> ${replyPreview.split('\n').slice(0, 20).join('\n> ')}`,
-    '──────────────────────────────────────',
-    '',
-    `Suggested classification: *${suggestion}*`,
-    '',
-    `Mark hot:           \`!classify-reply ${contact.id} hot\``,
-    `Mark not_interested:\`!classify-reply ${contact.id} not_interested\``,
-    `Mark needs_sarah:   \`!classify-reply ${contact.id} ambiguous\``,
-    '',
-    `(Block Kit buttons are Phase D polish; for v0, use the text commands above.)`,
-  ].join('\n');
-
   try {
-    if (PROSPECTOR_CHANNEL_ID) {
-      await slackPostToChannel('channel:' + PROSPECTOR_CHANNEL_ID, message);
-    }
-  } catch (e) {
-    console.warn('[resend-reply] Slack post failed:', e.message);
+    const providerMessageId = String(payload.message_id || payload.id || require('node:crypto')
+      .createHash('sha256')
+      .update(JSON.stringify({ fromEmail, replyText, tagSendId }))
+      .digest('hex'));
+    const result = await ingestEmailEvent(db, {
+      provider: 'resend_inbound',
+      providerMessageId,
+      providerThreadId: payload.thread_id || null,
+      rfcMessageId: payload.rfc_message_id || payload.message_id || null,
+      inReplyTo: payload.in_reply_to || null,
+      references: payload.references || null,
+      from: fromEmail,
+      to: payload.to?.address || payload.to || '',
+      subject: payload.subject || '',
+      text: replyText,
+      internalDate: payload.received_at || new Date().toISOString(),
+      direction: 'inbound',
+      outreachSendId: tagSendId ? Number.parseInt(tagSendId, 10) : null,
+    });
+    console.log(`[resend-reply] queued event ${result.event.id}, matched send #${result.send?.id || 'none'}`);
+    return res.status(result.created ? 202 : 200).json({
+      ok: true,
+      matched: Boolean(result.send),
+      send_id: result.send?.id || null,
+      email_thread_id: result.event.id,
+      queued: result.created,
+    });
+  } catch (error) {
+    console.error('[resend-reply] durable ingress failed:', error.message);
+    return res.status(500).json({ ok: false, error: 'durable email ingress failed' });
   }
-
-  console.log(`[resend-reply] Reply matched to send #${send.id}, contact #${contact?.id}, suggestion=${suggestion}`);
-  res.json({ ok: true, matched: true, send_id: send.id, suggestion });
 });
 
 // ─── API: Reply classification (Step 3.2 §4.4) ──────────────────────────────
