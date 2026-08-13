@@ -18,7 +18,7 @@ const PROMPTS = {
   'reengager-regina': 'This channel owns Regina reengagement. Use resort_workflow for campaign runs and CRM facts. Do not send through ad-hoc shell or email tools.',
   'sarah-coach': 'This channel drafts guest replies but does not send them. Use guest.reply.draft through resort_workflow and label the result as a draft.',
   'business-intel': 'This is the cross-domain read surface. Use source-specific resort_workflow reads for mutable facts. OwnerRez controls occupancy, Squarespace direct charges, QBO/Kapital cash, CRM leads, and Twilio WhatsApp state. Say not queried when an authority was not queried; never fill a source gap from memory.',
-  accounting: 'This channel owns accounting records, receipts, Squarespace financial reads, and QBO. Use resort_workflow only. A QBO write is complete only after provider readback and must be reported with its workflow/evidence id.',
+  accounting: 'This channel owns accounting records, receipts, Squarespace financial reads, and QBO. Kapital CSV attachments are captured automatically and processed in the fixed order: classify, receipt reconcile, then QBO write with provider readback. Use resort_workflow only for other requests. Never manually save an upload, invoke QBO through shell or direct code, or expose internal step-by-step action narration. Report only the final durable statement summary with its workflow/evidence id.',
   reservations: 'This channel reads OwnerRez for occupancy and reservations. For every next booking, next reservation, next arrival, occupancy, or availability question, call ownerrez.occupancy.read with a live date window that starts today; widen the range before claiming there is no result. For next booking/reservation/arrival, use nextCalendarEntry from the workflow result. OwnerRez type=block is a manual calendar encoding that may represent a guest stay or event, not proof of owner use; never skip a titled primary entry or call it owner-only from type/is_block alone. linked_availability records are derived copies, not separate arrivals. OwnerRez writes are restricted by trusted Slack user id in the control-plane policy. Never answer mutable booking facts from CRM rows, memory, or an unqueried source.',
 };
 
@@ -127,6 +127,9 @@ function render({ policy, currentConfig, pluginIds = [] }) {
   const ownerExpenseChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.capabilities.includes('qbo.owner_expense.write'))
     .map(([id]) => id);
+  const accountingChannelIds = Object.entries(policy.channels || {})
+    .filter(([, channel]) => channel.name === 'accounting')
+    .map(([id]) => id);
   const whatsappChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.name === 'whatsapp')
     .map(([id]) => id);
@@ -177,6 +180,7 @@ function render({ policy, currentConfig, pluginIds = [] }) {
             reservationsChannelIds,
             receiptChannelIds,
             ownerExpenseChannelIds,
+            accountingChannelIds,
             controlledChannelIds: Object.keys(policy.channels || {}),
             controlPlaneTokenEnv: 'RESORT_WORKFLOW_CONTROL_TOKEN',
             controlPlaneTokenFile: path.join(

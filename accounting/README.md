@@ -66,8 +66,17 @@ Before any QBO write, overlapping transactions are checked through the
 refresh-aware QBO client. An expired access token is refreshed automatically;
 if authentication, the duplicate query, or its response cannot be verified,
 the statement fails closed before creating any QBO entity. The completion
-message in `#accounting` reports principal writes, separate SPEI fee records,
-deduplicated transactions, and every transaction held for review.
+message in `#accounting` reports run-scoped principal writes, separate SPEI fee
+records, deduplicated transactions, and every transaction held for review.
+It is posted to the channel without tagging global workflow reviewers.
+
+A Kapital CSV attached in `#accounting` is refetched from the exact Slack
+message and atomically staged in `accounting/inbox/`. The inbox processor then
+runs one fixed sequence keyed by the file hash: `accounting.classify`,
+`receipt.reconcile`, and `qbo.write`. Controlled-channel tool enforcement
+blocks shell or direct-QBO bypasses, so the final notification represents the
+single durable statement run rather than a mixture of ad-hoc and workflow
+writes.
 
 Configure the Slack user(s) who submit Kapital reimbursements. The command is
 a dry run unless `--confirm-production` is supplied and backs up the ignored

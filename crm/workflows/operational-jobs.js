@@ -472,11 +472,15 @@ async function projectReceiptQboWrites(db, runId, receiptWrites) {
 function buildQboNotificationMessage({ run, state }) {
   const summary = state.verify_readback?.summary || {};
   const reviewDetails = Array.isArray(summary.reviewDetails) ? summary.reviewDetails : [];
+  const groupedTransactions = Number(summary.principalWritten || 0)
+    + Number(summary.dedupSkipped || 0)
+    + Number(summary.reviewRequired || 0);
   const lines = [
-    `Kapital statement processed and verified in QBO. Workflow ${run.id}.`,
-    `• Principal transactions written: ${summary.principalWritten || 0}`,
+    `Kapital statement workflow completed and verified in QBO. Workflow ${run.id}.`,
+    `• Grouped statement transactions evaluated: ${groupedTransactions}`,
+    `• Principal transactions written in this run: ${summary.principalWritten || 0}`,
     `• SPEI fee records written: ${summary.feeRecordsWritten || 0}`,
-    `• Existing transactions skipped: ${summary.dedupSkipped || 0}`,
+    `• Existing transactions skipped in this run: ${summary.dedupSkipped || 0}`,
     `• Held for review: ${summary.reviewRequired || 0}`,
   ];
   if (reviewDetails.length) {
@@ -500,6 +504,7 @@ const qboWrite = makeDurableJob({
   operation: 'kapital_transactions.write',
   autonomous: true,
   notificationChannelName: 'accounting',
+  mentionUsers: false,
   buildNotificationMessage: buildQboNotificationMessage,
   validate: input => { safeAccountingCsv(input); },
   requestSummary: input => ({ csv: path.basename(safeAccountingCsv(input)), classificationTier: 'auto_only' }),

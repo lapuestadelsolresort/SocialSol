@@ -227,7 +227,10 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   thread reply with a stable, alphanumeric-only Kapital payment concept; exact
   reference + amount + currency reconciliation then preserves receipt-level
   category splits in QBO. Unknown transactions are escalated to the configured
-  payment approver.
+  payment approver. Kapital CSV uploads in `#accounting` are captured
+  automatically and run through classify → receipt reconciliation → QBO
+  readback as one hash-idempotent sequence; direct shell/QBO tool bypasses are
+  blocked in controlled Slack channels.
   Weekly automated tests (7 checks) run Monday 8am PT and post to
   `#accounting`. See `accounting/README.md` for the full spec.
 
