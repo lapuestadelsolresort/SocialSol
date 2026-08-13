@@ -136,6 +136,39 @@ Historical reconciliation is dry-run by default. Production repair uses
 `--apply`; by default it excludes legacy/test sends without an original Slack
 thread. Use `--include-unthreaded` only for an explicit forensic backfill.
 
+### Gmail delegation access
+
+Paulina's Gmail capture and reply graph uses the existing Workspace
+service-account client with domain-wide delegation. The credential stays
+outside Git at `${SOCIALSOL_SECRETS_DIR}/gmail-service-account.json`; the
+delegated mailbox comes from `GMAIL_IMPERSONATE_USER`, with
+`prospector/config.json`'s `sender_reply_to` as the fallback. Do not copy the
+client ID, mailbox address, or credential into committed files.
+
+The authoritative Admin Console location is **Security → Access and data
+control → API controls → Manage domain wide delegation**. Find the client whose
+identity matches `client_email` in the service-account JSON. Its required
+scopes are:
+
+```text
+https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/gmail.send
+```
+
+Other scopes already assigned to that client must be preserved. The production
+preflight is:
+
+```bash
+node crm/scripts/verify-gmail-send-scope.js
+```
+
+Success proves that the configured client can impersonate the configured
+mailbox with both Gmail scopes; it does not send a message. The guarded cutover
+also runs this preflight before changing policy, LaunchAgents, or live workflow
+state. Treat the committed requirement and this command as the normal access
+record. Ask for an Admin sign-in only if the preflight fails with an
+authorization error and the delegation entry actually needs repair.
+
 Slack commands such as add-contact, do-not-contact, campaign creation,
 approval, rejection, and staging operations are adapters over authenticated
 CRM endpoints. The CRM owns their state transitions and audit history.

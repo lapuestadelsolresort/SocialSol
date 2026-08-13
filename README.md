@@ -231,7 +231,7 @@ runtime/state/          Generated health and tracking snapshots (not committed)
 | **Google Drive** | Resort photo library (6 folders), corporate document storage, HEIC→JPEG conversion pipeline |
 | **Twilio** | WhatsApp webhook bridge for guest conversations |
 | **Resend** | Outbound email delivery (outreach subdomain), webhook signature verification |
-| **Gmail** | Read-only Inbox/Sent conversation capture for Paulina; confirmation-gated replies through Sarah's mailbox with Sent-folder readback |
+| **Gmail** | Domain-wide delegated, read-only Inbox/Sent conversation capture for Paulina; confirmation-gated replies through Sarah's mailbox with Sent-folder readback. Required scopes and the non-sending access preflight are documented in `prospector/COMMANDS.md`. |
 | **Postiz** | Instagram post/Reel scheduling via API |
 | **Cloudflare** | Pages hosting for landing pages + named tunnel (`lapuestadelsol-crm`) exposing CRM webhooks at `webhook.lapuestadelsolresort.com` |
 | **Chroma** | Vector store for voice corpus (sarah_voice_corpus) and media library (media_corpus) |
