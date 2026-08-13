@@ -146,7 +146,7 @@ async function queueEmailEvents(db) {
   for (const row of rows) {
     const created = await createRun(db, {
       definition,
-      idempotencyKey: `email:${row.provider || 'unknown'}:${row.provider_message_id || row.id}:observe`,
+      idempotencyKey: `email:${row.provider || 'unknown'}:${row.provider_message_id || row.id}:observe:v${definition.version}`,
       triggerType: 'system',
       triggerRef: `email-thread:${row.id}`,
       input: { emailThreadId: row.id },

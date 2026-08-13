@@ -18,6 +18,7 @@
     "configure:email-replies": "node scripts/configure-email-replies.js",
     "cutover:email-replies": "node scripts/cutover-email-replies.js --confirm-production",
     "reconcile:email-conversations": "node crm/scripts/reconcile-email-conversations.js",
+    "reconcile:email-classifications": "node crm/scripts/reconcile-email-classifications.js",
     "reconcile:owner-expense": "node scripts/reconcile-owner-expense-receipt.js",
     "test": "npm --workspace crm test",
     "test:prospector": "node --test prospector/lib/*.test.js",

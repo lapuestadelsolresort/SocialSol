@@ -5,6 +5,7 @@ const { sql } = require('@databases/sqlite');
 const NEGATIVE_PATTERNS = [
   ['unsubscribe', /\bunsubscribe\b/i],
   ['not_interested', /\bnot\s+interested\b/i],
+  ['retiring', /\bretir(?:e|ed|ing)\b/i],
   ['remove_me', /\bremove\s+me\b/i],
   ['stop_emailing', /\bstop\s+(?:emailing|contacting)\s+me\b/i],
   ['wrong_person', /\bwrong\s+person\b/i],
@@ -64,14 +65,23 @@ function stripQuotedHistory(value) {
   let text = String(value || '')
     .replace(/\r\n?/g, '\n')
     .replace(/\u00a0/g, ' ')
+    // Some senders expose an HTML fallback as one collapsed text line. Decode
+    // the small entity set needed to recover reply separators and readable
+    // addresses before looking for quoted-history boundaries.
+    .replace(/(?:&nbsp;|&#160;|&#x0*a0;)/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/(?:&#39;|&apos;)/gi, "'")
+    .replace(/&amp;/gi, '&')
     .trim();
   if (!text) return '';
 
   const markers = [
-    /\nOn [^\n]{1,400}\bwrote:\s*\n/i,
-    /\nEl [\s\S]{1,500}?\bescribi[oó]:\s*\n/i,
-    /\nLe [\s\S]{1,500}?\ba écrit\s*:\s*\n/i,
-    /\nAm [\s\S]{1,500}?\bschrieb [\s\S]{1,160}?:\s*\n/i,
+    /(?:^|\s)On\s+(?:(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?|Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b)[\s\S]{1,500}?\bwrote:\s*/i,
+    /(?:^|\s)El\s+(?:(?:lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\b)[\s\S]{1,500}?\bescribi[oó]:\s*/i,
+    /(?:^|\s)Le\s+(?:(?:lun|mar|mer|jeu|ven|sam|dim)\b)[\s\S]{1,500}?\ba écrit\s*:\s*/i,
+    /(?:^|\s)Am\s+(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4})[\s\S]{1,500}?\bschrieb[\s\S]{1,160}?:\s*/i,
     /\n-{2,}\s*(?:Original Message|Forwarded message)\s*-{2,}/i,
     /\nFrom:\s*[^\n]+\n(?:Sent|Date):\s*/i,
     /\n_{5,}\s*\n/i,

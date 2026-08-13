@@ -107,6 +107,7 @@ daily key.
 node prospector/scripts/engagement-analysis.js --dry-run
 bash prospector/scripts/sweep-stale-drafts.sh
 node crm/scripts/reconcile-email-conversations.js --days 365
+node crm/scripts/reconcile-email-classifications.js
 ```
 
 ## Email conversations
@@ -135,6 +136,11 @@ commands and ordinary Slack replies do not send email.
 Historical reconciliation is dry-run by default. Production repair uses
 `--apply`; by default it excludes legacy/test sends without an original Slack
 thread. Use `--include-unthreaded` only for an explicit forensic backfill.
+The classification reconciliation is also dry-run by default. Its guarded
+`--apply --confirm-production` mode normalizes collapsed Gmail quote history,
+requeues only changed classifications through the durable graph, repairs only
+the exact false-negative suppression, and posts the correction in the original
+Slack thread.
 
 ### Gmail delegation access
 
