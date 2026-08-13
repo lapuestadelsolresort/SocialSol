@@ -215,12 +215,13 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   (Banxico daily rate) → QuickBooks Online push. Three-tier classifier
   (auto/guess/unknown) maps SPEI transfers, payroll, utilities, and vendor
   payments to QBO categories. Deduplication via Kapital Clave references.
-  Dedicated Slack receipt channels (`#receipts`, `#mayela-receipts`,
-  `#property-receipts`, `#cleaning-receipts`, `#sergio-receipts`,
-  `#group-expenses`, `#temo-receipts`, `#daniel-invoices`,
-  `#sergio-mayela-invoices`, `#misc-receipts`, `#new-receipts`) where the
-  team posts expense receipts, SPEI confirmations, and salary invoices. The
-  same scoped intake is also enabled for `#receipts-pettycash`.
+  The standard reimbursement workflow is enabled in 14 dedicated Slack receipt
+  channels: `#receipts`, `#receipt-mayela`, `#receipts-commonareas`,
+  `#receipts-housekeeper`, `#receipts-sergio`, `#receipts-groups`,
+  `#receipts-temo`, `#receipt-daniel`, `#petty-cash-receipts`,
+  `#receipts-maintenance`, `#receipts-laundry`, `#receipts-pettycash`,
+  `#receipts-otis`, and `#receipts-resort-purchases`. The separate
+  `#receipt-jorge` channel uses the guarded owner-liability workflow.
   Sol cross-references these with bank statement transactions for
   classification context. Annotated reimbursements receive an itemized Slack
   thread reply with a stable Kapital payment concept; exact reference + amount
