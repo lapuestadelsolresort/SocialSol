@@ -23,7 +23,7 @@ function validatePolicy(policy) {
       throw new Error(`invalid workflow policy channel: ${channelId || '<empty>'}`);
     }
   }
-  for (const capability of ['ownerrez.write', 'marketing.write']) {
+  for (const capability of ['ownerrez.write', 'marketing.write', 'email.send']) {
     const granted = Object.values(policy.channels)
       .some(channel => channel.capabilities.includes(capability));
     const restriction = policy.restricted_capabilities?.[capability];

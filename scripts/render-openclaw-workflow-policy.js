@@ -13,7 +13,7 @@ const CONFIG_PATH = process.env.OPENCLAW_CONFIG_PATH || path.join(os.homedir(), 
 const PROMPTS = {
   whatsapp: 'This channel is the human WhatsApp console. Use only resort_workflow for messages and status. Never infer sent, delivered, read, or viewed; report the exact persisted Twilio state. A guest-facing send requires the explicit !wa command.',
   'social-sol': 'This channel owns paid Meta, campaign-linked landing variants, social content, and Meta DMs. Use marketing.snapshot.read before performance decisions. Reads and proposals may be autonomous. meta.campaign.autonomous may only execute the exact pause or budget decrease authorized by fresh healthy snapshot evidence, with one autonomous mutation per campaign per 24 hours. New campaigns, activation, budget increases, and landing changes require marketing.change.propose followed by the exact !meta confirm command. Never bypass resort_workflow or claim a mutation without workflow, effect, and readback evidence.',
-  'prospector-paulina': 'This channel owns Paulina outreach. Use resort_workflow for performance and sends. Receiving-server delivery is not inbox placement; report recorded counts and their evidence timestamp.',
+  'prospector-paulina': 'This channel owns Paulina outreach and its email conversation ledger. In the original recorded outreach thread, !email reply creates an immutable proposal and only the exact emitted !email confirm command in that same thread sends through Gmail. Plain Slack replies and top-level email commands never send email. Use resort_workflow for performance and report provider/readback evidence exactly.',
   'reengager-regina': 'This channel owns Regina reengagement. Use resort_workflow for campaign runs and CRM facts. Do not send through ad-hoc shell or email tools.',
   'sarah-coach': 'This channel drafts guest replies but does not send them. Use guest.reply.draft through resort_workflow and label the result as a draft.',
   'business-intel': 'This is the cross-domain read surface. Use source-specific resort_workflow reads for mutable facts. OwnerRez controls occupancy, Squarespace direct charges, QBO/Kapital cash, CRM leads, and Twilio WhatsApp state. Say not queried when an authority was not queried; never fill a source gap from memory.',
@@ -34,7 +34,7 @@ const CHANNEL_MUTATION_WORKFLOWS = {
     'marketing.report.daily',
     'meta.audience.sync',
   ],
-  'prospector-paulina': ['paulina.daily'],
+  'prospector-paulina': ['paulina.daily', 'email.reply.propose', 'email.reply.confirm', 'email.message.classify'],
   'reengager-regina': ['regina.daily', 'regina.campaign'],
   accounting: ['accounting.classify', 'qbo.write', 'receipt.reconcile'],
   reservations: ['ownerrez.mutation.confirm'],
@@ -131,6 +131,10 @@ function render({ policy, currentConfig, pluginIds = [] }) {
   const socialChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.name === 'social-sol')
     .map(([id]) => id);
+  const emailChannelIds = Object.entries(policy.channels || {})
+    .filter(([, channel]) => channel.name === 'prospector-paulina'
+      && channel.capabilities.includes('email.send'))
+    .map(([id]) => id);
   const ownerrezChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.capabilities.includes('ownerrez.write'))
     .map(([id]) => id);
@@ -167,6 +171,7 @@ function render({ policy, currentConfig, pluginIds = [] }) {
             slackAccountId: accountId,
             whatsappChannelIds,
             socialChannelIds,
+            emailChannelIds,
             ownerrezChannelIds,
             reservationsChannelIds,
             receiptChannelIds,

@@ -59,6 +59,9 @@ const COMMAND_ONLY_WORKFLOWS = new Set([
   'receipt.owner_expense.ingest',
   'receipt.owner_expense.process',
   'receipt.owner_expense.confirm',
+  'email.reply.propose',
+  'email.reply.confirm',
+  'email.message.classify',
 ]);
 
 function pluginConfig(value = {}) {
@@ -69,6 +72,7 @@ function pluginConfig(value = {}) {
     slackAccountId: String(parsed.slackAccountId || ''),
     whatsappChannelIds: new Set(Array.isArray(parsed.whatsappChannelIds) ? parsed.whatsappChannelIds.filter(Boolean) : []),
     socialChannelIds: new Set(Array.isArray(parsed.socialChannelIds) ? parsed.socialChannelIds.filter(Boolean) : []),
+    emailChannelIds: new Set(Array.isArray(parsed.emailChannelIds) ? parsed.emailChannelIds.filter(Boolean) : []),
     ownerrezChannelIds: new Set(Array.isArray(parsed.ownerrezChannelIds) ? parsed.ownerrezChannelIds.filter(Boolean) : []),
     reservationsChannelIds: new Set(Array.isArray(parsed.reservationsChannelIds) ? parsed.reservationsChannelIds.filter(Boolean) : []),
     receiptChannelIds: new Set(Array.isArray(parsed.receiptChannelIds) ? parsed.receiptChannelIds.filter(Boolean) : []),
@@ -265,6 +269,37 @@ export function formatWorkflowReply(payload) {
       `Workflow: ${run.id}${output.effectId ? ` · Effect: ${output.effectId}` : ''}`,
     ].join('\n');
   }
+  if (run.workflow_name === 'email.reply.propose') {
+    const output = run.output || {};
+    return [
+      'No email has been sent.',
+      `Recipient: ${output.recipient || output.toAddress || 'unknown'} · Draft #${output.outreachSendId || 'unknown'}`,
+      `Immutable request: ${output.requestHash || 'unknown'}`,
+      '',
+      `> ${String(output.bodyText || '').split('\n').join('\n> ')}`,
+      `Expires: ${output.expiresAt || 'unknown'}`,
+      'After reviewing the exact message above, paste this command as a new Slack message:',
+      `\`${output.confirmationCommand || 'confirmation command unavailable'}\``,
+      `Workflow: ${run.id}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
+    ].join('\n');
+  }
+  if (run.workflow_name === 'email.reply.confirm') {
+    const output = run.output || {};
+    return [
+      `Email to ${output.recipient || 'the contact'} was accepted by Gmail and verified in Sent.`,
+      `Proposal: ${output.proposalId || 'unknown'} · Email event: ${output.emailThreadId || 'unknown'}`,
+      `Workflow: ${run.id}${output.effectId ? ` · Effect: ${output.effectId}` : ''}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
+    ].join('\n');
+  }
+  if (run.workflow_name === 'email.message.classify') {
+    const output = run.output || {};
+    return [
+      `Email event ${output.emailThreadId || 'unknown'} classified as ${output.quality || 'unknown'}.`,
+      output.suppressionRepaired ? 'A prior false-negative suppression was removed.' : null,
+      output.suppressed ? 'The contact was suppressed from future outreach.' : null,
+      `Workflow: ${run.id}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
+    ].filter(Boolean).join('\n');
+  }
   if (run.workflow_name === 'ownerrez.mutation.propose') {
     const output = run.output || {};
     return [
@@ -438,6 +473,23 @@ export function parseMetaDmCommand(text) {
   const match = body.match(/^!dm\s+(\d+)\s+([\s\S]+)$/i);
   if (!match || !match[2].trim()) return { error: 'invalid_meta_dm_command' };
   return { dmId: Number(match[1]), message: match[2].trim() };
+}
+
+export function parseEmailCommand(text, { hasThread = false } = {}) {
+  const body = String(text || '').trim();
+  if (!/^!email(?:\s|$)/i.test(body)) return null;
+  if (!hasThread) return { error: 'original_thread_required' };
+  const confirm = body.match(/^!email\s+confirm\s+([0-9a-f-]{36})\s+([0-9a-f]{12})\s*$/i);
+  if (confirm) return {
+    action: 'confirm', proposalId: confirm[1].toLowerCase(), acceptanceHash: confirm[2].toLowerCase(),
+  };
+  const classify = body.match(/^!email\s+classify\s+(\d+)\s+(hot|not_interested|ambiguous)\s*$/i);
+  if (classify) return { action: 'classify', eventId: Number(classify[1]), quality: classify[2].toLowerCase() };
+  const reply = body.match(/^!email\s+reply\s+([\s\S]+)$/i);
+  if (!reply) return { error: 'invalid_email_command' };
+  const remainder = reply[1].trim();
+  if (!remainder) return { error: 'message_required' };
+  return { action: 'propose', message: remainder };
 }
 
 export function parseMarketingConfirmCommand(text) {
@@ -828,6 +880,61 @@ export function createMetaDmClaimHandler({ config, execute = callControlPlane, l
   };
 }
 
+export function createEmailClaimHandler({ config, execute = callControlPlane, logger = null } = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    if (!config.emailChannelIds.has(channelId)) return undefined;
+    const command = parseEmailCommand(event.bodyForAgent || event.body || event.content || '', {
+      hasThread: Boolean(event.threadId),
+    });
+    if (!command) return undefined;
+    if (command.error) {
+      return {
+        handled: true,
+        reply: { text: 'Not sent. Use `!email reply <message>` in the original draft thread. Confirm there with the exact emitted `!email confirm ...` command.' },
+      };
+    }
+    const workflow = command.action === 'confirm' ? 'email.reply.confirm'
+      : command.action === 'classify' ? 'email.message.classify'
+        : 'email.reply.propose';
+    if (!workflowIsLive(config, workflow)) {
+      return { handled: true, reply: { text: 'Not sent. Email conversation commands are still in shadow mode.' } };
+    }
+    const messageId = trustedMessageId(event, ctx);
+    if (!messageId) {
+      return { handled: true, reply: { text: 'Not sent. Slack did not provide a stable message ID, so this command cannot be deduplicated safely.' } };
+    }
+    const input = { ...command };
+    delete input.action;
+    if (event.threadId) input.threadTs = String(event.threadId);
+    const entrypoint = command.action === 'confirm' ? 'slack_email_confirm_command'
+      : command.action === 'classify' ? 'slack_email_classify_command'
+        : 'slack_email_reply_command';
+    try {
+      const payload = await execute(config, {
+        workflow,
+        input,
+        context: {
+          channelId,
+          actorUserId: event.senderId || ctx?.senderId,
+          messageId,
+          entrypoint,
+        },
+        idempotencyKey: `slack:${channelId}:${messageId}:${workflow}`,
+      });
+      return { handled: true, reply: { text: formatWorkflowReply(payload) } };
+    } catch (error) {
+      logger?.error?.(`resort-workflows email command failed: ${error.message}`);
+      const prefix = command.action === 'confirm' ? 'Not sent.'
+        : command.action === 'classify' ? 'Classification not changed.'
+          : 'No email proposal was created.';
+      return { handled: true, reply: { text: `${prefix} The durable email workflow failed (${error.code || 'workflow_error'}).` } };
+    }
+  };
+}
+
 export function createMarketingConfirmClaimHandler({ config, execute = callControlPlane, logger = null } = {}) {
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
@@ -1039,6 +1146,7 @@ const plugin = {
     api.on('inbound_claim', createInboundClaimHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });
     api.on('inbound_claim', createOwnerRezClaimHandler({ config, logger: api.logger }), { priority: 210, timeoutMs: 70_000 });
     api.on('inbound_claim', createMetaDmClaimHandler({ config, logger: api.logger }), { priority: 205, timeoutMs: 70_000 });
+    api.on('inbound_claim', createEmailClaimHandler({ config, logger: api.logger }), { priority: 206, timeoutMs: 70_000 });
     api.on('inbound_claim', createMarketingConfirmClaimHandler({ config, logger: api.logger }), { priority: 207, timeoutMs: 70_000 });
     api.on('inbound_claim', createManualReviewClaimHandler({ config, logger: api.logger }), { priority: 220, timeoutMs: 35_000 });
     api.on('inbound_claim', createReceiptConfirmClaimHandler({ config, logger: api.logger }), { priority: 215, timeoutMs: 70_000 });

@@ -2,8 +2,10 @@
 //
 // gmail-client.js — Gmail API client backed by service-account + DWD.
 //
-// Auth is provisioned out-of-band with domain-wide delegation and the
-// gmail.readonly scope. The service-account JSON must remain outside git.
+// Auth is provisioned out-of-band with domain-wide delegation. Mailbox polling
+// uses gmail.readonly; the confirmation-gated reply graph requests
+// gmail.readonly + gmail.send so it can perform a Sent-folder readback. The
+// service-account JSON must remain outside git.
 //
 // CRITICAL: load the JSON manually and pass client_email + private_key
 // explicitly to google.auth.JWT. Do NOT use { keyFile: ... } / keyFilename —
@@ -12,14 +14,22 @@
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
+const { ROOT: REPO_ROOT, SECRETS_DIR } = require('../../lib/runtime-paths');
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
-const SECRETS_DIR = process.env.SOCIALSOL_SECRETS_DIR || path.join(REPO_ROOT, 'secrets');
 const SECRET_PATH = path.join(SECRETS_DIR, 'gmail-service-account.json');
-const IMPERSONATE_USER = process.env.GMAIL_IMPERSONATE_USER || '';
+let IMPERSONATE_USER = process.env.GMAIL_IMPERSONATE_USER || '';
+if (!IMPERSONATE_USER) {
+  try {
+    IMPERSONATE_USER = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'prospector', 'config.json'), 'utf8')).sender_reply_to || '';
+  } catch {}
+}
 const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
+const SEND_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
+];
 
-let _cachedClient = null;
+const _cachedClients = new Map();
 
 function loadServiceAccount() {
   let raw;
@@ -40,8 +50,10 @@ function loadServiceAccount() {
   return parsed;
 }
 
-function getGmailClient() {
-  if (_cachedClient) return _cachedClient;
+function getGmailClient(scopes = SCOPES) {
+  const scopeList = [...new Set(scopes)].sort();
+  const cacheKey = scopeList.join(' ');
+  if (_cachedClients.has(cacheKey)) return _cachedClients.get(cacheKey);
   if (!IMPERSONATE_USER) {
     throw new Error('GMAIL_IMPERSONATE_USER is not configured');
   }
@@ -49,11 +61,12 @@ function getGmailClient() {
   const auth = new google.auth.JWT({
     email: sa.client_email,
     key: sa.private_key,
-    scopes: SCOPES,
+    scopes: scopeList,
     subject: IMPERSONATE_USER,
   });
-  _cachedClient = google.gmail({ version: 'v1', auth });
-  return _cachedClient;
+  const client = google.gmail({ version: 'v1', auth });
+  _cachedClients.set(cacheKey, client);
+  return client;
 }
 
 // Decode a Gmail API base64url body to text. Gmail returns body data as
@@ -118,6 +131,51 @@ function parseAddress(value) {
   return { name: '', address: s };
 }
 
+async function listMessageIds(gmail, q, maxResults = 500) {
+  const limit = Math.max(1, Math.min(5000, Number(maxResults) || 500));
+  const ids = [];
+  let pageToken;
+  do {
+    const list = await gmail.users.messages.list({
+      userId: 'me', q, maxResults: Math.min(500, limit - ids.length), pageToken,
+    });
+    ids.push(...(list.data.messages || []).map(message => message.id));
+    pageToken = list.data.nextPageToken || null;
+  } while (pageToken && ids.length < limit);
+  return ids.slice(0, limit);
+}
+
+async function getMessageById(id, { scopes = SCOPES } = {}) {
+  const gmail = getGmailClient(scopes);
+  const full = await gmail.users.messages.get({ userId: 'me', id, format: 'full' });
+  const payload = full.data.payload || {};
+  return {
+    id: full.data.id,
+    threadId: full.data.threadId || null,
+    labelIds: full.data.labelIds || [],
+    messageId: header(payload.headers, 'Message-ID'),
+    from: parseAddress(header(payload.headers, 'From')),
+    to: header(payload.headers, 'To'),
+    subject: header(payload.headers, 'Subject'),
+    text: extractTextBody(payload),
+    internalDate: full.data.internalDate
+      ? new Date(Number(full.data.internalDate)).toISOString()
+      : null,
+    inReplyTo: header(payload.headers, 'In-Reply-To'),
+    references: header(payload.headers, 'References'),
+  };
+}
+
+async function loadMessages(ids, options = {}) {
+  const concurrency = Math.max(1, Math.min(20, Number(options.concurrency) || 10));
+  const out = [];
+  for (let index = 0; index < ids.length; index += concurrency) {
+    const chunk = ids.slice(index, index + concurrency);
+    out.push(...await Promise.all(chunk.map(id => getMessageById(id, options))));
+  }
+  return out;
+}
+
 /**
  * List Sarah's Sent messages within the last `days` days.
  *
@@ -133,42 +191,29 @@ async function searchSentSince(days, opts = {}) {
   let q = `in:sent newer_than:${dayCount}d`;
   if (opts.toFilter) q += ` to:${opts.toFilter}`;
 
-  const list = await gmail.users.messages.list({
-    userId: 'me',
-    q,
-    maxResults: 100,
-  });
-  const ids = (list.data.messages || []).map((m) => m.id);
+  const ids = await listMessageIds(gmail, q, 100);
   if (ids.length === 0) return [];
-
-  const out = [];
-  for (const id of ids) {
-    const full = await gmail.users.messages.get({
-      userId: 'me',
-      id,
-      format: 'full',
-    });
-    const payload = full.data.payload || {};
-    const body = extractTextBody(payload);
-    out.push({
-      id,
-      to: header(payload.headers, 'To'),
-      from: header(payload.headers, 'From'),
-      subject: header(payload.headers, 'Subject'),
-      body,
-      sent_at: full.data.internalDate
-        ? new Date(Number(full.data.internalDate)).toISOString()
-        : null,
-    });
-  }
-  return out;
+  const messages = await loadMessages(ids);
+  return messages.map(message => ({
+    id: message.id,
+    threadId: message.threadId,
+    messageId: message.messageId,
+    to: message.to,
+    from: message.from?.address || '',
+    subject: message.subject,
+    body: message.text,
+    sent_at: message.internalDate,
+    inReplyTo: message.inReplyTo,
+    references: message.references,
+  }));
 }
 
 /**
- * List Sarah's Inbox messages received within the last `minutes` minutes.
+ * List messages received by Sarah within the last `minutes` minutes, including
+ * mail that has already been archived out of Inbox.
  * Used by gmail-reply-forwarder to feed /webhook/resend-reply.
  *
- * Query: `in:inbox -in:chats -in:sent after:<epoch>` (Gmail's `newer_than:`
+ * Query: `-in:chats -in:sent after:<epoch>` (Gmail's `newer_than:`
  * unit codes are d/m/y — month, not minute — so we use `after:` with a
  * Unix-seconds timestamp for real minute-level granularity).
  * Messages are NOT marked read (scope is gmail.readonly anyway).
@@ -191,51 +236,104 @@ async function searchInboxSince(minutes) {
   const mins = Math.max(1, Number(minutes) || 60);
 
   const afterEpoch = Math.floor((Date.now() - mins * 60 * 1000) / 1000);
-  const q = `in:inbox -in:chats -in:sent after:${afterEpoch}`;
+  const q = `-in:chats -in:sent after:${afterEpoch}`;
 
-  const list = await gmail.users.messages.list({
-    userId: 'me',
-    q,
-    maxResults: 100,
-  });
-  const ids = (list.data.messages || []).map((m) => m.id);
+  const ids = await listMessageIds(gmail, q, 100);
   if (ids.length === 0) return [];
+  return loadMessages(ids);
+}
 
-  const out = [];
-  for (const id of ids) {
-    const full = await gmail.users.messages.get({
-      userId: 'me',
-      id,
-      format: 'full',
-    });
-    const payload = full.data.payload || {};
-    const fromRaw = header(payload.headers, 'From');
-    const from = parseAddress(fromRaw);
-    out.push({
-      id,
-      messageId: header(payload.headers, 'Message-ID'),
-      from,
-      to: header(payload.headers, 'To'),
-      subject: header(payload.headers, 'Subject'),
-      text: extractTextBody(payload),
-      internalDate: full.data.internalDate
-        ? new Date(Number(full.data.internalDate)).toISOString()
-        : null,
-      inReplyTo: header(payload.headers, 'In-Reply-To'),
-      references: header(payload.headers, 'References'),
-    });
+async function searchSentSinceMinutes(minutes) {
+  const gmail = getGmailClient();
+  const mins = Math.max(1, Number(minutes) || 60);
+  const afterEpoch = Math.floor((Date.now() - mins * 60 * 1000) / 1000);
+  const ids = await listMessageIds(gmail, `in:sent after:${afterEpoch}`, 100);
+  return loadMessages(ids);
+}
+
+async function searchMailboxSinceDays(days, { maxResults = 5000 } = {}) {
+  const gmail = getGmailClient();
+  const dayCount = Math.max(1, Math.min(3650, Number(days) || 365));
+  const [inboxIds, sentIds] = await Promise.all([
+    listMessageIds(gmail, `-in:chats -in:sent newer_than:${dayCount}d`, maxResults),
+    listMessageIds(gmail, `in:sent newer_than:${dayCount}d`, maxResults),
+  ]);
+  const [inbox, sent] = await Promise.all([loadMessages(inboxIds), loadMessages(sentIds)]);
+  return { inbox, sent };
+}
+
+function cleanHeader(value) {
+  return String(value || '').replace(/[\r\n]+/g, ' ').trim();
+}
+
+function encodeRawMessage({ from, to, subject, body, inReplyTo, references, messageId }) {
+  const headers = [
+    `From: ${cleanHeader(from)}`,
+    `To: ${cleanHeader(to)}`,
+    `Subject: ${cleanHeader(subject)}`,
+    ...(messageId ? [`Message-ID: <${cleanHeader(messageId).replace(/^<|>$/g, '')}>`] : []),
+    ...(inReplyTo ? [`In-Reply-To: <${cleanHeader(inReplyTo).replace(/^<|>$/g, '')}>`] : []),
+    ...(references ? [`References: ${cleanHeader(references)}`] : []),
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: 8bit',
+  ];
+  const raw = `${headers.join('\r\n')}\r\n\r\n${String(body || '').replace(/\r?\n/g, '\r\n')}\r\n`;
+  return Buffer.from(raw, 'utf8').toString('base64url');
+}
+
+async function sendGmailReply({ to, subject, body, threadId, inReplyTo, references, messageId }) {
+  const gmail = getGmailClient(SEND_SCOPES);
+  const raw = encodeRawMessage({
+    from: IMPERSONATE_USER,
+    to,
+    subject,
+    body,
+    inReplyTo,
+    references,
+    messageId,
+  });
+  const response = await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw, ...(threadId ? { threadId } : {}) },
+  });
+  if (!response.data?.id) {
+    const error = new Error('Gmail accepted no durable message id');
+    error.code = 'ambiguous_external_result';
+    throw error;
   }
-  return out;
+  return {
+    id: response.data.id,
+    threadId: response.data.threadId || threadId || null,
+    labelIds: response.data.labelIds || [],
+  };
+}
+
+async function readSentMessage(id) {
+  return getMessageById(id, { scopes: SEND_SCOPES });
+}
+
+async function verifySendScope() {
+  const gmail = getGmailClient(SEND_SCOPES);
+  const profile = await gmail.users.getProfile({ userId: 'me' });
+  return { emailAddress: profile.data.emailAddress || IMPERSONATE_USER };
 }
 
 module.exports = {
   searchSentSince,
+  searchSentSinceMinutes,
+  searchMailboxSinceDays,
+  getMessageById,
+  sendGmailReply,
+  readSentMessage,
+  verifySendScope,
   searchInboxSince,
   getGmailClient,
   loadServiceAccount, // exported for tests
   SECRET_PATH,
   IMPERSONATE_USER,
   SCOPES,
+  SEND_SCOPES,
   // exported for tests
-  _internal: { decodeBody, extractTextBody, header, parseAddress },
+  _internal: { cleanHeader, decodeBody, encodeRawMessage, extractTextBody, header, listMessageIds, parseAddress },
 };

@@ -52,6 +52,7 @@ business at sale.
 | Evidence-bound pause/budget-decrease guardrails | On demand; max once/campaign/24h | `#social-sol` |
 | Sender-domain warmup | Scheduled batches | `#prospector-paulina` |
 | Paulina preparation + send digest | Daily 8:30am PT (preparation weekdays) | `#prospector-paulina` |
+| Paulina Gmail conversation ledger | Every 5 min (Inbox + Sarah Sent) | Original `#prospector-paulina` draft thread |
 | Regina reengagement + send digest | Daily 7:30am PT | `#reengager-regina` |
 | Encrypted backups + Healthchecks monitoring | Daily | `#ops-alerts` |
 | Accounting weekly tests (7 checks) | Monday 8am PT | `#accounting` |
@@ -96,6 +97,14 @@ business at sale.
 - Instagram/Facebook DM replies are likewise command-only: `!dm <dm-id>
   <message>` in `#social-sol`. The retired `/api/meta-dm/reply` endpoint cannot
   bypass the durable ledger.
+- Paulina email replies are recorded in the original Slack draft thread. Gmail
+  Inbox and Sarah Sent are polled read-only into `email_threads`; reply bodies
+  are classified only after quoted history is removed. In that original thread,
+  `!email reply <message>` creates an immutable 15-minute proposal. Only the
+  same authorized Slack user pasting the emitted `!email confirm …` in the same
+  thread can send through Sarah's Gmail. The graph records Gmail acceptance,
+  Sent-folder readback, the outbound CRM event, and its Slack-thread projection.
+  Plain replies and top-level `!email` commands never send.
 - Paid-Meta decisions begin with `marketing.snapshot.read`, which records live
   Meta delivery, exact CRM conversion facts, tracking health, and any fixed
   bounded actions as expiring evidence. Autonomous evidence requires at least
@@ -222,6 +231,7 @@ runtime/state/          Generated health and tracking snapshots (not committed)
 | **Google Drive** | Resort photo library (6 folders), corporate document storage, HEIC→JPEG conversion pipeline |
 | **Twilio** | WhatsApp webhook bridge for guest conversations |
 | **Resend** | Outbound email delivery (outreach subdomain), webhook signature verification |
+| **Gmail** | Read-only Inbox/Sent conversation capture for Paulina; confirmation-gated replies through Sarah's mailbox with Sent-folder readback |
 | **Postiz** | Instagram post/Reel scheduling via API |
 | **Cloudflare** | Pages hosting for landing pages + named tunnel (`lapuestadelsol-crm`) exposing CRM webhooks at `webhook.lapuestadelsolresort.com` |
 | **Chroma** | Vector store for voice corpus (sarah_voice_corpus) and media library (media_corpus) |

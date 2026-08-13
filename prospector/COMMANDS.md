@@ -106,7 +106,35 @@ daily key.
 ```bash
 node prospector/scripts/engagement-analysis.js --dry-run
 bash prospector/scripts/sweep-stale-drafts.sh
+node crm/scripts/reconcile-email-conversations.js --days 365
 ```
+
+## Email conversations
+
+Every matched Gmail reply and every reply Sarah sends from Gmail is appended to
+the original `#prospector-paulina` draft thread and persisted in
+`email_threads`. The mailbox poller never marks Gmail messages read. The
+classifier strips quoted history before looking for explicit positive or
+negative language, so the original outreach unsubscribe footer cannot classify
+the contact as `not_interested`.
+
+In the original draft thread:
+
+```text
+!email reply <message>
+!email confirm <proposal-id> <acceptance-hash>
+!email classify <email-event-id> hot|not_interested|ambiguous
+```
+
+The reply command does not send. It records an immutable proposal with a
+15-minute expiry. The exact confirm command must be posted by the same
+authorized Slack user in the same thread; Gmail acceptance and Sent readback
+must both succeed before the workflow reports the message sent. Top-level
+commands and ordinary Slack replies do not send email.
+
+Historical reconciliation is dry-run by default. Production repair uses
+`--apply`; by default it excludes legacy/test sends without an original Slack
+thread. Use `--include-unthreaded` only for an explicit forensic backfill.
 
 Slack commands such as add-contact, do-not-contact, campaign creation,
 approval, rejection, and staging operations are adapters over authenticated

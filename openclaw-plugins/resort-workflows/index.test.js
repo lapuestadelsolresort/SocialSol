@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createFinalizeHandler,
+  createEmailClaimHandler,
   createInboundClaimHandler,
   createMetaDmClaimHandler,
   createMarketingConfirmClaimHandler,
@@ -16,6 +17,7 @@ import {
   formatOwnerRezOccupancyReply,
   formatWorkflowReply,
   parseWhatsAppCommand,
+  parseEmailCommand,
   parseMetaDmCommand,
   parseMarketingConfirmCommand,
   parseManualReviewCommand,
@@ -45,6 +47,59 @@ test('parses only explicit Meta DM mutations', () => {
   assert.deepEqual(parseMetaDmCommand('hello'), null);
   assert.deepEqual(parseMetaDmCommand('!dm 42 Welcome'), { dmId: 42, message: 'Welcome' });
   assert.deepEqual(parseMetaDmCommand('!dm Welcome'), { error: 'invalid_meta_dm_command' });
+});
+
+test('parses email replies, confirmations, and classifications only in the original thread', () => {
+  const id = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  assert.equal(parseEmailCommand('hello', { hasThread: true }), null);
+  assert.deepEqual(parseEmailCommand('!email reply Thanks—here are the rates.', { hasThread: true }), {
+    action: 'propose', message: 'Thanks—here are the rates.',
+  });
+  assert.deepEqual(parseEmailCommand(`!email confirm ${id} abcdef123456`, { hasThread: true }), {
+    action: 'confirm', proposalId: id, acceptanceHash: 'abcdef123456',
+  });
+  assert.deepEqual(parseEmailCommand('!email classify 17 hot', { hasThread: true }), {
+    action: 'classify', eventId: 17, quality: 'hot',
+  });
+  assert.deepEqual(parseEmailCommand('!email reply 10339 | bypass', { hasThread: false }), {
+    error: 'original_thread_required',
+  });
+});
+
+test('email reply commands bind the trusted Slack user, message, channel, and thread', async () => {
+  const config = pluginConfig({
+    emailChannelIds: ['CPAULINA'], shadowMode: true,
+    liveWorkflowNames: ['email.reply.propose', 'email.reply.confirm', 'email.message.classify'],
+  });
+  const calls = [];
+  const result = await createEmailClaimHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'email-proposal-run', workflow_name: request.workflow, status: 'completed',
+        output: { status: 'awaiting_explicit_confirmation', bodyText: request.input.message,
+          confirmationCommand: '!email confirm id hash' } } };
+    },
+  })({
+    channel: 'slack', conversationId: 'CPAULINA', messageId: '200.1',
+    senderId: 'U-SARAH', threadId: '1786549495.693669',
+    bodyForAgent: '!email reply Thanks—here are the rates.',
+  }, {});
+  assert.equal(result.handled, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workflow, 'email.reply.propose');
+  assert.equal(calls[0].input.threadTs, '1786549495.693669');
+  assert.equal(calls[0].context.actorUserId, 'U-SARAH');
+  assert.equal(calls[0].context.entrypoint, 'slack_email_reply_command');
+  assert.equal(calls[0].idempotencyKey, 'slack:CPAULINA:200.1:email.reply.propose');
+  assert.match(result.reply.text, /No email has been sent/);
+
+  const topLevel = await createEmailClaimHandler({ config, execute: async () => assert.fail('must not execute') })({
+    channel: 'slack', conversationId: 'CPAULINA', messageId: '200.2', senderId: 'U-SARAH',
+    bodyForAgent: '!email reply 10339 | bypass',
+  }, {});
+  assert.equal(topLevel.handled, true);
+  assert.match(topLevel.reply.text, /original draft thread/);
 });
 
 test('parses only exact paid-media confirmation commands', () => {
