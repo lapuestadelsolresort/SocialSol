@@ -109,6 +109,43 @@ test('observed replies repair legacy quoted-footer false negatives and notify th
   });
 });
 
+test('re-observation repairs this classifier\'s exact collapsed-quote false negative', async () => {
+  await withDb(async db => {
+    const [event] = await db.query(sql`SELECT * FROM email_threads WHERE provider_message_id='gmail-in-1'`);
+    const collapsed = "Like wise if you need a planner&nbsp; Robin&nbsp; On May 20, 2026, at 4:45 PM, Sarah &lt;sarah@example.com&gt; wrote: Hi there. Reply 'unsubscribe' to unsubscribe@example.com.";
+    await db.query(sql`UPDATE email_threads SET body_text=${collapsed}, raw_body_text=${collapsed},
+      sentiment='not_interested', sentiment_notes='unsubscribe',
+      classification_source='email_conversation_classifier', processing_status='pending'
+      WHERE id=${event.id}`);
+    await db.query(sql`UPDATE suppressions SET source='email_conversation_classifier',
+      notes=${`Email event #${event.id} classified not_interested`}
+      WHERE email='gretel@example.com'`);
+
+    const run = await startGraph(db, observeDefinition, {
+      idempotencyKey: 'email:gmail:gmail-in-1:observe:v2',
+      triggerType: 'system', triggerRef: `email-thread:${event.id}:repair`,
+      input: { emailThreadId: event.id },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.classification.quality, 'ambiguous');
+    const [contact] = await db.query(sql`SELECT * FROM contacts WHERE id=7`);
+    assert.equal(contact.status, 'replied');
+    assert.equal(contact.reply_status, 'ambiguous');
+    assert.equal(contact.lead_quality, 'ambiguous');
+    assert.equal(contact.do_not_contact, 0);
+    assert.equal(contact.do_not_contact_reason, null);
+    const [{ count: suppressionCount }] = await db.query(sql`SELECT COUNT(*) AS count FROM suppressions`);
+    assert.equal(suppressionCount, 0);
+    const [outbox] = await db.query(sql`SELECT * FROM workflow_outbox WHERE run_id=${run.id}`);
+    const payload = JSON.parse(outbox.payload_json);
+    assert.equal(payload.threadTs, '1786549495.693669');
+    assert.match(payload.message, /classification corrected/i);
+    assert.match(payload.message, /Previous classification: \*not_interested\*/);
+    assert.match(payload.message, /Classification: \*ambiguous\*/);
+    assert.match(payload.message, /false-negative suppression was removed/);
+  });
+});
+
 test('Slack email replies require same-user, same-thread confirmation and Gmail Sent readback', async () => {
   await withDb(async db => {
     const proposalRun = await startGraph(db, proposeDefinition, {

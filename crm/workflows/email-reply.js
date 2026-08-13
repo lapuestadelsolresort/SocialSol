@@ -44,15 +44,25 @@ function validateClassification(input) {
   if (!String(input?.threadTs || '').trim()) throw new Error('email classification must be in the original Slack thread');
 }
 
-async function clearFalseNegativeSuppression(db, contact) {
+async function clearFalseNegativeSuppression(db, contact, event = null) {
   if (!contact?.email || contact.do_not_contact_reason !== 'negative_reply') return false;
-  const rows = await db.query(sql`SELECT id, source FROM suppressions
+  const rows = await db.query(sql`SELECT id, source, notes FROM suppressions
     WHERE LOWER(email)=${normalizeEmail(contact.email)} AND reason='negative_reply'`);
   // `reply_classify` is the legacy path that classified the full MIME body,
-  // including the quoted outreach footer. The new classifier never clears a
-  // suppression it created from an explicit negative reply.
-  const repairable = rows.filter(row => row.source === 'reply_classify');
+  // including the quoted outreach footer. A suppression created by this
+  // classifier is repairable only when the same event is being reclassified;
+  // this keeps unrelated explicit negative replies fail-closed.
+  const eventNote = event ? `Email event #${event.id} classified not_interested` : null;
+  const repairable = rows.filter(row => row.source === 'reply_classify'
+    || (event?.classification_source === 'email_conversation_classifier'
+      && event.sentiment === 'not_interested'
+      && row.source === 'email_conversation_classifier'
+      && row.notes === eventNote));
   if (!repairable.length) return false;
+  const [{ count: otherNegatives }] = await db.query(sql`SELECT COUNT(*) AS count
+    FROM email_threads WHERE contact_id=${contact.id} AND direction='inbound'
+      AND sentiment='not_interested' AND id<>${event?.id || 0}`);
+  if (Number(otherNegatives) > 0) return false;
   for (const row of repairable) await db.query(sql`DELETE FROM suppressions WHERE id=${row.id}`);
   await db.query(sql`UPDATE contacts SET do_not_contact=0, do_not_contact_reason=NULL,
     status='replied', updated_at=datetime('now') WHERE id=${contact.id}`);
@@ -78,8 +88,11 @@ async function applyClassification(db, event, classification, { actorUserId = nu
   }
   if (!contact) return { suppressionRepaired: false, suppressed: false };
 
+  const suppressionRepaired = classification.quality !== 'not_interested'
+    ? await clearFalseNegativeSuppression(db, contact, event)
+    : false;
+
   if (classification.quality === 'hot') {
-    const suppressionRepaired = await clearFalseNegativeSuppression(db, contact);
     await db.query(sql`UPDATE contacts SET status='replied', reply_status='positive',
       lead_quality='hot', updated_at=${now} WHERE id=${contact.id}`);
     return { suppressionRepaired, suppressed: false };
@@ -101,7 +114,7 @@ async function applyClassification(db, event, classification, { actorUserId = nu
     lead_quality='ambiguous', updated_at=${now}
     WHERE id=${contact.id} AND do_not_contact=0
       AND (lead_quality IS NULL OR lead_quality <> 'hot')`);
-  return { suppressionRepaired: false, suppressed: false };
+  return { suppressionRepaired, suppressed: false };
 }
 
 function quotedBody(body, limit = 2800) {
@@ -111,7 +124,7 @@ function quotedBody(body, limit = 2800) {
 
 const observeDefinition = {
   name: 'email.message.observe',
-  version: 1,
+  version: 2,
   capability: 'email.read',
   mutates: false,
   notificationChannelName: 'prospector-paulina',
@@ -148,6 +161,8 @@ const observeDefinition = {
           };
           projection = await applyClassification(db, event, classification);
         }
+        const classificationChanged = Boolean(classification && event.sentiment
+          && event.sentiment !== classification.quality);
         const evidence = await store.createEvidence(db, {
           runId: run.id,
           stepKey,
@@ -170,7 +185,13 @@ const observeDefinition = {
         await db.query(sql`UPDATE email_threads SET workflow_run_id=${run.id},
           processing_status='processed', processing_error=NULL, processed_at=datetime('now'),
           updated_at=datetime('now') WHERE id=${event.id}`);
-        return { classification, evidenceId: evidence.id, ...projection };
+        return {
+          classification,
+          classificationChanged,
+          previousClassification: event.sentiment || null,
+          evidenceId: evidence.id,
+          ...projection,
+        };
       },
     },
     {
@@ -201,10 +222,16 @@ const observeDefinition = {
           ].join('\n');
         } else {
           const quality = projected.classification?.quality || 'ambiguous';
+          const heading = projected.classificationChanged
+            ? `🔄 *Email classification corrected for ${event.contact_name || event.from_address || event.contact_email}*`
+            : `📬 *Reply from ${event.contact_name || ''} <${event.from_address || event.contact_email}>*`;
           message = [
-            `📬 *Reply from ${event.contact_name || ''} <${event.from_address || event.contact_email}>*`,
+            heading,
             `Original: Draft #${event.outreach_send_id} sent ${event.original_sent_at || '(unknown)'} (${event.campaign_slug || 'unknown campaign'})`,
             '', quotedBody(event.body_text), '',
+            projected.classificationChanged
+              ? `Previous classification: *${projected.previousClassification}*`
+              : null,
             `Classification: *${quality}* (${projected.classification?.reason || 'no deterministic signal'})`,
             projected.suppressionRepaired ? 'A prior false-negative suppression was removed.' : null,
             `To answer from this thread: \`!email reply <your message>\``,

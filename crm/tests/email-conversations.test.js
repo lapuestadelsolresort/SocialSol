@@ -79,6 +79,18 @@ test('a quoted unsubscribe footer cannot mark a reply not_interested', () => {
   assert.equal(classifyReply('No thanks. Please unsubscribe me.').quality, 'not_interested');
 });
 
+test('collapsed HTML reply history is removed before classification', () => {
+  const reciprocal = "Like wise if you need a planner&nbsp; Robin&nbsp; On May 20, 2026, at 4:45 PM, Sarah &lt;sarah@example.com&gt; wrote: Hi there. Reply 'unsubscribe' to unsubscribe@example.com.";
+  assert.equal(stripQuotedHistory(reciprocal), 'Like wise if you need a planner  Robin');
+  assert.equal(classifyReply(reciprocal).quality, 'ambiguous');
+
+  const retiring = "Thank you but we are in the process of retiring.&nbsp; Sent from my iPhone On May 22, 2026, at 10:22 PM, Sarah &lt;sarah@example.com&gt; wrote: Hi Jo Ann. Reply 'unsubscribe' to unsubscribe@example.com.";
+  const result = classifyReply(retiring);
+  assert.equal(result.quality, 'not_interested');
+  assert.equal(result.reason, 'retiring');
+  assert.doesNotMatch(result.normalizedText, /unsubscribe/i);
+});
+
 test('legacy email_threads upgrades and Gmail ingestion is matched and idempotent', async () => {
   await withDb(async db => {
     const columns = new Set((await db.query(sql`PRAGMA table_info(email_threads)`)).map(row => row.name));
