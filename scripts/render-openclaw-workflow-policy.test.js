@@ -99,7 +99,31 @@ test('email console rendering exposes only thread-bound commands to both authori
     const sarah = patch.channels.slack.accounts['test-account'].channels.CEMAIL;
     assert.match(sarah.systemPrompt, /Gmail and OwnerRez/);
     assert.match(sarah.systemPrompt, /same user in that same thread/);
+    assert.match(sarah.systemPrompt, /call email\.activity\.read against Sarah Gmail live/);
     assert.deepEqual(sarah.tools.allow, ['resort_workflow']);
+  } finally {
+    if (previousAccount === undefined) delete process.env.OPENCLAW_SLACK_ACCOUNT;
+    else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;
+  }
+});
+
+test('business intelligence retains its domain prompt in shadow mode and can read Gmail activity', () => {
+  const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
+  process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';
+  try {
+    const patch = render({
+      policy: {
+        shadow_mode: true,
+        live_workflows: [],
+        channels: { CBI: { name: 'business-intel', capabilities: ['business.read_all'] } },
+      },
+      currentConfig: { channels: { slack: { accounts: { 'test-account': {} } } } },
+    });
+    const business = patch.channels.slack.accounts['test-account'].channels.CBI;
+    assert.match(business.systemPrompt, /call email\.activity\.read against Sarah Gmail live/);
+    assert.match(business.systemPrompt, /cross-domain read surface/);
+    assert.match(business.systemPrompt, /SHADOW MODE/);
+    assert.deepEqual(business.tools.alsoAllow, ['resort_workflow']);
   } finally {
     if (previousAccount === undefined) delete process.env.OPENCLAW_SLACK_ACCOUNT;
     else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;

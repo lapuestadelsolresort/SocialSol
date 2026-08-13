@@ -29,6 +29,7 @@ const WORKFLOW_SCHEMA = {
         'accounting.classify',
         'qbo.write',
         'business.snapshot.read',
+        'email.activity.read',
         'whatsapp.status.read',
         'receipts.status.read',
         'receipts.scoped.read',
@@ -306,6 +307,27 @@ export function formatWorkflowReply(payload) {
       output.suppressed ? 'The contact was suppressed from future outreach.' : null,
       `Workflow: ${run.id}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
     ].filter(Boolean).join('\n');
+  }
+  if (run.workflow_name === 'email.activity.read') {
+    const output = run.output || {};
+    const window = output.window || {};
+    const direction = output.direction === 'outbound' ? 'sent' : output.direction === 'all' ? 'received/sent' : 'received';
+    const lines = [
+      `Sarah Gmail live activity for ${window.start || 'unknown'}${window.end && window.end !== window.start ? ` through ${window.end}` : ''}: ${Number(output.totalMessages || 0)} ${direction} message${Number(output.totalMessages || 0) === 1 ? '' : 's'}.`,
+      `${Number(output.unreadMessages || 0)} unread · ${Number(output.spamMessages || 0)} spam.`,
+    ];
+    for (const message of output.messages || []) {
+      const sender = message.senderName
+        ? `${message.senderName}${message.fromAddress ? ` <${message.fromAddress}>` : ''}`
+        : message.fromAddress || 'unknown sender';
+      const party = message.direction === 'outbound' ? `To ${message.toAddress || 'unknown recipient'}` : `From ${sender}`;
+      lines.push(`• ${message.receivedAt || 'unknown time'} — ${party} — ${message.subject || '(no subject)'}${message.unread ? ' [unread]' : ''}${message.spam ? ' [spam]' : ''}`);
+      if (message.bodyPreview) lines.push(`  ${String(message.bodyPreview).replace(/\s+/g, ' ').slice(0, 500)}`);
+    }
+    if (output.truncated) lines.push('The result was truncated; narrow the date window or request a larger limit.');
+    lines.push(`Ledger coverage for displayed messages: ${Number(output.ledgerCapturedMessages || 0)} captured · ${Number(output.ledgerMissingMessages || 0)} missing.`);
+    lines.push(`Workflow: ${run.id}${output._evidence?.id ? ` · Evidence: ${output._evidence.id}` : ''}`);
+    return lines.join('\n');
   }
   if (run.workflow_name === 'ownerrez.mutation.propose') {
     const output = run.output || {};

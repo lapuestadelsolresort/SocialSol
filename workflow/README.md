@@ -75,7 +75,10 @@ flowchart LR
   one Slack root. `!email reply` is intercepted before the model and follows an
   immutable same-user/same-thread confirmation path; Gmail and OwnerRez sends
   each require exact provider readback. Direct replies Sarah sends outside
-  Slack are captured into the original thread.
+  Slack are captured into the original thread. `email.activity.read` is the
+  live, read-only Gmail authority for recent/received/sent/unread questions in
+  both `#sarah-email` and the broad-read `#business-intel` channel; its result
+  states live mailbox counts and ledger projection coverage separately.
 - Paid media: `marketing.snapshot.read` records live Meta delivery, exact CRM
   conversions, tracking health, and the only bounded actions available to
   autonomy. Evidence must cover at least three completed local days; daily

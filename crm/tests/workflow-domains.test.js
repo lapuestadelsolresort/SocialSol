@@ -14,6 +14,7 @@ const { tokenMatches } = require('../routes/workflows');
 const { getDefinition, listDefinitions } = require('../workflows/registry');
 const { runVerifiedCommand } = require('../workflows/paulina-prepare');
 const { matchingPost } = require('../workflows/social-publish');
+const { _internal: readModelInternals } = require('../workflows/read-models');
 
 async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-domains-'));
@@ -93,12 +94,66 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
     'guest.reply.draft', 'crm.sync', 'crm.pipeline.read',
     'ownerrez.occupancy.read', 'squarespace.summary.read',
     'ownerrez.mutation.propose', 'ownerrez.mutation.confirm',
-    'email.message.observe', 'email.reply.propose', 'email.reply.confirm', 'email.message.classify',
+    'email.activity.read', 'email.message.observe', 'email.reply.propose', 'email.reply.confirm', 'email.message.classify',
     'qbo.write', 'qbo.bank_balances.read', 'qbo.report.read', 'business.snapshot.read',
   ]) assert.equal(definitions.has(expected), true, expected);
   assert.equal(definitions.get('business.snapshot.read').mutates, false);
+  assert.equal(definitions.get('email.activity.read').capability, 'email.read');
   assert.equal(definitions.get('qbo.write').autonomous, true);
   assert.equal(definitions.has('shell.exec'), false);
+});
+
+test('email activity reads live Gmail and reports durable ledger coverage separately', async () => {
+  await withDb(async db => {
+    await db.query(sql`CREATE TABLE contacts (id INTEGER PRIMARY KEY)`);
+    await db.query(sql`CREATE TABLE leads (id INTEGER PRIMARY KEY)`);
+    await db.query(sql`CREATE TABLE outreach_sends (id INTEGER PRIMARY KEY)`);
+    await db.query(sql`INSERT INTO email_threads (
+      direction, subject, received_at, provider, provider_message_id,
+      processing_status, slack_channel_id, slack_message_ts
+    ) VALUES (
+      'inbound', 'Captured subject', '2026-08-13T16:32:28.000Z', 'gmail', 'gmail-captured',
+      'processed', 'SARAH-EMAIL', '171.1'
+    )`);
+    const run = await startGraph(db, getDefinition('email.activity.read'), {
+      idempotencyKey: 'email-activity-1', triggerType: 'slack',
+      channelId: 'SARAH-EMAIL', actorUserId: 'TEST-OWNER',
+      input: { start: '2026-08-13', end: '2026-08-13', direction: 'inbound', limit: 25 },
+    }, {
+      readEmailActivity: async input => {
+        assert.equal(input.start, '2026-08-13T07:00:00.000Z');
+        assert.equal(input.end, '2026-08-14T07:00:00.000Z');
+        return {
+          total: 2, inbound: 2, outbound: 0, unread: 2, spam: 0, truncated: false,
+          messages: [
+            { id: 'gmail-captured', threadId: 'thread-1', direction: 'inbound',
+              internalDate: '2026-08-13T16:32:28.000Z', from: { name: 'Guest One', address: 'one@example.com' },
+              to: 'sarah@example.com', subject: 'Captured subject', text: 'First message', labelIds: ['INBOX', 'UNREAD'] },
+            { id: 'gmail-missing', threadId: 'thread-2', direction: 'inbound',
+              internalDate: '2026-08-13T16:39:28.000Z', from: { name: 'Guest Two', address: 'two@example.com' },
+              to: 'sarah@example.com', subject: 'Missing subject', text: 'Second message', labelIds: ['INBOX', 'UNREAD'] },
+          ],
+        };
+      },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.authority, 'Sarah Gmail live mailbox');
+    assert.equal(run.output.totalMessages, 2);
+    assert.equal(run.output.unreadMessages, 2);
+    assert.equal(run.output.ledgerCapturedMessages, 1);
+    assert.equal(run.output.ledgerMissingMessages, 1);
+    assert.equal(run.output.messages[0].ledger.slackProjected, true);
+    assert.equal(run.output.messages[1].ledger.captured, false);
+    assert.equal(run.output._evidence.source, 'gmail.live_mailbox_api+sqlite.email_threads');
+  });
+});
+
+test('email activity local date windows honor Pacific daylight-saving boundaries', () => {
+  assert.equal(readModelInternals.zonedMidnightUtc('2026-03-08'), '2026-03-08T08:00:00.000Z');
+  assert.equal(readModelInternals.zonedMidnightUtc('2026-03-09'), '2026-03-09T07:00:00.000Z');
+  assert.equal(readModelInternals.zonedMidnightUtc('2026-11-01'), '2026-11-01T07:00:00.000Z');
+  assert.equal(readModelInternals.zonedMidnightUtc('2026-11-02'), '2026-11-02T08:00:00.000Z');
+  assert.throws(() => readModelInternals.validateEmailActivityInput({ start: '2026-08-13', end: '2026-10-01' }), /31 days/);
 });
 
 test('durable shell jobs retry only before dispatch and require review after dispatch', async () => {
