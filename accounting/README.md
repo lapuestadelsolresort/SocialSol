@@ -49,6 +49,19 @@ Edit `config.json` → `receipt_channels`. Add a new entry:
 The classifier references channels in `needs_channel_check` so Sol knows
 where to look for context on ambiguous transactions.
 
+Use the guarded configurator to update both ignored runtime files together.
+It is a dry run unless `--confirm-production` is supplied:
+
+```bash
+npm run configure:receipt-channel -- \
+  --channel-id C0XXXXX --channel-name receipts-pettycash \
+  --scope sergio --description "Sergio petty cash receipts and invoices" \
+  --person-id U0XXXXX
+
+# After inspecting the dry-run output, repeat with:
+# --confirm-production
+```
+
 ### Owner-paid expense channels
 
 An owner-expense channel is also listed under `owner_expense_channels` with
