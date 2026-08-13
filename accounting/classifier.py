@@ -548,14 +548,16 @@ class KapitalClassifier:
                 result['note'] = 'Sergio weekly salary'
             return result
 
-        # Petty cash reimbursement → default to Maintenance (materials)
+        # Petty cash reimbursements require the durable receipt reference. The
+        # QBO writer promotes an exact reconciled LPDS-R code to auto and keeps
+        # an unreferenced reimbursement out of autonomous posting.
         if 'REINBURSMENT PETTY CASH' in concept or 'PETTY CASH' in concept:
             result['category'] = 'maintenance'
             result['category_name'] = 'Maintenance'
-            result['confidence'] = 'auto'
-            result['reason'] = f'Sergio petty cash reimbursement (${amount:,.0f}) — maintenance materials'
+            result['confidence'] = 'guess'
+            result['reason'] = f'Sergio petty cash reimbursement (${amount:,.0f}) — receipt payment reference required'
             result['needs_channel_check'] = self._channel_ids('sergio', 'sergio_mayela')
-            result['note'] = f'Sergio petty cash ${amount:,.0f} — maintenance materials. If unclear, ping Mayela in receipt channel.'
+            result['note'] = f'Sergio petty cash ${amount:,.0f} — do not auto-post without an exact reconciled LPDS-R reference.'
             return result
 
         # Temo payment

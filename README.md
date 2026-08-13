@@ -222,7 +222,10 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   team posts expense receipts, SPEI confirmations, and salary invoices. The
   same scoped intake is also enabled for `#receipts-pettycash`.
   Sol cross-references these with bank statement transactions for
-  classification context. Unknown transactions are escalated to Mayela.
+  classification context. Annotated reimbursements receive an itemized Slack
+  thread reply with a stable Kapital payment concept; exact reference + amount
+  + currency reconciliation then preserves receipt-level category splits in
+  QBO. Unknown transactions are escalated to the configured payment approver.
   Weekly automated tests (7 checks) run Monday 8am PT and post to
   `#accounting`. See `accounting/README.md` for the full spec.
 

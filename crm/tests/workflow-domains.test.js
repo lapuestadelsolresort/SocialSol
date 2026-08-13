@@ -19,7 +19,9 @@ async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-domains-'));
   const db = createDB(path.join(directory, 'crm.db'));
   const priorPolicyPath = process.env.RESORT_WORKFLOW_POLICY_PATH;
+  const priorAccountingPath = process.env.ACCOUNTING_CONFIG_PATH;
   const policyPath = path.join(directory, 'policy.json');
+  const accountingPath = path.join(directory, 'accounting.json');
   fs.writeFileSync(policyPath, JSON.stringify({
     version: 1,
     shadow_mode: false,
@@ -35,7 +37,17 @@ async function withDb(run) {
     restricted_capabilities: {},
     write_notifications: { user_ids: [], channel_ids: [] },
   }));
+  fs.writeFileSync(accountingPath, JSON.stringify({
+    qbo_accounts: {
+      expenses: {
+        maintenance: { id: '10', name: 'Maintenance' },
+        cleaning_services: { id: '11', name: 'Cleaning Services' },
+      },
+    },
+    receipt_payment: { approver_user_ids: ['U123MAYELA'] },
+  }));
   process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
+  process.env.ACCOUNTING_CONFIG_PATH = accountingPath;
   try {
     await db.query(sql`PRAGMA foreign_keys=ON`);
     await db.query(sql`CREATE TABLE meta_messages (
@@ -49,6 +61,8 @@ async function withDb(run) {
     await db.dispose();
     if (priorPolicyPath === undefined) delete process.env.RESORT_WORKFLOW_POLICY_PATH;
     else process.env.RESORT_WORKFLOW_POLICY_PATH = priorPolicyPath;
+    if (priorAccountingPath === undefined) delete process.env.ACCOUNTING_CONFIG_PATH;
+    else process.env.ACCOUNTING_CONFIG_PATH = priorAccountingPath;
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }
@@ -242,7 +256,7 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     const definition = getDefinition('receipt.ingest');
     const request = {
       idempotencyKey: 'slack:RECEIPT-A:171.2:receipt.ingest',
-      triggerType: 'slack', triggerRef: '171.2', channelId: 'RECEIPT-A', actorUserId: 'TEST-WORKER',
+      triggerType: 'slack', triggerRef: '171.2', channelId: 'RECEIPT-A', actorUserId: 'UTESTWORKER',
       input: { slackMessageId: '171.2', messageText: 'Materials 1250 MXN', fileRefs: [{ id: 'F1', name: 'receipt.jpg' }] },
     };
     const first = await startGraph(db, definition, request);
@@ -255,7 +269,7 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     const annotate = getDefinition('receipt.annotate');
     const annotated = await startGraph(db, annotate, {
       idempotencyKey: 'slack:RECEIPT-A:171.3:receipt.annotate',
-      triggerType: 'slack', channelId: 'RECEIPT-A', actorUserId: 'TEST-WORKER',
+      triggerType: 'slack', channelId: 'RECEIPT-A', actorUserId: 'UTESTWORKER',
       input: {
         receiptId: first.output.receiptId, amount: 1250, currency: 'MXN',
         transactionDate: '2026-08-10', vendor: 'Hardware',
@@ -277,13 +291,27 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     });
     assert.equal(annotated.status, 'completed', annotated.error_message);
     assert.equal(annotated.output.receiptStatus, 'extracted');
-    const [receipt] = await db.query(sql`SELECT description, category_key, category_name
+    const [receipt] = await db.query(sql`SELECT description, category_key, category_name,
+      payment_reference, reimbursement_recipient_user_id, payment_instruction_queued_at
       FROM accounting_receipts WHERE id=${first.output.receiptId}`);
-    assert.deepEqual(receipt, {
-      description: 'Replacement hardware for villa doors',
-      category_key: 'maintenance',
-      category_name: 'Maintenance',
-    });
+    assert.equal(receipt.description, 'Replacement hardware for villa doors');
+    assert.equal(receipt.category_key, 'maintenance');
+    assert.equal(receipt.category_name, 'Maintenance');
+    assert.match(receipt.payment_reference, /^LPDS-R-[A-F0-9]{16}$/);
+    assert.equal(receipt.reimbursement_recipient_user_id, 'UTESTWORKER');
+    assert.ok(receipt.payment_instruction_queued_at);
+    assert.equal(annotated.output.paymentReference, receipt.payment_reference);
+    assert.equal(annotated.output.instructionStatus, 'pending');
+    const [instruction] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${annotated.output.outboxId}`);
+    const instructionPayload = JSON.parse(instruction.payload_json);
+    assert.equal(instructionPayload.channelId, 'RECEIPT-A');
+    assert.equal(instructionPayload.threadTs, '171.2');
+    assert.match(instructionPayload.message, /<@U123MAYELA> \*Kapital payment instruction\*/);
+    assert.match(instructionPayload.message, /<@UTESTWORKER>, please confirm/);
+    assert.match(instructionPayload.message, /MXN \$1,000\.00 · Maintenance/);
+    assert.match(instructionPayload.message, /MXN \$250\.00 · Cleaning Services/);
+    assert.match(instructionPayload.message, new RegExp(receipt.payment_reference));
     assert.equal(annotated.output.itemCount, 2);
     const items = await db.query(sql`SELECT item_index, file_ref_id, amount, category_key
       FROM accounting_receipt_items WHERE receipt_id=${first.output.receiptId} ORDER BY item_index`);
@@ -304,6 +332,63 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     });
     assert.equal(denied.status, 'failed');
     assert.equal(denied.error_code, 'receipt_scope_violation');
+  });
+});
+
+test('receipt reconciliation uses an exact payment reference before the legacy date window', async () => {
+  await withDb(async db => {
+    const receipts = [
+      ['11111111-1111-4111-8111-111111111111', 'LPDS-R-A1B2C3D4E5F60718', 2105, '2026-08-06'],
+      ['22222222-2222-4222-8222-222222222222', 'LPDS-R-B1C2D3E4F5061728', 3086, '2026-08-13'],
+      ['33333333-3333-4333-8333-333333333333', null, 500, '2026-08-10'],
+    ];
+    for (const [id, reference, amount, transactionDate] of receipts) {
+      await db.query(sql`INSERT INTO accounting_receipts (
+        id, slack_channel_id, slack_message_id, submitted_at, source_hash, status,
+        transaction_date, currency, amount, payment_reference
+      ) VALUES (${id}, 'RECEIPT-A', ${id}, '2026-08-13T12:00:00Z', ${id}, 'extracted',
+        ${transactionDate}, 'MXN', ${amount}, ${reference})`);
+    }
+    const bankRows = [
+      ['bank-ref-match', '2026-08-20', 'Reembolso LPDS-R-A1B2C3D4E5F60718', 2105],
+      ['bank-ref-wrong-amount', '2026-08-13', 'LPDS-R-B1C2D3E4F5061728', 3000],
+      ['bank-date-only-decoy', '2026-08-13', 'Other payment', 3086],
+      ['bank-legacy', '2026-08-11', 'Legacy reimbursement', 500],
+    ];
+    for (const [sourceKey, transactionDate, description, amount] of bankRows) {
+      await db.query(sql`INSERT INTO accounting_bank_transactions (
+        id, source_key, transaction_date, description, currency, amount,
+        classification_tier, source_file_hash
+      ) VALUES (${sourceKey}, ${sourceKey}, ${transactionDate}, ${description}, 'MXN', ${amount},
+        'unknown', 'statement-hash')`);
+    }
+    const run = await startGraph(db, getDefinition('receipt.reconcile'), {
+      idempotencyKey: 'receipt-reconcile-reference-first',
+      triggerType: 'system',
+      input: {},
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.matched, 2);
+    assert.equal(run.output.referenceMatched, 1);
+    assert.equal(run.output.legacyMatched, 1);
+    assert.equal(run.output.ambiguous, 1);
+    const states = await db.query(sql`SELECT id, status, review_reason FROM accounting_receipts ORDER BY id`);
+    assert.deepEqual(states, [
+      { id: receipts[0][0], status: 'matched', review_reason: null },
+      { id: receipts[1][0], status: 'needs_review', review_reason: 'payment_reference_amount_or_currency_mismatch' },
+      { id: receipts[2][0], status: 'matched', review_reason: null },
+    ]);
+    const reconciliations = await db.query(sql`SELECT receipt_id, evidence_json
+      FROM accounting_reconciliations ORDER BY receipt_id`);
+    assert.equal(JSON.parse(reconciliations[0].evidence_json).rule, 'exact_payment_reference_amount_currency');
+    assert.equal(JSON.parse(reconciliations[1].evidence_json).rule, 'unique_amount_currency_date_window');
+    const lateCorrection = await startGraph(db, getDefinition('receipt.annotate'), {
+      idempotencyKey: 'receipt-correction-after-match',
+      triggerType: 'slack', channelId: 'RECEIPT-A', actorUserId: 'UTESTWORKER',
+      input: { receiptId: receipts[0][0], amount: 2105, currency: 'MXN', transactionDate: '2026-08-06' },
+    });
+    assert.equal(lateCorrection.status, 'failed');
+    assert.equal(lateCorrection.error_code, 'receipt_already_reconciled');
   });
 });
 

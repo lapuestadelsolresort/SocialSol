@@ -14,6 +14,7 @@ const PROCESSED = path.join(INBOX, 'processed');
 
 function accountingWorkflowsLive(policy) {
   return workflowIsLive(policy, 'accounting.classify')
+    && workflowIsLive(policy, 'receipt.reconcile')
     && workflowIsLive(policy, 'qbo.write');
 }
 
@@ -64,14 +65,19 @@ async function execute(workflow, input, idempotencyKey, fetchImpl = fetch) {
   return run;
 }
 
-async function main(fetchImpl = fetch) {
-  fs.mkdirSync(INBOX, { recursive: true });
-  const files = fs.readdirSync(INBOX, { withFileTypes: true })
+async function main(fetchImpl = fetch, {
+  inboxDirectory = INBOX,
+  processedDirectory = PROCESSED,
+  executeWorkflow = execute,
+  policy = null,
+} = {}) {
+  fs.mkdirSync(inboxDirectory, { recursive: true });
+  const files = fs.readdirSync(inboxDirectory, { withFileTypes: true })
     .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.csv'))
-    .map(entry => path.join(INBOX, entry.name))
+    .map(entry => path.join(inboxDirectory, entry.name))
     .sort()
     .slice(0, 25);
-  if (!accountingWorkflowsLive(loadPolicy({ fresh: true }))) {
+  if (!accountingWorkflowsLive(policy || loadPolicy({ fresh: true }))) {
     console.log(JSON.stringify({ ok: true, shadow: true, candidates: files.map(file => path.basename(file)) }));
     return;
   }
@@ -79,16 +85,20 @@ async function main(fetchImpl = fetch) {
   for (const file of files) {
     const hash = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
     const relative = path.relative(ROOT, file);
-    const classification = await execute(
+    const classification = await executeWorkflow(
       'accounting.classify', { csvPath: relative }, `accounting:${hash}:classify`, fetchImpl,
     );
-    const qbo = await execute('qbo.write', { csvPath: relative }, `accounting:${hash}:qbo`, fetchImpl);
-    const archived = archiveProcessedFile(file, hash);
+    const reconciliation = await executeWorkflow(
+      'receipt.reconcile', {}, `accounting:${hash}:receipt-reconcile`, fetchImpl,
+    );
+    const qbo = await executeWorkflow('qbo.write', { csvPath: relative }, `accounting:${hash}:qbo`, fetchImpl);
+    const archived = archiveProcessedFile(file, hash, processedDirectory);
     results.push({
       file: path.basename(file),
       archived: path.relative(ROOT, archived),
       hash,
       classificationRunId: classification.id,
+      reconciliationRunId: reconciliation.id,
       qboRunId: qbo.id,
     });
   }

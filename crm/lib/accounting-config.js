@@ -68,6 +68,12 @@ function validateAccountingConfig(config) {
   for (const [channelId, profile] of Object.entries(config.owner_expense_channels || {})) {
     validateOwnerExpenseProfile(channelId, profile);
   }
+  const approvers = config.receipt_payment?.approver_user_ids;
+  if (approvers !== undefined && (!Array.isArray(approvers)
+      || approvers.length === 0
+      || approvers.some(userId => !/^U[A-Z0-9]+$/.test(String(userId))))) {
+    throw new Error('receipt_payment.approver_user_ids must contain Slack user ids');
+  }
   return config;
 }
 
