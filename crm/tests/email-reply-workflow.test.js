@@ -16,6 +16,7 @@ const {
   observeDefinition,
   proposeDefinition,
 } = require('../workflows/email-reply');
+const { auditClassifications } = require('../scripts/reconcile-email-classifications');
 
 async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'email-reply-workflow-'));
@@ -144,13 +145,64 @@ test('re-observation repairs this classifier\'s exact collapsed-quote false nega
     assert.equal(suppressionCount, 0);
     const [outbox] = await db.query(sql`SELECT * FROM workflow_outbox WHERE run_id=${run.id}`);
     assert.equal(outbox.idempotency_key,
-      `email-thread:${event.id}:classification:ambiguous:v2:slack`);
+      `email-thread:${event.id}:classification:ambiguous:no_deterministic_signal:v3:slack`);
     const payload = JSON.parse(outbox.payload_json);
     assert.equal(payload.threadTs, '1786549495.693669');
     assert.match(payload.message, /classification corrected/i);
     assert.match(payload.message, /Previous classification: \*not_interested\*/);
     assert.match(payload.message, /Classification: \*ambiguous\*/);
     assert.match(payload.message, /false-negative suppression was removed/);
+  });
+});
+
+test('historical audit requeues a correct negative status whose quoted-footer reason is stale', async () => {
+  await withDb(async db => {
+    const [event] = await db.query(sql`SELECT * FROM email_threads WHERE provider_message_id='gmail-in-1'`);
+    const collapsed = "Thank you but we are in the process of retiring. Jo Ann. On May 22, 2026, Sarah wrote: Reply 'unsubscribe' to unsubscribe@example.com.";
+    await db.query(sql`UPDATE email_threads SET body_text='Thank you but we are in the process of retiring. Jo Ann.',
+      raw_body_text=${collapsed}, sentiment='not_interested', sentiment_notes='unsubscribe',
+      classification_source='email_conversation_classifier', processing_status='processed'
+      WHERE id=${event.id}`);
+
+    const changes = await auditClassifications(db);
+    assert.equal(changes.length, 1);
+    assert.equal(changes[0].classificationChanged, false);
+    assert.equal(changes[0].reasonChanged, true);
+    assert.equal(changes[0].requiresRequeue, true);
+    assert.equal(changes[0].reason, 'retiring');
+  });
+});
+
+test('re-observation corrects a stale reason in the original Slack thread', async () => {
+  await withDb(async db => {
+    const [event] = await db.query(sql`SELECT * FROM email_threads WHERE provider_message_id='gmail-in-1'`);
+    const collapsed = "Thank you but we are in the process of retiring. Jo Ann. On May 22, 2026, Sarah wrote: Reply 'unsubscribe' to unsubscribe@example.com.";
+    await db.query(sql`UPDATE email_threads SET body_text='Thank you but we are in the process of retiring. Jo Ann.',
+      raw_body_text=${collapsed}, sentiment='not_interested', sentiment_notes='unsubscribe',
+      classification_source='email_conversation_classifier', processing_status='pending'
+      WHERE id=${event.id}`);
+
+    const run = await startGraph(db, observeDefinition, {
+      idempotencyKey: 'email:gmail:gmail-in-1:observe:v3',
+      triggerType: 'system', triggerRef: `email-thread:${event.id}:reason-repair`,
+      input: { emailThreadId: event.id },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.classification.quality, 'not_interested');
+    assert.equal(run.output.classification.reason, 'retiring');
+    const [updated] = await db.query(sql`SELECT sentiment, sentiment_notes FROM email_threads WHERE id=${event.id}`);
+    assert.equal(updated.sentiment, 'not_interested');
+    assert.equal(updated.sentiment_notes, 'retiring');
+    const [contact] = await db.query(sql`SELECT * FROM contacts WHERE id=7`);
+    assert.equal(contact.status, 'dead');
+    assert.equal(contact.do_not_contact, 1);
+    const [outbox] = await db.query(sql`SELECT * FROM workflow_outbox WHERE run_id=${run.id}`);
+    assert.equal(outbox.idempotency_key,
+      `email-thread:${event.id}:classification:not_interested:retiring:v3:slack`);
+    const payload = JSON.parse(outbox.payload_json);
+    assert.equal(payload.threadTs, '1786549495.693669');
+    assert.match(payload.message, /Previous classification: \*not_interested\* \(unsubscribe\)/);
+    assert.match(payload.message, /Classification: \*not_interested\* \(retiring\)/);
   });
 });
 

@@ -138,9 +138,9 @@ Historical reconciliation is dry-run by default. Production repair uses
 thread. Use `--include-unthreaded` only for an explicit forensic backfill.
 The classification reconciliation is also dry-run by default. Its guarded
 `--apply --confirm-production` mode normalizes collapsed Gmail quote history,
-requeues only changed classifications through the durable graph, repairs only
-the exact false-negative suppression, and posts the correction in the original
-Slack thread.
+requeues changed classifications or stale reasons through the durable graph,
+repairs only the exact false-negative suppression, and posts the correction in
+the original Slack thread.
 
 ### Gmail delegation access
 

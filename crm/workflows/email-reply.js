@@ -124,7 +124,7 @@ function quotedBody(body, limit = 2800) {
 
 const observeDefinition = {
   name: 'email.message.observe',
-  version: 2,
+  version: 3,
   capability: 'email.read',
   mutates: false,
   notificationChannelName: 'prospector-paulina',
@@ -162,7 +162,8 @@ const observeDefinition = {
           projection = await applyClassification(db, event, classification);
         }
         const classificationChanged = Boolean(classification && event.sentiment
-          && event.sentiment !== classification.quality);
+          && (event.sentiment !== classification.quality
+            || String(event.sentiment_notes || '') !== String(classification.reason || '')));
         const evidence = await store.createEvidence(db, {
           runId: run.id,
           stepKey,
@@ -189,6 +190,7 @@ const observeDefinition = {
           classification,
           classificationChanged,
           previousClassification: event.sentiment || null,
+          previousClassificationReason: event.sentiment_notes || null,
           evidenceId: evidence.id,
           ...projection,
         };
@@ -230,7 +232,7 @@ const observeDefinition = {
             `Original: Draft #${event.outreach_send_id} sent ${event.original_sent_at || '(unknown)'} (${event.campaign_slug || 'unknown campaign'})`,
             '', quotedBody(event.body_text), '',
             projected.classificationChanged
-              ? `Previous classification: *${projected.previousClassification}*`
+              ? `Previous classification: *${projected.previousClassification}*${projected.previousClassificationReason ? ` (${projected.previousClassificationReason})` : ''}`
               : null,
             `Classification: *${quality}* (${projected.classification?.reason || 'no deterministic signal'})`,
             projected.suppressionRepaired ? 'A prior false-negative suppression was removed.' : null,
@@ -240,7 +242,7 @@ const observeDefinition = {
           ].filter(Boolean).join('\n');
         }
         const projectionKey = projected.classificationChanged
-          ? `email-thread:${event.id}:classification:${quality}:v${observeDefinition.version}:slack`
+          ? `email-thread:${event.id}:classification:${quality}:${projected.classification?.reason || 'unspecified'}:v${observeDefinition.version}:slack`
           : `email-thread:${event.id}:slack`;
         await store.enqueueOutbox(db, {
           runId: run.id,
