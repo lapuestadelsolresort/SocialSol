@@ -49,6 +49,27 @@ Edit `config.json` → `receipt_channels`. Add a new entry:
 The classifier references channels in `needs_channel_check` so Sol knows
 where to look for context on ambiguous transactions.
 
+Normal reimbursement posts are annotated as a single bundle with one child
+item per attached receipt. Annotation replies in the original Slack thread
+with the itemized total and a stable `LPDS-R-…` Kapital concept for the
+configured payment approver to copy exactly. New referenced reimbursements
+reconcile on that exact concept plus amount and currency; the legacy ±3-day
+rule is used only for older receipts that have no payment reference. A matched
+bundle is written to QBO with one expense line per receipt item so mixed
+categories remain split even though Kapital contains one reimbursement.
+
+Configure the Slack user(s) who submit Kapital reimbursements. The command is
+a dry run unless `--confirm-production` is supplied and backs up the ignored
+runtime config before changing it:
+
+```bash
+npm run configure:receipt-payments -- \
+  --payment-approver-id U0XXXXX
+
+# After inspecting the dry-run output, repeat with:
+# --confirm-production
+```
+
 Use the guarded configurator to update both ignored runtime files together.
 It is a dry run unless `--confirm-production` is supplied:
 

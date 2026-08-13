@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { sql } = require('@databases/sqlite');
-const { ROOT } = require('../../lib/runtime-paths');
+const { ROOT, DB_PATH } = require('../../lib/runtime-paths');
 const { nodeCommand, pythonCommand, resolveRepoFile } = require('../lib/workflow-command');
 const { makeDurableJob } = require('./durable-job');
 const { listPosts } = require('../lib/postiz');
@@ -440,6 +440,35 @@ const accountingClassify = makeDurableJob({
   summarize: ({ verification }) => ({ classification: verification.summary }),
 });
 
+async function projectReceiptQboWrites(db, runId, receiptWrites) {
+  if (!receiptWrites.length) return true;
+  await db.tx(async tx => {
+    for (const write of receiptWrites) {
+      await tx.query(sql`UPDATE accounting_receipts SET
+        status='posted', qbo_entity_type='Purchase', qbo_entity_id=${String(write.qbo_id)},
+        qbo_request_id=${write.request_id || null}, posted_at=datetime('now'),
+        workflow_run_id=${runId}, updated_at=datetime('now')
+        WHERE id=${String(write.receipt_id)} AND status IN ('matched','posted')`);
+      await tx.query(sql`UPDATE accounting_reconciliations SET
+        qbo_entity_type='Purchase', qbo_entity_id=${String(write.qbo_id)},
+        workflow_run_id=${runId}, updated_at=datetime('now')
+        WHERE receipt_id=${String(write.receipt_id)} AND status='matched'`);
+    }
+  });
+  for (const write of receiptWrites) {
+    const [receipt] = await db.query(sql`SELECT status, qbo_entity_type, qbo_entity_id
+      FROM accounting_receipts WHERE id=${String(write.receipt_id)}`);
+    const [reconciliation] = await db.query(sql`SELECT qbo_entity_type, qbo_entity_id
+      FROM accounting_reconciliations
+      WHERE receipt_id=${String(write.receipt_id)} AND status='matched'`);
+    if (receipt?.status !== 'posted' || receipt.qbo_entity_type !== 'Purchase'
+        || String(receipt.qbo_entity_id) !== String(write.qbo_id)
+        || reconciliation?.qbo_entity_type !== 'Purchase'
+        || String(reconciliation.qbo_entity_id) !== String(write.qbo_id)) return false;
+  }
+  return true;
+}
+
 const qboWrite = makeDurableJob({
   name: 'qbo.write',
   capability: 'qbo.write',
@@ -451,10 +480,10 @@ const qboWrite = makeDurableJob({
   requestSummary: input => ({ csv: path.basename(safeAccountingCsv(input)), classificationTier: 'auto_only' }),
   buildCommand: ({ input, shadowMode }) => pythonCommand(
     'accounting/qbo_push.py',
-    [safeAccountingCsv(input), ...(shadowMode ? [] : ['--live']), '--json'],
+    [safeAccountingCsv(input), '--receipt-db', DB_PATH, ...(shadowMode ? [] : ['--live']), '--json'],
     { timeoutMs: 30 * 60_000 },
   ),
-  async verify({ state }) {
+  async verify({ db, run, state }) {
     const invalid = parseRequiredJson(state.execute, 'QBO writer');
     if (invalid) return invalid;
     const summary = state.execute.parsed;
@@ -463,12 +492,22 @@ const qboWrite = makeDurableJob({
     if ((summary.errors || []).length || unverified.length) {
       return { verified: false, reason: 'one or more QBO writes failed provider readback' };
     }
+    const receiptWrites = (summary.details || []).filter(row =>
+      row.status === 'PUSHED' && row.receipt_id && row.qbo_id && row.record_type === 'expense');
+    if (!await projectReceiptQboWrites(db, run.id, receiptWrites)) {
+      return { verified: false, reason: 'receipt QBO projection failed readback', retryable: true };
+    }
     return {
       verified: true,
       source: 'quickbooks.entity_readback',
       providerStatus: written ? 'entities_readback_verified' : 'no_new_entities_verified',
       evidence: summary,
-      summary: { written, dedupSkipped: summary.dedup_skipped || 0, skipped: summary.skipped || 0 },
+      summary: {
+        written,
+        dedupSkipped: summary.dedup_skipped || 0,
+        skipped: summary.skipped || 0,
+        receiptsPosted: receiptWrites.length,
+      },
     };
   },
   summarize: ({ verification }) => ({ qbo: verification.summary }),
@@ -479,6 +518,7 @@ module.exports = {
   crmSync,
   ownerrezCrmSync,
   paulinaDaily,
+  projectReceiptQboWrites,
   qboWrite,
   reginaCampaign,
   reginaDaily,

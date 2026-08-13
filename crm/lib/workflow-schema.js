@@ -195,6 +195,10 @@ const SCHEMA_STATEMENTS = [
     qbo_entity_id TEXT,
     qbo_request_id TEXT,
     posted_at TEXT,
+    payment_reference TEXT,
+    reimbursement_recipient_user_id TEXT,
+    payment_instruction_hash TEXT,
+    payment_instruction_queued_at TEXT,
     extraction_json TEXT,
     workflow_run_id TEXT REFERENCES workflow_runs(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -550,6 +554,10 @@ const ACCOUNTING_RECEIPT_COLUMNS = [
   'qbo_entity_id TEXT',
   'qbo_request_id TEXT',
   'posted_at TEXT',
+  'payment_reference TEXT',
+  'reimbursement_recipient_user_id TEXT',
+  'payment_instruction_hash TEXT',
+  'payment_instruction_queued_at TEXT',
 ];
 
 function ensureColumnsBetterSqlite(db, table, specs) {
@@ -627,6 +635,8 @@ function ensureSchemaBetterSqlite(db) {
   ensureColumnsBetterSqlite(db, 'accounting_receipts', ACCOUNTING_RECEIPT_COLUMNS);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_qbo_entity
     ON accounting_receipts(qbo_entity_type, qbo_entity_id) WHERE qbo_entity_id IS NOT NULL`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_payment_reference
+    ON accounting_receipts(payment_reference) WHERE payment_reference IS NOT NULL`);
   const columns = new Set(db.prepare('PRAGMA table_info(meta_messages)').all().map(row => row.name));
   if (columns.size > 0) {
     for (const spec of META_MESSAGE_COLUMNS) {
@@ -677,6 +687,8 @@ async function ensureSchemaAsync(db, sql) {
   await ensureColumnsAsync(db, sql, 'accounting_receipts', ACCOUNTING_RECEIPT_COLUMNS);
   await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_qbo_entity
     ON accounting_receipts(qbo_entity_type, qbo_entity_id) WHERE qbo_entity_id IS NOT NULL`);
+  await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_payment_reference
+    ON accounting_receipts(payment_reference) WHERE payment_reference IS NOT NULL`);
   const columns = new Set((await db.query(sql`PRAGMA table_info(meta_messages)`)).map(row => row.name));
   if (columns.size > 0) {
     for (const spec of META_MESSAGE_COLUMNS) {

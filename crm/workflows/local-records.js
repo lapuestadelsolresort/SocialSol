@@ -4,6 +4,50 @@ const crypto = require('node:crypto');
 const { sql } = require('@databases/sqlite');
 const { callOne } = require('../lib/voice-service');
 const { loadPolicy } = require('../lib/channel-policy');
+const { loadAccountingConfig } = require('../lib/accounting-config');
+
+const PAYMENT_REFERENCE_RE = /\bLPDS-R-[A-F0-9]{16}\b/g;
+
+function receiptPaymentReference(receiptId) {
+  const digest = crypto.createHash('sha256').update(String(receiptId)).digest('hex').slice(0, 16).toUpperCase();
+  return `LPDS-R-${digest}`;
+}
+
+function paymentReferencesIn(...values) {
+  return [...new Set(values.flatMap(value => String(value || '').toUpperCase().match(PAYMENT_REFERENCE_RE) || []))];
+}
+
+function formatReceiptMoney(amount, currency) {
+  return `${currency} $${Number(amount).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function buildReceiptPaymentInstruction({ receipt, items, approverUserIds }) {
+  const currency = String(receipt.currency).toUpperCase();
+  const recipient = `<@${receipt.reimbursement_recipient_user_id}>`;
+  const approvers = approverUserIds.map(userId => `<@${userId}>`).join(' ');
+  const lines = items.length
+    ? items.map(item => {
+      const category = item.category_name || item.category_key || 'Unclassified';
+      const vendor = item.vendor ? ` · ${item.vendor}` : '';
+      return `${item.item_index}. ${formatReceiptMoney(item.amount, item.currency)} · ${category}${vendor}`;
+    })
+    : [`1. ${formatReceiptMoney(receipt.amount, currency)} · ${receipt.category_name || receipt.category_key || 'Unclassified'}`];
+  return [
+    '🧾 *Reimbursement ready for confirmation*',
+    `${recipient}, please confirm the receipt amounts and categories below:`,
+    ...lines,
+    `*Total: ${formatReceiptMoney(receipt.amount, currency)}*`,
+    '',
+    `${approvers} *Kapital payment instruction*`,
+    `• Reimburse: ${recipient}`,
+    `• Send one transfer for: *${formatReceiptMoney(receipt.amount, currency)}*`,
+    `• Concept/description — copy exactly: \`${receipt.payment_reference}\``,
+    'Keep that code unchanged. Reconciliation requires the exact code, amount, and currency; a missing or mismatched code will not auto-match.',
+  ].join('\n');
+}
 
 function validateReceipt(input) {
   if (!input || typeof input !== 'object') throw new Error('receipt input is required');
@@ -247,6 +291,10 @@ function validateReceiptAnnotation(input) {
   }
   if (categoryKey && !/^[a-z0-9_]{1,80}$/.test(categoryKey)) throw new Error('invalid categoryKey');
   if (categoryName.length > 160) throw new Error('categoryName is too long');
+  if (input.reimbursementRecipientUserId !== undefined
+      && !/^U[A-Z0-9]+$/.test(String(input.reimbursementRecipientUserId))) {
+    throw new Error('reimbursementRecipientUserId must be a Slack user id');
+  }
   normalizeReceiptItems(input);
 }
 
@@ -305,7 +353,7 @@ function normalizeReceiptItems(input) {
 
 const receiptAnnotate = {
   name: 'receipt.annotate',
-  version: 3,
+  version: 4,
   capability: 'receipts.write',
   mutates: true,
   validate: validateReceiptAnnotation,
@@ -314,6 +362,11 @@ const receiptAnnotate = {
     async run({ db, run, input, store, stepKey }) {
       const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${input.receiptId}`);
       if (!receipt) throw new Error('receipt not found');
+      if (['matched', 'posted'].includes(receipt.status)) {
+        const error = new Error('a reconciled receipt cannot be re-annotated');
+        error.code = 'receipt_already_reconciled';
+        throw error;
+      }
       const channel = loadPolicy().channels?.[run.channel_id];
       const canSeeAll = channel?.capabilities?.includes('receipts.read');
       if (!canSeeAll && receipt.slack_channel_id !== run.channel_id) {
@@ -330,8 +383,16 @@ const receiptAnnotate = {
         description: String(input.description || '').trim() || null,
         categoryKey: String(input.categoryKey || '').trim() || null,
         categoryName: String(input.categoryName || '').trim() || null,
+        reimbursementRecipientUserId: String(
+          input.reimbursementRecipientUserId || receipt.submitted_by || '',
+        ).trim() || null,
         items: normalizeReceiptItems(input),
       };
+      if (!request.reimbursementRecipientUserId
+          || !/^U[A-Z0-9]+$/.test(request.reimbursementRecipientUserId)) {
+        throw new Error('receipt submitter cannot be resolved as the reimbursement recipient');
+      }
+      const paymentReference = receipt.payment_reference || receiptPaymentReference(receipt.id);
       const attachedFileIds = new Set((() => {
         try { return JSON.parse(receipt.file_refs_json || '[]'); } catch { return []; }
       })().map(file => String(file?.id || '')).filter(Boolean));
@@ -349,6 +410,8 @@ const receiptAnnotate = {
         await tx.query(sql`UPDATE accounting_receipts SET vendor=${request.vendor},
           transaction_date=${request.transactionDate}, currency=${request.currency}, amount=${request.amount},
           description=${request.description}, category_key=${request.categoryKey}, category_name=${request.categoryName},
+          payment_reference=${paymentReference},
+          reimbursement_recipient_user_id=${request.reimbursementRecipientUserId},
           extraction_json=${JSON.stringify({
             source: 'channel_member', actorUserId: run.actor_user_id,
             itemCount: input.items === undefined ? null : request.items.length,
@@ -369,11 +432,14 @@ const receiptAnnotate = {
         }
       });
       const [readback] = await db.query(sql`SELECT id, vendor, transaction_date, currency, amount,
-        description, category_key, category_name, status
+        description, category_key, category_name, status, payment_reference,
+        reimbursement_recipient_user_id, slack_channel_id, slack_message_id, slack_thread_ts
         FROM accounting_receipts WHERE id=${input.receiptId}`);
       if (!readback || Number(readback.amount) !== request.amount || readback.currency !== request.currency
         || readback.description !== request.description || readback.category_key !== request.categoryKey
-        || readback.category_name !== request.categoryName) {
+        || readback.category_name !== request.categoryName
+        || readback.payment_reference !== paymentReference
+        || readback.reimbursement_recipient_user_id !== request.reimbursementRecipientUserId) {
         throw new Error('receipt annotation readback mismatch');
       }
       const itemReadback = await db.query(sql`SELECT item_index, file_ref_id, vendor, transaction_date,
@@ -397,15 +463,62 @@ const receiptAnnotate = {
       return {
         receiptId: input.receiptId, effectId: effect.id, evidenceId: evidence.id,
         receiptStatus: readback.status, itemCount: itemReadback.length,
+        paymentReference: readback.payment_reference,
+      };
+    },
+  }, {
+    key: 'queue_payment_instruction', maxAttempts: 2,
+    async run({ db, run, state, store }) {
+      const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts
+        WHERE id=${state.write_annotation.receiptId}`);
+      if (!receipt) throw new Error('annotated receipt was not found');
+      const items = await db.query(sql`SELECT item_index, vendor, currency, amount,
+        category_key, category_name FROM accounting_receipt_items
+        WHERE receipt_id=${receipt.id} ORDER BY item_index`);
+      const accounting = loadAccountingConfig();
+      const approverUserIds = [...new Set(accounting.receipt_payment?.approver_user_ids || [])];
+      if (!approverUserIds.length) {
+        const error = new Error('receipt payment approvers are not configured');
+        error.code = 'receipt_payment_approver_unavailable';
+        throw error;
+      }
+      const message = buildReceiptPaymentInstruction({ receipt, items, approverUserIds });
+      const instructionHash = store.sha256({
+        receiptId: receipt.id,
+        paymentReference: receipt.payment_reference,
+        recipientUserId: receipt.reimbursement_recipient_user_id,
+        approverUserIds,
+        message,
+      });
+      const outbox = await store.enqueueOutbox(db, {
+        runId: run.id,
+        topic: 'slack.notification',
+        idempotencyKey: `receipt:${receipt.id}:payment-instruction:${instructionHash}`,
+        payload: {
+          channelId: receipt.slack_channel_id,
+          threadTs: receipt.slack_thread_ts || receipt.slack_message_id,
+          message,
+        },
+      });
+      await db.query(sql`UPDATE accounting_receipts SET
+        payment_instruction_hash=${instructionHash},
+        payment_instruction_queued_at=COALESCE(payment_instruction_queued_at, datetime('now')),
+        updated_at=datetime('now') WHERE id=${receipt.id}`);
+      return {
+        outboxId: outbox.id,
+        instructionStatus: outbox.status,
+        paymentReference: receipt.payment_reference,
       };
     },
   }],
-  output({ state }) { return { ...state.write_annotation, status: 'verified_by_readback' }; },
+  output({ state }) {
+    return { ...state.write_annotation, ...state.queue_payment_instruction, status: 'verified_by_readback' };
+  },
 };
 
 const receiptReconcile = {
   name: 'receipt.reconcile',
-  version: 1,
+  version: 2,
   capability: 'accounting.write',
   mutates: true,
   autonomous: true,
@@ -417,14 +530,41 @@ const receiptReconcile = {
         WHERE r.status='extracted' AND r.amount IS NOT NULL AND r.transaction_date IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM accounting_reconciliations x
             WHERE x.receipt_id=r.id AND x.status='matched')`);
-      const summary = { examined: receipts.length, matched: 0, ambiguous: 0, unmatched: 0 };
+      const summary = {
+        examined: receipts.length,
+        matched: 0,
+        ambiguous: 0,
+        unmatched: 0,
+        referenceMatched: 0,
+        legacyMatched: 0,
+        outcomes: [],
+      };
       for (const receipt of receipts) {
-        const candidates = await db.query(sql`SELECT id, source_key, transaction_date, currency, amount,
-          category_key, classification_tier FROM accounting_bank_transactions
-          WHERE currency=${receipt.currency}
-            AND ABS(amount-${Number(receipt.amount)}) <= ${receipt.currency === 'MXN' ? 1 : 0.01}
-            AND ABS(julianday(transaction_date)-julianday(${receipt.transaction_date})) <= 3
-          ORDER BY transaction_date, id`);
+        const tolerance = receipt.currency === 'MXN' ? 1 : 0.01;
+        let candidates;
+        let matchRule;
+        let referenceCandidates = [];
+        if (receipt.payment_reference) {
+          const possibleReferenceCandidates = await db.query(sql`SELECT id, source_key, transaction_date,
+            description, reference, currency, amount, category_key, classification_tier
+            FROM accounting_bank_transactions
+            WHERE instr(upper(COALESCE(description,'') || ' ' || COALESCE(reference,'')),
+              upper(${receipt.payment_reference})) > 0
+            ORDER BY transaction_date, id`);
+          referenceCandidates = possibleReferenceCandidates.filter(candidate =>
+            paymentReferencesIn(candidate.description, candidate.reference).includes(receipt.payment_reference));
+          candidates = referenceCandidates.filter(candidate => candidate.currency === receipt.currency
+            && Math.abs(Number(candidate.amount) - Number(receipt.amount)) <= tolerance);
+          matchRule = 'exact_payment_reference_amount_currency';
+        } else {
+          candidates = await db.query(sql`SELECT id, source_key, transaction_date, currency, amount,
+            category_key, classification_tier FROM accounting_bank_transactions
+            WHERE currency=${receipt.currency}
+              AND ABS(amount-${Number(receipt.amount)}) <= ${tolerance}
+              AND ABS(julianday(transaction_date)-julianday(${receipt.transaction_date})) <= 3
+            ORDER BY transaction_date, id`);
+          matchRule = 'unique_amount_currency_date_window';
+        }
         if (candidates.length === 1) {
           const candidate = candidates[0];
           const reconciliationId = crypto.randomUUID();
@@ -432,17 +572,43 @@ const receiptReconcile = {
               id, receipt_id, bank_reference, status, confidence, evidence_json, workflow_run_id
             ) VALUES (
               ${reconciliationId}, ${receipt.id}, ${candidate.source_key}, 'matched', 1,
-              ${JSON.stringify({ rule: 'unique_amount_currency_date_window', bankTransactionId: candidate.id })}, ${run.id}
+              ${JSON.stringify({
+                rule: matchRule,
+                paymentReference: receipt.payment_reference || null,
+                bankTransactionId: candidate.id,
+              })}, ${run.id}
             ) ON CONFLICT(receipt_id, bank_provider, bank_reference) DO UPDATE SET
               status='matched', confidence=1, evidence_json=excluded.evidence_json,
               workflow_run_id=excluded.workflow_run_id, updated_at=datetime('now')`);
-          await db.query(sql`UPDATE accounting_receipts SET status='matched', updated_at=datetime('now') WHERE id=${receipt.id}`);
+          await db.query(sql`UPDATE accounting_receipts SET status='matched', review_reason=NULL,
+            updated_at=datetime('now') WHERE id=${receipt.id}`);
           summary.matched += 1;
+          if (receipt.payment_reference) summary.referenceMatched += 1;
+          else summary.legacyMatched += 1;
+          summary.outcomes.push({ receiptId: receipt.id, status: 'matched', rule: matchRule, bankTransactionId: candidate.id });
         } else if (candidates.length > 1) {
-          await db.query(sql`UPDATE accounting_receipts SET status='needs_review', updated_at=datetime('now') WHERE id=${receipt.id}`);
+          const reason = receipt.payment_reference
+            ? 'payment_reference_matches_multiple_bank_transactions'
+            : 'amount_currency_date_matches_multiple_bank_transactions';
+          await db.query(sql`UPDATE accounting_receipts SET status='needs_review', review_reason=${reason},
+            updated_at=datetime('now') WHERE id=${receipt.id}`);
           summary.ambiguous += 1;
+          summary.outcomes.push({ receiptId: receipt.id, status: 'needs_review', rule: matchRule, reason, candidateCount: candidates.length });
+        } else if (receipt.payment_reference && referenceCandidates.length > 0) {
+          const reason = 'payment_reference_amount_or_currency_mismatch';
+          await db.query(sql`UPDATE accounting_receipts SET status='needs_review', review_reason=${reason},
+            updated_at=datetime('now') WHERE id=${receipt.id}`);
+          summary.ambiguous += 1;
+          summary.outcomes.push({
+            receiptId: receipt.id,
+            status: 'needs_review',
+            rule: matchRule,
+            reason,
+            candidateCount: referenceCandidates.length,
+          });
         } else {
           summary.unmatched += 1;
+          summary.outcomes.push({ receiptId: receipt.id, status: 'unmatched', rule: matchRule });
         }
       }
       const evidence = await store.createEvidence(db, {
@@ -455,9 +621,12 @@ const receiptReconcile = {
 };
 
 module.exports = {
+  buildReceiptPaymentInstruction,
   guestReplyDraft,
+  paymentReferencesIn,
   receiptAnnotate,
   receiptIngest,
+  receiptPaymentReference,
   receiptReconcile,
   socialContentUpsert,
   validateGuestDraft,

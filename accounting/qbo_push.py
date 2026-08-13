@@ -18,6 +18,21 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
+def allocate_receipt_item_usd(total_usd: float, items: List[Dict]) -> List[float]:
+    """Allocate rounded USD cents proportionally while preserving the exact total."""
+    total_cents = int(round(float(total_usd) * 100))
+    source_total = sum(float(item.get('amount') or 0) for item in items)
+    if total_cents <= 0 or source_total <= 0 or not items:
+        raise ValueError('receipt split requires positive parent and item totals')
+    raw = [total_cents * float(item.get('amount') or 0) / source_total for item in items]
+    cents = [int(value) for value in raw]
+    remainder = total_cents - sum(cents)
+    order = sorted(range(len(items)), key=lambda index: (raw[index] - cents[index], -index), reverse=True)
+    for index in order[:remainder]:
+        cents[index] += 1
+    return [value / 100 for value in cents]
+
+
 class QBOClient:
     """QuickBooks Online API client."""
 
@@ -167,12 +182,13 @@ class QBOClient:
                 - date, amount_usd, category (QBO account key), vendor_key,
                 - description, note, reference
         """
-        account_id = self._resolve_account_id(txn.get('category'))
+        receipt_items = txn.get('receipt_items') or []
+        account_id = self._resolve_account_id(txn.get('category')) if not receipt_items else None
         vendor_id = self._resolve_vendor_id(txn.get('vendor_key'))
         amount_usd = txn.get('amount_usd', 0)
         txn_date = txn.get('date')
 
-        if not account_id:
+        if not receipt_items and not account_id:
             raise ValueError(f"No QBO account for category: {txn.get('category')}")
         if not amount_usd or amount_usd <= 0:
             raise ValueError(f"Invalid USD amount: {amount_usd}")
@@ -186,10 +202,44 @@ class QBOClient:
             memo_parts.append(f"Kapital: {desc[:150]}")
         if txn.get('reference'):
             memo_parts.append(f"Ref: {txn['reference'][:80]}")
+        if txn.get('payment_reference'):
+            memo_parts.append(f"Receipt ref: {txn['payment_reference']}")
         if txn.get('fx_rate'):
             memo_parts.append(f"FX: {txn['fx_rate']} MXN/USD, orig ${txn.get('amount', 0):,.2f} MXN")
 
         memo = ' | '.join(memo_parts)[:4000]  # QBO memo limit
+
+        if receipt_items:
+            allocations = allocate_receipt_item_usd(amount_usd, receipt_items)
+            lines = []
+            for item, line_amount in zip(receipt_items, allocations):
+                line_account_id = self._resolve_account_id(item.get('category_key'))
+                if not line_account_id:
+                    raise ValueError(f"No QBO account for receipt category: {item.get('category_key')}")
+                line_description = ' · '.join(part for part in [
+                    f"Receipt {item.get('item_index')}",
+                    item.get('vendor'),
+                    item.get('description'),
+                    f"MXN ${float(item.get('amount') or 0):,.2f}",
+                    txn.get('payment_reference'),
+                ] if part)
+                lines.append({
+                    "Amount": line_amount,
+                    "DetailType": "AccountBasedExpenseLineDetail",
+                    "AccountBasedExpenseLineDetail": {
+                        "AccountRef": {"value": str(line_account_id)},
+                    },
+                    "Description": line_description[:4000],
+                })
+        else:
+            lines = [{
+                "Amount": round(amount_usd, 2),
+                "DetailType": "AccountBasedExpenseLineDetail",
+                "AccountBasedExpenseLineDetail": {
+                    "AccountRef": {"value": str(account_id)},
+                },
+                "Description": memo[:4000],
+            }]
 
         purchase = {
             "PaymentType": "Cash",
@@ -198,14 +248,7 @@ class QBOClient:
             "CurrencyRef": {"value": "USD"},
             "TotalAmt": round(amount_usd, 2),
             "PrivateNote": memo,
-            "Line": [{
-                "Amount": round(amount_usd, 2),
-                "DetailType": "AccountBasedExpenseLineDetail",
-                "AccountBasedExpenseLineDetail": {
-                    "AccountRef": {"value": str(account_id)},
-                },
-                "Description": memo[:4000],
-            }],
+            "Line": lines,
         }
 
         # Add vendor if known
@@ -405,6 +448,34 @@ def qbo_request_id(txn: Dict, record_type: str, suffix: str = '') -> str:
     return f"ss-{record_type[:3]}-{digest}"[:50]
 
 
+def verify_receipt_purchase_readback(txn: Dict, purchase: Dict) -> None:
+    """Verify a receipt bundle's total, reference, accounts, and split amounts."""
+    items = txn.get('receipt_items') or []
+    if not items:
+        return
+    expected_amounts = allocate_receipt_item_usd(txn.get('amount_usd'), items)
+    expected_accounts = []
+    config_path = str(Path(__file__).parent / 'config.json')
+    with open(config_path) as config_file:
+        accounts = json.load(config_file).get('qbo_accounts', {}).get('expenses', {})
+    for item in items:
+        account_id = accounts.get(item.get('category_key'), {}).get('id')
+        if not account_id:
+            raise RuntimeError(f"QBO receipt readback has no configured account for {item.get('category_key')}")
+        expected_accounts.append(str(account_id))
+    actual_lines = [line for line in purchase.get('Line', [])
+                    if line.get('DetailType') == 'AccountBasedExpenseLineDetail']
+    actual_amounts = [round(float(line.get('Amount') or 0), 2) for line in actual_lines]
+    actual_accounts = [str(line.get('AccountBasedExpenseLineDetail', {}).get('AccountRef', {}).get('value') or '')
+                       for line in actual_lines]
+    if round(float(purchase.get('TotalAmt') or 0), 2) != round(float(txn.get('amount_usd') or 0), 2):
+        raise RuntimeError('QBO receipt purchase total failed readback')
+    if actual_amounts != expected_amounts or actual_accounts != expected_accounts:
+        raise RuntimeError('QBO receipt purchase split lines failed readback')
+    if str(txn.get('payment_reference')) not in str(purchase.get('PrivateNote') or ''):
+        raise RuntimeError('QBO receipt purchase reference failed readback')
+
+
 def push_classified_to_qbo(
     results: Dict[str, List[Dict]],
     push_auto: bool = True,
@@ -509,6 +580,9 @@ def push_classified_to_qbo(
                     'record_type': record_type,
                     'bucket': bucket_name,
                     'status': 'DRY_RUN',
+                    'receipt_id': txn.get('receipt_id'),
+                    'payment_reference': txn.get('payment_reference'),
+                    'receipt_item_count': len(txn.get('receipt_items') or []),
                 })
                 continue
 
@@ -552,6 +626,8 @@ def push_classified_to_qbo(
                 readback = client.read_entity(entity_type, qbo_id)
                 if str(readback.get('Id')) != str(qbo_id):
                     raise RuntimeError(f"QBO {record_type} readback mismatch for {qbo_id}")
+                if record_type == 'expense':
+                    verify_receipt_purchase_readback(txn, readback)
 
                 summary['details'].append({
                     'date': str(txn.get('date')),
@@ -564,6 +640,9 @@ def push_classified_to_qbo(
                     'record_type': record_type,
                     'bucket': bucket_name,
                     'status': 'PUSHED',
+                    'receipt_id': txn.get('receipt_id'),
+                    'payment_reference': txn.get('payment_reference'),
+                    'receipt_item_count': len(txn.get('receipt_items') or []),
                 })
             except Exception as e:
                 summary['errors'].append(f"{txn.get('date')} ${txn.get('amount_usd')} ({record_type}): {e}")
@@ -577,14 +656,21 @@ if __name__ == '__main__':
     from kapital_parser import parse_kapital_csv
     from classifier import KapitalClassifier
     from fx_rates import get_usd_rate, convert_mxn_to_usd
+    from receipt_ledger import apply_receipt_ledger
 
     if len(sys.argv) < 2:
-        print("Usage: python qbo_push.py <csv_file> [--live] [--json]")
+        print("Usage: python qbo_push.py <csv_file> [--receipt-db crm.db] [--live] [--json]")
         sys.exit(1)
 
     csv_path = sys.argv[1]
     is_live = '--live' in sys.argv
     output_json = '--json' in sys.argv
+    receipt_db = None
+    if '--receipt-db' in sys.argv:
+        receipt_db_index = sys.argv.index('--receipt-db')
+        if receipt_db_index + 1 >= len(sys.argv):
+            raise ValueError('--receipt-db requires a path')
+        receipt_db = sys.argv[receipt_db_index + 1]
 
     meta, txns = parse_kapital_csv(csv_path)
     classifier = KapitalClassifier()
@@ -603,6 +689,9 @@ if __name__ == '__main__':
                             fee['amount_usd'] = convert_mxn_to_usd(fee['amount'], txn['date'])
                 except Exception:
                     txn['amount_usd'] = None
+
+    if receipt_db:
+        results = apply_receipt_ledger(results, receipt_db)
 
     dry_run = not is_live
     summary = push_classified_to_qbo(results, push_auto=True, push_guess=False, dry_run=dry_run)
