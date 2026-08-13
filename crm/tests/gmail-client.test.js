@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { _internal, SEND_SCOPES } = require('../lib/gmail-client');
+const { _internal, searchEmailActivity, SEND_SCOPES } = require('../lib/gmail-client');
 
 test('Gmail reply MIME encoding preserves threading and blocks header injection', () => {
   const encoded = _internal.encodeRawMessage({
@@ -65,4 +65,45 @@ test('Gmail mailbox listing can include Spam without including Trash', async () 
   assert.deepEqual(ids, ['m1']);
   assert.equal(calls[0].includeSpamTrash, true);
   assert.match(calls[0].q, /-in:trash/);
+});
+
+test('Gmail activity reads exact inbound and outbound windows without mutating mail', async () => {
+  const lists = [];
+  const messages = new Map([
+    ['in-1', { id: 'in-1', threadId: 'thread-in', internalDate: String(Date.parse('2026-08-13T14:00:00Z')),
+      labelIds: ['INBOX', 'UNREAD'], payload: { headers: [
+        { name: 'From', value: 'Guest <guest@example.com>' },
+        { name: 'To', value: 'Sarah <sarah@example.com>' },
+        { name: 'Subject', value: 'Wedding dates' },
+      ], mimeType: 'text/plain', body: { data: Buffer.from('Are your May dates open?').toString('base64url') } } }],
+    ['out-1', { id: 'out-1', threadId: 'thread-out', internalDate: String(Date.parse('2026-08-13T15:00:00Z')),
+      labelIds: ['SENT'], payload: { headers: [
+        { name: 'From', value: 'Sarah <sarah@example.com>' },
+        { name: 'To', value: 'Guest <guest@example.com>' },
+        { name: 'Subject', value: 'Re: Wedding dates' },
+      ], mimeType: 'text/plain', body: { data: Buffer.from('Yes, we have availability.').toString('base64url') } } }],
+    ['edge', { id: 'edge', threadId: 'thread-edge', internalDate: String(Date.parse('2026-08-14T07:00:00Z')),
+      labelIds: ['INBOX'], payload: { headers: [], mimeType: 'text/plain', body: { data: '' } } }],
+  ]);
+  const gmail = { users: { messages: {
+    async list(input) {
+      lists.push(input);
+      return { data: { messages: input.q.startsWith('in:sent') ? [{ id: 'out-1' }] : [{ id: 'in-1' }, { id: 'edge' }] } };
+    },
+    async get({ id }) { return { data: messages.get(id) }; },
+  } } };
+
+  const result = await searchEmailActivity({
+    start: '2026-08-13T07:00:00.000Z', end: '2026-08-14T07:00:00.000Z',
+    direction: 'all', limit: 25,
+  }, { gmail });
+  assert.equal(result.total, 2);
+  assert.equal(result.inbound, 1);
+  assert.equal(result.outbound, 1);
+  assert.equal(result.unread, 1);
+  assert.deepEqual(result.messages.map(message => message.id), ['out-1', 'in-1']);
+  assert.equal(lists.length, 2);
+  assert.equal(lists.find(call => call.q.startsWith('-in:trash')).includeSpamTrash, true);
+  assert.match(lists.find(call => call.q.startsWith('-in:trash')).q, /-in:drafts/);
+  assert.match(lists.find(call => call.q.startsWith('in:sent')).q, /-in:drafts/);
 });

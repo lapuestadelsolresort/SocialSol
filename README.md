@@ -113,7 +113,10 @@ business at sale.
   confirmation, execute-once effect, provider-readback, CRM projection, and
   Slack documentation contract. Sarah's direct Gmail or OwnerRez replies are
   captured back into the same thread. The retired 15-minute Gmail scanner no
-  longer posts one-off leads to `#social-sol`.
+  longer posts one-off leads to `#social-sol`. Read-only questions about recent,
+  received, unread, or sent Gmail activity use a live date-bounded Gmail read in
+  both `#sarah-email` and `#business-intel`, with durable-ledger coverage reported
+  separately from mailbox truth.
 - Paid-Meta decisions begin with `marketing.snapshot.read`, which records live
   Meta delivery, exact CRM conversion facts, tracking health, and any fixed
   bounded actions as expiring evidence. Autonomous evidence requires at least

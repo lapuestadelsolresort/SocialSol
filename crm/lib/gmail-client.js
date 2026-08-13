@@ -146,8 +146,8 @@ async function listMessageIds(gmail, q, maxResults = 500, { includeSpamTrash = f
   return ids.slice(0, limit);
 }
 
-async function getMessageById(id, { scopes = SCOPES } = {}) {
-  const gmail = getGmailClient(scopes);
+async function getMessageById(id, { scopes = SCOPES, gmail: suppliedGmail = null } = {}) {
+  const gmail = suppliedGmail || getGmailClient(scopes);
   const full = await gmail.users.messages.get({ userId: 'me', id, format: 'full' });
   const payload = full.data.payload || {};
   return {
@@ -266,6 +266,78 @@ async function searchMailboxSinceDays(days, { maxResults = 5000 } = {}) {
   return { inbox, sent };
 }
 
+/**
+ * Read Sarah's mailbox activity inside an exact UTC instant window. Callers
+ * are responsible for converting their business-local dates to UTC instants.
+ * This is read-only and deliberately excludes Trash, Chats, and Drafts.
+ */
+async function searchEmailActivity({ start, end, direction = 'inbound', limit = 25 }, options = {}) {
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    throw new Error('email activity requires a valid start/end instant window');
+  }
+  if (!['inbound', 'outbound', 'all'].includes(direction)) {
+    throw new Error('email activity direction must be inbound, outbound, or all');
+  }
+
+  const gmail = options.gmail || getGmailClient();
+  const displayLimit = Math.max(1, Math.min(100, Number(limit) || 25));
+  const scanLimit = Math.max(100, displayLimit);
+  const after = Math.max(0, Math.floor(startMs / 1000) - 1);
+  const before = Math.ceil(endMs / 1000);
+  const searches = [];
+
+  if (direction === 'inbound' || direction === 'all') {
+    searches.push({
+      direction: 'inbound',
+      query: `-in:trash -in:chats -in:sent -in:drafts after:${after} before:${before}`,
+      includeSpamTrash: true,
+    });
+  }
+  if (direction === 'outbound' || direction === 'all') {
+    searches.push({
+      direction: 'outbound',
+      query: `in:sent -in:drafts after:${after} before:${before}`,
+      includeSpamTrash: false,
+    });
+  }
+
+  const batches = await Promise.all(searches.map(async search => {
+    const ids = await listMessageIds(gmail, search.query, scanLimit, {
+      includeSpamTrash: search.includeSpamTrash,
+    });
+    const messages = await loadMessages(ids, { gmail });
+    return {
+      direction: search.direction,
+      truncated: ids.length >= scanLimit,
+      messages: messages.filter(message => {
+        const timestamp = Date.parse(message.internalDate || '');
+        return Number.isFinite(timestamp) && timestamp >= startMs && timestamp < endMs;
+      }),
+    };
+  }));
+
+  const messages = batches.flatMap(batch => batch.messages.map(message => ({
+    ...message,
+    direction: batch.direction,
+  }))).sort((left, right) => (
+    String(right.internalDate || '').localeCompare(String(left.internalDate || ''))
+    || String(right.id || '').localeCompare(String(left.id || ''))
+  ));
+
+  return {
+    messages: messages.slice(0, displayLimit),
+    total: messages.length,
+    inbound: messages.filter(message => message.direction === 'inbound').length,
+    outbound: messages.filter(message => message.direction === 'outbound').length,
+    unread: messages.filter(message => Array.isArray(message.labelIds) && message.labelIds.includes('UNREAD')).length,
+    spam: messages.filter(message => Array.isArray(message.labelIds) && message.labelIds.includes('SPAM')).length,
+    truncated: batches.some(batch => batch.truncated) || messages.length > displayLimit,
+    displayLimit,
+  };
+}
+
 function cleanHeader(value) {
   return String(value || '').replace(/[\r\n]+/g, ' ').trim();
 }
@@ -346,6 +418,7 @@ async function verifySendScope() {
 }
 
 module.exports = {
+  searchEmailActivity,
   searchSentSince,
   searchSentSinceMinutes,
   searchMailboxSinceDays,
@@ -361,5 +434,5 @@ module.exports = {
   SCOPES,
   SEND_SCOPES,
   // exported for tests
-  _internal: { cleanHeader, decodeBody, encodeMimeHeader, encodeRawMessage, extractTextBody, header, listMessageIds, parseAddress },
+  _internal: { cleanHeader, decodeBody, encodeMimeHeader, encodeRawMessage, extractTextBody, header, listMessageIds, loadMessages, parseAddress },
 };

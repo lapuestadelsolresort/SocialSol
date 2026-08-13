@@ -3,6 +3,7 @@
 const { sql } = require('@databases/sqlite');
 const { nodeCommand } = require('../lib/workflow-command');
 const { readBankAccounts, readReport, REPORTS } = require('../lib/quickbooks-api');
+const { searchEmailActivity } = require('../lib/gmail-client');
 const {
   isBlock,
   reservationDisplayName,
@@ -109,6 +110,125 @@ function validateLimit(input) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
   }
 }
+
+const BUSINESS_TIME_ZONE = 'America/Los_Angeles';
+
+function addCalendarDays(value, days) {
+  const [year, month, day] = String(value).split('-').map(Number);
+  const result = new Date(Date.UTC(year, month - 1, day + days));
+  return result.toISOString().slice(0, 10);
+}
+
+// Convert a local calendar midnight to UTC without assuming PST/PDT. The
+// second pass handles dates on either side of a daylight-saving transition.
+function zonedMidnightUtc(value, timeZone = BUSINESS_TIME_ZONE) {
+  const [year, month, day] = String(value).split('-').map(Number);
+  const target = Date.UTC(year, month - 1, day);
+  let guess = target;
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(guess))
+      .filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]));
+    const represented = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    guess += target - represented;
+  }
+  return new Date(guess).toISOString();
+}
+
+function validateEmailActivityInput(input) {
+  validateLimit(input);
+  for (const key of ['start', 'end']) {
+    if (input[key] !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(input[key]))) {
+      throw new Error(`${key} must be YYYY-MM-DD`);
+    }
+  }
+  if (input.direction !== undefined && !['inbound', 'outbound', 'all'].includes(String(input.direction))) {
+    throw new Error('direction must be inbound, outbound, or all');
+  }
+  const start = String(input.start || new Date().toLocaleDateString('en-CA', { timeZone: BUSINESS_TIME_ZONE }));
+  const end = String(input.end || start);
+  if (end < start) throw new Error('end must be on or after start');
+  const days = (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000;
+  if (!Number.isFinite(days) || days > 31) throw new Error('email activity window may not exceed 31 days');
+}
+
+function bodyPreview(value, maxLength = 1200) {
+  const normalized = String(value || '').replace(/\r\n/g, '\n').trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+const emailActivityRead = evidenceReadDefinition({
+  name: 'email.activity.read',
+  capability: 'email.read',
+  validate: validateEmailActivityInput,
+  async collect({ db, input, services }) {
+    const localStart = String(input.start || new Date().toLocaleDateString('en-CA', { timeZone: BUSINESS_TIME_ZONE }));
+    const localEnd = String(input.end || localStart);
+    const start = zonedMidnightUtc(localStart);
+    const end = zonedMidnightUtc(addCalendarDays(localEnd, 1));
+    const direction = String(input.direction || 'inbound');
+    const limit = Number(input.limit || 25);
+    const reader = services.readEmailActivity || searchEmailActivity;
+    const live = await reader({ start, end, direction, limit });
+    const ledgerRows = await queryIfTable(db, 'email_threads', sql`SELECT
+      provider_message_id, direction, received_at, processing_status,
+      slack_channel_id, slack_thread_ts, slack_message_ts, workflow_run_id
+      FROM email_threads
+      WHERE provider='gmail' AND received_at>=${start} AND received_at<${end}`, []);
+    const ledgerByMessage = new Map(ledgerRows
+      .filter(row => row.provider_message_id)
+      .map(row => [String(row.provider_message_id), row]));
+    const messages = (live.messages || []).map(message => {
+      const ledger = ledgerByMessage.get(String(message.id || '')) || null;
+      return {
+        providerMessageId: message.id || null,
+        providerThreadId: message.threadId || null,
+        direction: message.direction || direction,
+        receivedAt: message.internalDate || null,
+        senderName: message.from?.name || '',
+        fromAddress: message.from?.address || '',
+        toAddress: message.to || '',
+        subject: message.subject || '(no subject)',
+        unread: Array.isArray(message.labelIds) && message.labelIds.includes('UNREAD'),
+        spam: Array.isArray(message.labelIds) && message.labelIds.includes('SPAM'),
+        bodyPreview: bodyPreview(message.text),
+        ledger: ledger ? {
+          captured: true,
+          processingStatus: ledger.processing_status,
+          slackProjected: Boolean(ledger.slack_thread_ts || ledger.slack_message_ts),
+          workflowRunId: ledger.workflow_run_id || null,
+        } : { captured: false, processingStatus: null, slackProjected: false, workflowRunId: null },
+      };
+    });
+    const ledgerCaptured = messages.filter(message => message.ledger.captured).length;
+    return {
+      source: 'gmail.live_mailbox_api+sqlite.email_threads',
+      sourceRef: `${localStart}:${localEnd}:${direction}`,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      payload: {
+        authority: 'Sarah Gmail live mailbox',
+        window: { start: localStart, end: localEnd, timeZone: BUSINESS_TIME_ZONE },
+        direction,
+        totalMessages: Number(live.total ?? messages.length),
+        displayedMessages: messages.length,
+        inboundMessages: Number(live.inbound ?? messages.filter(message => message.direction === 'inbound').length),
+        outboundMessages: Number(live.outbound ?? messages.filter(message => message.direction === 'outbound').length),
+        unreadMessages: Number(live.unread ?? messages.filter(message => message.unread).length),
+        spamMessages: Number(live.spam ?? messages.filter(message => message.spam).length),
+        ledgerCapturedMessages: ledgerCaptured,
+        ledgerMissingMessages: messages.length - ledgerCaptured,
+        ledgerCoverageScope: 'displayed_messages',
+        truncated: Boolean(live.truncated),
+        messages,
+      },
+    };
+  },
+});
 
 const whatsappStatusRead = evidenceReadDefinition({
   name: 'whatsapp.status.read',
@@ -360,6 +480,7 @@ const paulinaPerformanceRead = evidenceReadDefinition({
 
 module.exports = {
   businessSnapshot,
+  emailActivityRead,
   evidenceReadDefinition,
   ownerrezOccupancyRead,
   qboBankBalancesRead,
@@ -371,4 +492,5 @@ module.exports = {
   socialContentRead,
   squarespaceSummaryRead,
   whatsappStatusRead,
+  _internal: { addCalendarDays, bodyPreview, validateEmailActivityInput, zonedMidnightUtc },
 };

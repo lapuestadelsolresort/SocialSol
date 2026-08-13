@@ -46,6 +46,34 @@ test('parses only explicit WhatsApp mutations', () => {
   assert.deepEqual(parseWhatsAppCommand('!wa Welcome', { hasThread: false }), { error: 'dm_id_required' });
 });
 
+test('workflow tool exposes live email activity as a model-callable read', () => {
+  const tool = createWorkflowTool({
+    config: pluginConfig({}),
+    ctx: { deliveryContext: { to: 'channel:CEMAIL' }, requesterSenderId: 'U-JASON' },
+  });
+  assert.ok(tool.parameters.properties.workflow.enum.includes('email.activity.read'));
+});
+
+test('formats live Gmail activity with unread and ledger coverage facts', () => {
+  const reply = formatWorkflowReply({ run: {
+    id: 'email-read-run', workflow_name: 'email.activity.read', status: 'completed',
+    output: {
+      window: { start: '2026-08-13', end: '2026-08-13', timeZone: 'America/Los_Angeles' },
+      direction: 'inbound', totalMessages: 2, unreadMessages: 2, spamMessages: 0,
+      ledgerCapturedMessages: 1, ledgerMissingMessages: 1,
+      messages: [{ receivedAt: '2026-08-13T16:32:28.000Z', direction: 'inbound',
+        senderName: 'Guest', fromAddress: 'guest@example.com', subject: 'Wedding dates',
+        unread: true, spam: false, bodyPreview: 'Are your May dates open?' }],
+      _evidence: { id: 'evidence-1' },
+    },
+  } });
+  assert.match(reply, /Sarah Gmail live activity/);
+  assert.match(reply, /2 received messages/);
+  assert.match(reply, /Wedding dates \[unread\]/);
+  assert.match(reply, /1 captured · 1 missing/);
+  assert.match(reply, /Evidence: evidence-1/);
+});
+
 test('parses only explicit Meta DM mutations', () => {
   assert.deepEqual(parseMetaDmCommand('hello'), null);
   assert.deepEqual(parseMetaDmCommand('!dm 42 Welcome'), { dmId: 42, message: 'Welcome' });

@@ -9,6 +9,12 @@ Every new provider conversation starts one top-level Slack message. Later
 inbound messages and replies Sarah sends directly in Gmail or OwnerRez are
 written back to that same Slack thread.
 
+Questions about new, recent, today's, unread, received, or sent Gmail activity
+use the read-only `email.activity.read` workflow. It queries Sarah's Gmail live
+for the requested America/Los_Angeles date window and reports durable ledger
+coverage separately, so a missed Slack projection cannot be mistaken for no
+mail.
+
 ## Reply commands
 
 Run these only inside the original message thread:
