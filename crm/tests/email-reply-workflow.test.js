@@ -283,6 +283,28 @@ test('Slack email replies require same-user, same-thread confirmation and Gmail 
   });
 });
 
+test('reply proposals use the original outreach subject instead of inbound mojibake', async () => {
+  await withDb(async db => {
+    await db.query(sql`UPDATE outreach_sends SET
+      subject='La Puesta del Sol — 10% referral commission, Riviera Nayarit'
+      WHERE id=10339`);
+    await db.query(sql`UPDATE email_threads SET
+      subject='Re: La Puesta del Sol Ã¢Â€Â” 10% referral commission, Riviera Nayarit'
+      WHERE provider_message_id='gmail-in-1'`);
+    const run = await startGraph(db, proposeDefinition, {
+      idempotencyKey: 'slack:CPAULINA:subject-repair:email.reply.propose',
+      triggerType: 'slack_email_reply_command', triggerRef: 'subject-repair',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: { threadTs: '1786549495.693669', message: 'How about 5?' },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    const [proposal] = await db.query(sql`SELECT subject FROM email_reply_proposals
+      WHERE id=${run.output.proposalId}`);
+    assert.equal(proposal.subject,
+      'Re: La Puesta del Sol — 10% referral commission, Riviera Nayarit');
+  });
+});
+
 test('ambiguous follow-ups do not downgrade an already-hot contact', async () => {
   await withDb(async db => {
     await db.query(sql`UPDATE contacts SET status='replied', reply_status='positive',

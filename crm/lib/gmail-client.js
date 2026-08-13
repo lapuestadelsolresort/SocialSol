@@ -266,11 +266,33 @@ function cleanHeader(value) {
   return String(value || '').replace(/[\r\n]+/g, ' ').trim();
 }
 
+// RFC 5322 headers are ASCII. Encode any Unicode header value as adjacent
+// RFC 2047 encoded-words, each within the 75-character encoded-word limit.
+// Separating folded encoded-words with linear whitespace is display-neutral.
+function encodeMimeHeader(value) {
+  const cleaned = cleanHeader(value);
+  if (!/[^\x20-\x7e]/.test(cleaned)) return cleaned;
+  const chunks = [];
+  let chunk = '';
+  for (const character of cleaned) {
+    const candidate = chunk + character;
+    if (chunk && Buffer.byteLength(candidate, 'utf8') > 45) {
+      chunks.push(chunk);
+      chunk = character;
+    } else {
+      chunk = candidate;
+    }
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.map(part => `=?UTF-8?B?${Buffer.from(part, 'utf8').toString('base64')}?=`)
+    .join('\r\n ');
+}
+
 function encodeRawMessage({ from, to, subject, body, inReplyTo, references, messageId }) {
   const headers = [
     `From: ${cleanHeader(from)}`,
     `To: ${cleanHeader(to)}`,
-    `Subject: ${cleanHeader(subject)}`,
+    `Subject: ${encodeMimeHeader(subject)}`,
     ...(messageId ? [`Message-ID: <${cleanHeader(messageId).replace(/^<|>$/g, '')}>`] : []),
     ...(inReplyTo ? [`In-Reply-To: <${cleanHeader(inReplyTo).replace(/^<|>$/g, '')}>`] : []),
     ...(references ? [`References: ${cleanHeader(references)}`] : []),
@@ -335,5 +357,5 @@ module.exports = {
   SCOPES,
   SEND_SCOPES,
   // exported for tests
-  _internal: { cleanHeader, decodeBody, encodeRawMessage, extractTextBody, header, listMessageIds, parseAddress },
+  _internal: { cleanHeader, decodeBody, encodeMimeHeader, encodeRawMessage, extractTextBody, header, listMessageIds, parseAddress },
 };

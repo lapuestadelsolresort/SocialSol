@@ -277,11 +277,21 @@ function parseJsonResponse(text) {
 // post per slack-interaction.md §5.1 with `!approve <id>` / `!reject <id>
 // <reason>` / `!edit <id>` instructions in the footer. The Slack message_ts
 // returned here is what the plugin uses for chat.update on click in Phase D.
-function buildDraftMessage({ draftId, contact, campaign, persona, hookAngle, subject, body }) {
+function buildDraftMessage({ draftId, contact, campaign, persona, hookAngle, subject, body, autoApprove = false }) {
   const personaPath = path.relative(path.resolve(PROSPECTOR_DIR, '..'), persona.path);
   const reviewedDate = persona.frontMatter.last_reviewed_by_sarah || 'not yet';
+  const actionFooter = autoApprove
+    ? [
+        'Approval: automatic after compliance checks.',
+        'After the recipient replies, respond in this thread with `!email reply <message>`.',
+      ]
+    : [
+        `Approve:  \`!approve ${draftId}\``,
+        `Reject:   \`!reject ${draftId} <reason>\``,
+        `Edit:     \`!edit ${draftId}\``,
+      ];
   return [
-    `📝 Draft #${draftId} — ready for review`,
+    `📝 Draft #${draftId} — ${autoApprove ? 'queued for automatic approval' : 'ready for review'}`,
     '',
     `Contact:    ${contact.name}${contact.email ? ` <${contact.email}>` : ''}`,
     `            ${contact.company || '(no company)'}${contact.context_source ? ` • ${contact.context_source}` : ''}`,
@@ -294,11 +304,7 @@ function buildDraftMessage({ draftId, contact, campaign, persona, hookAngle, sub
     body,
     '──────────────────────────────────────',
     '',
-    `Approve:  \`!approve ${draftId}\``,
-    `Reject:   \`!reject ${draftId} <reason>\``,
-    `Edit:     \`!edit ${draftId}\``,
-    '',
-    `(Block Kit buttons are Phase D polish; for v0, use the text commands above.)`,
+    ...actionFooter,
   ].join('\n');
 }
 
@@ -460,6 +466,7 @@ async function compose({ persona_id, contact_id, campaign_id, options = {} } = {
       hookAngle: result.parsed.hook_angle,
       subject: result.parsed.subject,
       body: result.parsed.body,
+      autoApprove: Boolean(config.composer?.auto_approve),
     });
     const slack = await postToSlack(channelId, message);
     const postedAt = new Date().toISOString();
@@ -658,6 +665,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildDraftMessage,
   buildPrompt,
   compose,
   composeBatch,
