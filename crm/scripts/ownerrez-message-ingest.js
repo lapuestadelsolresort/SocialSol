@@ -22,6 +22,8 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const Database = require('better-sqlite3');
+const { ensureSchemaBetterSqlite } = require('../lib/workflow-schema');
+const { loadPolicy } = require('../lib/channel-policy');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SECRETS_DIR = process.env.SOCIALSOL_SECRETS_DIR || path.join(REPO_ROOT, 'secrets');
@@ -97,9 +99,20 @@ function getExistingMessageIds(db) {
 // ─── Main ────────────────────────────────────────────────────────────────────
 async function run() {
   const args = process.argv.slice(2);
+  const requestedMessageIndex = args.indexOf('--message-id');
+  const requestedMessageId = requestedMessageIndex >= 0
+    ? String(args[requestedMessageIndex + 1] || '').trim() : null;
+  if (requestedMessageIndex >= 0 && !requestedMessageId) {
+    throw new Error('--message-id requires an OwnerRez message id');
+  }
+  const strictThreadRun = args.includes('--thread');
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  db.transaction(() => ensureSchemaBetterSqlite(db))();
   ensureTable(db);
+  const sarahEmailChannel = Object.entries(loadPolicy().channels || {})
+    .find(([, channel]) => channel.name === 'sarah-email')?.[0] || null;
 
   // Check the schema of sarah_voice_corpus so we insert correctly
   const cols = db.prepare("PRAGMA table_info(sarah_voice_corpus)").all();
@@ -153,12 +166,22 @@ async function run() {
 
   console.log(`[message-ingest] ${threadIds.length} threads to process`);
 
-  const stats = { threads: 0, messages_total: 0, sarah_replies: 0, ingested: 0, skipped: 0 };
+  const stats = {
+    threads: 0, messages_total: 0, sarah_replies: 0, ingested: 0, skipped: 0,
+    ledger_ingested: 0, ledger_existing: 0, thread_errors: 0,
+  };
+  const threadErrors = [];
 
   for (const tid of threadIds) {
     try {
       const result = await apiGet('messages', { threadId: String(tid) });
-      const messages = result.items || [];
+      const allMessages = result.items || [];
+      const messages = requestedMessageId
+        ? allMessages.filter(message => String(message.id) === requestedMessageId)
+        : allMessages;
+      if (requestedMessageId && !messages.length) {
+        throw new Error(`message ${requestedMessageId} was not visible on thread ${tid}`);
+      }
       const thread = result.thread || {};
       const guest = result.guest || {};
       const guestName = [guest.first_name, guest.last_name].filter(Boolean).join(' ') || 'Unknown';
@@ -166,6 +189,53 @@ async function run() {
 
       stats.threads++;
       stats.messages_total += messages.length;
+
+      if (sarahEmailChannel && !DRY_RUN) {
+        const contact = guest.id
+          ? db.prepare('SELECT id FROM contacts WHERE ownerrez_guest_id = ? LIMIT 1').get(guest.id)
+          : null;
+        const lead = guest.id
+          ? db.prepare(`SELECT id FROM leads WHERE ownerrez_guest_id = ?
+              ORDER BY created_at DESC, id DESC LIMIT 1`).get(guest.id)
+          : null;
+        const metadata = JSON.stringify({
+          channel,
+          threadType: thread.type || null,
+          inquiryId: thread.inquiry_id || null,
+          bookingId: thread.booking_id || null,
+          propertyId: thread.property_id || null,
+          guestId: guest.id || null,
+        });
+        const insertLedger = db.prepare(`INSERT OR IGNORE INTO email_threads (
+          contact_id, crm_lead_id, direction, subject, body_text, from_address, sender_name,
+          to_address, received_at, provider, provider_message_id,
+          provider_thread_id, provider_metadata_json, raw_body_text,
+          processing_status, slack_channel_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ownerrez', ?, ?, ?, ?, 'pending', ?)`);
+        for (const msg of messages) {
+          if (msg.is_draft || !msg.id || !String(msg.body || '').trim()) continue;
+          const inbound = ['guest', 'cotraveler', 'third_party_booker'].includes(msg.from_role);
+          const body = String(msg.body).trim();
+          const result = insertLedger.run(
+            contact?.id || null,
+            lead?.id || null,
+            inbound ? 'inbound' : 'outbound',
+            `${String(channel).replace(/^./, value => value.toUpperCase())} guest conversation`,
+            body,
+            inbound ? `ownerrez:${msg.from_role}:${msg.from_contact_id || guest.id || 'guest'}` : 'ownerrez:host',
+            inbound ? guestName : 'Sarah / Resort team',
+            inbound ? 'ownerrez:host' : `ownerrez:guest:${guest.id || 'unknown'}`,
+            msg.date_utc || new Date().toISOString(),
+            String(msg.id),
+            String(tid),
+            metadata,
+            body,
+            sarahEmailChannel,
+          );
+          if (result.changes) stats.ledger_ingested++;
+          else stats.ledger_existing++;
+        }
+      }
 
       for (const msg of messages) {
         // Only ingest Sarah's replies (co_host role)
@@ -219,6 +289,8 @@ async function run() {
       // Be nice to the API
       await new Promise(r => setTimeout(r, 300));
     } catch (e) {
+      stats.thread_errors++;
+      threadErrors.push(`thread ${tid}: ${e.message}`);
       console.warn(`[message-ingest] Thread ${tid} error:`, e.message);
     }
   }
@@ -228,6 +300,9 @@ async function run() {
   }
 
   db.close();
+  if (strictThreadRun && threadErrors.length) {
+    throw new Error(`targeted OwnerRez message ingest failed: ${threadErrors.join('; ')}`);
+  }
   console.log(`[message-ingest] Done:`, stats);
 
   if (stats.ingested > 0) {

@@ -33,6 +33,7 @@ business at sale.
 | **Prospector Paulina** | Marketing | Verified B2B email outreach to named wedding planners and retreat coordinators, with staged send-volume and deliverability gates; separate from paid Meta delivery | `#prospector-paulina` |
 | **Reengager Regina** | Marketing | Past-guest and stale-inquiry reactivation campaigns | `#reengager-regina` |
 | **Sarah Coach** | Guest comms | Drafts replies to inbound guest messages in Sarah's voice; she edits and sends | `#sarah-coach` |
+| **Sarah Email Console** | Guest comms | Complete Gmail + OwnerRez Airbnb/Vrbo message ledger with guarded thread replies | `#sarah-email` |
 | **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |
 | **Corporate Intelligence** | Finance/legal | Analysis of Mexican corporate docs, tax filings, and property trusts (see "Not in this repo") | `#corporate` |
 | **QuickBooks Integration** | Finance | Automated expense tracking via Slack receipt channels → Kapital CSV → QBO pipeline, plus guarded owner-paid expense journals and review-gated repayments against configured liability accounts. Full read/write API. | `#accounting` |
@@ -46,7 +47,8 @@ business at sale.
 | Squarespace direct-commerce sync | Every 5 min | `#business-intel`, `#accounting`, `#reservations` |
 | OwnerRez message → voice corpus ingestion | Daily 6:30am + real-time on webhook | — |
 | CRM → Meta Custom Audience retargeting sync | Daily | `#social-sol` |
-| Inbound email scanner (Gmail) | Every 15 min | `#social-sol` |
+| Sarah Gmail conversation ledger | Every 5 min | `#sarah-email`; matched outreach remains in its original `#prospector-paulina` thread |
+| OwnerRez channel-message ledger | Real-time webhooks | `#sarah-email` |
 | Telmex bill reminder | Monthly | `#utility-payments` |
 | Durable paid-Meta snapshot/report | Daily + on demand | `#social-sol` |
 | Evidence-bound pause/budget-decrease guardrails | On demand; max once/campaign/24h | `#social-sol` |
@@ -105,6 +107,13 @@ business at sale.
   thread can send through Sarah's Gmail. The graph records Gmail acceptance,
   Sent-folder readback, the outbound CRM event, and its Slack-thread projection.
   Plain replies and top-level `!email` commands never send.
+- New Sarah Gmail mail and OwnerRez Airbnb/Vrbo channel messages are recorded in
+  dedicated `#sarah-email` threads. `!email reply` uses the provider recorded on
+  the inbound event but retains the same immutable proposal, same-user/thread
+  confirmation, execute-once effect, provider-readback, CRM projection, and
+  Slack documentation contract. Sarah's direct Gmail or OwnerRez replies are
+  captured back into the same thread. The retired 15-minute Gmail scanner no
+  longer posts one-off leads to `#social-sol`.
 - Paid-Meta decisions begin with `marketing.snapshot.read`, which records live
   Meta delivery, exact CRM conversion facts, tracking health, and any fixed
   bounded actions as expiring evidence. Autonomous evidence requires at least
@@ -173,6 +182,7 @@ prospector/            Paulina: research, composition, compliance, send
 
 regina/                Reengager: campaign engine, dossier-based drafting
 sarah-coach/           Inbound reply drafting and outcome capture
+sarah-email/           Operator contract for the Gmail + OwnerRez Slack console
 paloma/                Task tracker: channel scanner, weekly follow-up/summary
 
 media/                 Media library pipeline
@@ -231,7 +241,7 @@ runtime/state/          Generated health and tracking snapshots (not committed)
 | **Google Drive** | Resort photo library (6 folders), corporate document storage, HEIC→JPEG conversion pipeline |
 | **Twilio** | WhatsApp webhook bridge for guest conversations |
 | **Resend** | Outbound email delivery (outreach subdomain), webhook signature verification |
-| **Gmail** | Domain-wide delegated, read-only Inbox/Sent conversation capture for Paulina; confirmation-gated replies through Sarah's mailbox with Sent-folder readback. Required scopes and the non-sending access preflight are documented in `prospector/COMMANDS.md`. |
+| **Gmail** | Domain-wide delegated Inbox/Sent capture for Paulina and the complete Sarah email console; confirmation-gated replies through Sarah's mailbox with Sent-folder readback. |
 | **Postiz** | Instagram post/Reel scheduling via API |
 | **Cloudflare** | Pages hosting for landing pages + named tunnel (`lapuestadelsol-crm`) exposing CRM webhooks at `webhook.lapuestadelsolresort.com` |
 | **Chroma** | Vector store for voice corpus (sarah_voice_corpus) and media library (media_corpus) |

@@ -19,8 +19,9 @@ const path = require('path');
 const createDB = require('@databases/sqlite').default || require('@databases/sqlite');
 const { sql } = require('@databases/sqlite');
 const { searchInboxSince, searchSentSinceMinutes } = require('../lib/gmail-client');
-const { ingestEmailEvent, resolveOutreachSend } = require('../lib/email-conversations');
+const { ingestEmailEvent, resolveConversationEvent, resolveOutreachSend } = require('../lib/email-conversations');
 const { ensureSchemaAsync } = require('../lib/workflow-schema');
+const { loadPolicy } = require('../lib/channel-policy');
 
 const SINCE_MINUTES = 60;
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -49,12 +50,14 @@ function gmailEvent(message, direction, send = null) {
     inReplyTo: message.inReplyTo,
     references: message.references,
     from: message.from?.address || message.from || '',
+    senderName: message.from?.name || '',
     to: message.to || '',
     subject: message.subject || '',
     text: message.text || message.body || '',
     internalDate: message.internalDate || message.sent_at,
     direction,
     outreachSendId: send?.id || null,
+    providerMetadata: { labelIds: message.labelIds || [] },
   };
 }
 
@@ -75,21 +78,24 @@ async function run() {
 
   console.log(`[gmail-reply-forwarder] mailbox messages in last ${SINCE_MINUTES}m: inbox=${inboxMessages.length} sent=${sentMessages.length}`);
 
-  // Only process emails that are actual replies (have In-Reply-To header).
-  // This prevents Sarah's unrelated inbox mail (newsletters, vendor emails, etc.)
-  // from being logged as unmatched noise. We only care about responses to our
-  // cold outreach from outreach.lapuestadelsol.com.
-  const replies = inboxMessages.filter((m) => !!m.inReplyTo);
-  console.log(`[gmail-reply-forwarder] reply candidates (have In-Reply-To): ${replies.length}`);
+  const sarahChannelId = Object.entries(loadPolicy().channels || {})
+    .find(([, channel]) => channel.name === 'sarah-email')?.[0] || null;
+  // The dedicated Sarah console is the feature gate. Before its production
+  // policy cutover, preserve the narrower Paulina-only behavior so deploying
+  // source cannot silently consume unmatched mail without a Slack surface.
+  const inboxCandidates = sarahChannelId
+    ? inboxMessages
+    : inboxMessages.filter(message => Boolean(message.inReplyTo));
+  console.log(`[gmail-reply-forwarder] inbox candidates=${inboxCandidates.length} mode=${sarahChannelId ? 'sarah-console' : 'paulina-replies-only'}`);
 
   if (DRY_RUN) {
-    for (const m of replies) {
+    for (const m of inboxCandidates) {
       console.log(`  - id=${m.id} from=${m.from && m.from.address} subject=${(m.subject || '').slice(0, 80)} inReplyTo=${(m.inReplyTo || '').slice(0, 60)}`);
     }
     for (const m of sentMessages.filter(message => message.inReplyTo || message.references)) {
       console.log(`  - sent id=${m.id} to=${m.to} subject=${(m.subject || '').slice(0, 80)} thread=${m.threadId || ''}`);
     }
-    console.log(`[gmail-reply-forwarder] scanned=${inboxMessages.length + sentMessages.length} reply_candidates=${replies.length} (dry-run, no DB writes)`);
+    console.log(`[gmail-reply-forwarder] scanned=${inboxMessages.length + sentMessages.length} inbox_candidates=${inboxCandidates.length} (dry-run, no DB writes)`);
     return;
   }
 
@@ -101,9 +107,12 @@ async function run() {
   try {
     await ensureSchemaAsync(db, sql);
 
-    for (const m of replies) {
+    for (const m of inboxCandidates) {
       try {
-        const result = await ingestEmailEvent(db, gmailEvent(m, 'inbound'));
+        const result = await ingestEmailEvent(db, {
+          ...gmailEvent(m, 'inbound'),
+          ...(sarahChannelId ? { slackChannelId: sarahChannelId } : {}),
+        });
         const sendId = result.send?.id || result.event?.outreach_send_id || null;
         await recordProcessed(db, { messageId: m.id, sendId, matched: Boolean(sendId) });
         if (result.created) ingested++;
@@ -118,13 +127,19 @@ async function run() {
     for (const m of sentMessages.filter(message => message.inReplyTo || message.references)) {
       try {
         const candidate = gmailEvent(m, 'outbound');
-        const send = await resolveOutreachSend(db, candidate);
-        if (!send) { skipped++; continue; }
-        const result = await ingestEmailEvent(db, gmailEvent(m, 'outbound', send));
+        const [send, conversation] = await Promise.all([
+          resolveOutreachSend(db, candidate),
+          resolveConversationEvent(db, candidate),
+        ]);
+        if (!send && !conversation) { skipped++; continue; }
+        const result = await ingestEmailEvent(db, {
+          ...gmailEvent(m, 'outbound', send),
+          ...(sarahChannelId && !send ? { slackChannelId: sarahChannelId } : {}),
+        });
         if (result.created) ingested++;
         else skipped++;
-        matched++;
-        console.log(`[gmail-reply-forwarder] outbound id=${m.id} created=${result.created} send_id=${send.id}`);
+        if (send) matched++;
+        console.log(`[gmail-reply-forwarder] outbound id=${m.id} created=${result.created} send_id=${send?.id || ''} conversation_id=${conversation?.id || ''}`);
       } catch (e) {
         console.error(`[gmail-reply-forwarder] sent message ${m.id} failed:`, e.message);
       }
@@ -134,7 +149,7 @@ async function run() {
   }
 
   console.log(
-    `[gmail-reply-forwarder] scanned=${inboxMessages.length + sentMessages.length} reply_candidates=${replies.length} ingested=${ingested} ` +
+    `[gmail-reply-forwarder] scanned=${inboxMessages.length + sentMessages.length} inbox_candidates=${inboxCandidates.length} ingested=${ingested} ` +
     `matched=${matched} skipped=${skipped}`
   );
 }

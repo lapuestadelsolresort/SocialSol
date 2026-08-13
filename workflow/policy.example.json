@@ -16,6 +16,10 @@
       "name": "prospector-paulina",
       "capabilities": ["paulina.read", "paulina.run", "paulina.send", "email.read", "email.send", "crm.read", "crm.write"]
     },
+    "REPLACE_WITH_SARAH_EMAIL_CHANNEL_ID": {
+      "name": "sarah-email",
+      "capabilities": ["email.read", "email.send", "crm.read", "crm.write"]
+    },
     "REPLACE_WITH_BUSINESS_INTEL_CHANNEL_ID": {
       "name": "business-intel",
       "capabilities": ["business.read_all"]

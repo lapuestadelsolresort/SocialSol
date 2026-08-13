@@ -120,6 +120,16 @@ that retires `/api/meta-dm/reply`. Confirm an explicit `!dm` records a single
 provider message ID and reports only acceptance; ordinary model prose must not
 invoke the workflow.
 
+For the Sarah email console, run the guarded `npm run cutover:sarah-email`
+after the normal release deploy with `SARAH_EMAIL_SLACK_CHANNEL` set to the
+stable channel ID. The command proves Gmail send/read and OwnerRez message-read
+access before changing state, installs the unified five-minute Gmail poller,
+retires `com.lapuestadelsolresort.inbound-email-scanner`, updates the OpenClaw
+channel allowlist, restarts the socket gateway and worker, probes Socket Mode,
+and requires an acknowledged channel welcome post. The first genuine inbound
+Gmail and OwnerRez messages are the passive canaries; do not send a fabricated
+guest response merely to test the workflow.
+
 ### Paid-Meta autonomy canary
 
 After the normal release deploy, run `npm run configure:social-autonomy` first

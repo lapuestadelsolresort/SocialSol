@@ -195,6 +195,29 @@ async function resolveOutreachSend(db, message = {}) {
   return rows[0];
 }
 
+async function resolveConversationEvent(db, message = {}) {
+  const provider = String(message.provider || 'gmail').trim().toLowerCase();
+  if (message.providerThreadId) {
+    const [threadMatch] = await db.query(sql`SELECT * FROM email_threads
+      WHERE provider=${provider} AND provider_thread_id=${String(message.providerThreadId)}
+      ORDER BY COALESCE(received_at, created_at) DESC, id DESC LIMIT 1`);
+    if (threadMatch) return threadMatch;
+  }
+  const ids = [...new Set([
+    normalizeMessageId(message.inReplyTo),
+    ...referenceIds(message.references),
+  ].filter(Boolean))];
+  if (!ids.length) return null;
+  const placeholders = ids.map(value => `'${value.replaceAll("'", "''")}'`).join(',');
+  const rows = await db.query(sql.__dangerous__rawValue(`
+    SELECT * FROM email_threads
+    WHERE provider='${provider.replaceAll("'", "''")}'
+      AND LOWER(TRIM(rfc_message_id, '<>')) IN (${placeholders})
+    ORDER BY COALESCE(received_at, created_at) DESC, id DESC LIMIT 1
+  `));
+  return rows[0] || null;
+}
+
 async function ingestEmailEvent(db, message = {}) {
   const provider = String(message.provider || 'gmail').trim().toLowerCase();
   const providerMessageId = String(message.providerMessageId || message.id || '').trim();
@@ -203,30 +226,43 @@ async function ingestEmailEvent(db, message = {}) {
     WHERE provider=${provider} AND provider_message_id=${providerMessageId} LIMIT 1`);
   if (existing[0]) return { created: false, event: existing[0], send: await lookupSendById(db, existing[0].outreach_send_id) };
 
-  const send = await resolveOutreachSend(db, message);
+  const [send, conversation] = await Promise.all([
+    resolveOutreachSend(db, message),
+    resolveConversationEvent(db, message),
+  ]);
   const direction = message.direction === 'outbound' ? 'outbound' : 'inbound';
   const rawText = String(message.text || message.body || '');
   const bodyText = stripQuotedHistory(rawText);
   const receivedAt = message.internalDate || message.receivedAt || message.sentAt || new Date().toISOString();
+  const contactId = send?.contact_id || message.contactId || conversation?.contact_id || null;
+  const leadId = message.crmLeadId || conversation?.crm_lead_id || null;
+  const slackChannelId = send?.slack_channel_id || message.slackChannelId
+    || conversation?.slack_channel_id || null;
+  const slackThreadTs = send?.slack_message_ts || message.slackThreadTs
+    || conversation?.slack_thread_ts || conversation?.slack_message_ts || null;
+  const providerMetadata = message.providerMetadata
+    ? JSON.stringify(message.providerMetadata) : conversation?.provider_metadata_json || null;
   const result = await db.query(sql`INSERT INTO email_threads (
-      contact_id, outreach_send_id, direction, subject, body_text, body_html,
-      from_address, to_address, received_at, provider, provider_message_id,
-      provider_thread_id, rfc_message_id, in_reply_to, references_header,
+      contact_id, crm_lead_id, outreach_send_id, direction, subject, body_text, body_html,
+      from_address, sender_name, to_address, received_at, provider, provider_message_id,
+      provider_thread_id, provider_metadata_json, rfc_message_id, in_reply_to, references_header,
       raw_body_text, processing_status, slack_channel_id, slack_thread_ts
     ) VALUES (
-      ${send?.contact_id || null}, ${send?.id || null}, ${direction},
+      ${contactId}, ${leadId}, ${send?.id || message.outreachSendId || conversation?.outreach_send_id || null}, ${direction},
       ${String(message.subject || send?.subject || '').slice(0, 1000)}, ${bodyText},
       ${message.html ? String(message.html) : null},
       ${normalizeEmail(message.from) || String(message.from || '').slice(0, 500)},
+      ${String(message.senderName || '').slice(0, 500) || null},
       ${normalizeEmail(message.to) || String(message.to || '').slice(0, 500)},
       ${receivedAt}, ${provider}, ${providerMessageId},
       ${message.providerThreadId ? String(message.providerThreadId) : null},
+      ${providerMetadata},
       ${message.rfcMessageId ? String(message.rfcMessageId) : null},
       ${message.inReplyTo ? String(message.inReplyTo) : null},
       ${message.references ? String(message.references) : null}, ${rawText},
-      'pending', ${send?.slack_channel_id || null}, ${send?.slack_message_ts || null}
+      'pending', ${slackChannelId}, ${slackThreadTs}
     ) RETURNING *`);
-  return { created: true, event: result[0], send };
+  return { created: true, event: result[0], send, conversation };
 }
 
 module.exports = {
@@ -240,5 +276,6 @@ module.exports = {
   normalizeMessageId,
   referenceIds,
   resolveOutreachSend,
+  resolveConversationEvent,
   stripQuotedHistory,
 };

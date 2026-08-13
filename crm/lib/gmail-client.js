@@ -131,13 +131,14 @@ function parseAddress(value) {
   return { name: '', address: s };
 }
 
-async function listMessageIds(gmail, q, maxResults = 500) {
+async function listMessageIds(gmail, q, maxResults = 500, { includeSpamTrash = false } = {}) {
   const limit = Math.max(1, Math.min(5000, Number(maxResults) || 500));
   const ids = [];
   let pageToken;
   do {
     const list = await gmail.users.messages.list({
       userId: 'me', q, maxResults: Math.min(500, limit - ids.length), pageToken,
+      includeSpamTrash,
     });
     ids.push(...(list.data.messages || []).map(message => message.id));
     pageToken = list.data.nextPageToken || null;
@@ -191,7 +192,7 @@ async function searchSentSince(days, opts = {}) {
   let q = `in:sent newer_than:${dayCount}d`;
   if (opts.toFilter) q += ` to:${opts.toFilter}`;
 
-  const ids = await listMessageIds(gmail, q, 100);
+  const ids = await listMessageIds(gmail, q, 500);
   if (ids.length === 0) return [];
   const messages = await loadMessages(ids);
   return messages.map(message => ({
@@ -213,7 +214,7 @@ async function searchSentSince(days, opts = {}) {
  * mail that has already been archived out of Inbox.
  * Used by gmail-reply-forwarder to feed /webhook/resend-reply.
  *
- * Query: `-in:chats -in:sent after:<epoch>` (Gmail's `newer_than:`
+ * Query: `-in:trash -in:chats -in:sent after:<epoch>` (Gmail's `newer_than:`
  * unit codes are d/m/y — month, not minute — so we use `after:` with a
  * Unix-seconds timestamp for real minute-level granularity).
  * Messages are NOT marked read (scope is gmail.readonly anyway).
@@ -236,9 +237,12 @@ async function searchInboxSince(minutes) {
   const mins = Math.max(1, Number(minutes) || 60);
 
   const afterEpoch = Math.floor((Date.now() - mins * 60 * 1000) / 1000);
-  const q = `-in:chats -in:sent after:${afterEpoch}`;
+  const q = `-in:trash -in:chats -in:sent after:${afterEpoch}`;
 
-  const ids = await listMessageIds(gmail, q, 100);
+  // Gmail excludes Spam from list results unless includeSpamTrash is set.
+  // Sarah's console intentionally mirrors received spam for visibility, while
+  // the explicit query exclusion keeps deleted mail out of the console.
+  const ids = await listMessageIds(gmail, q, 500, { includeSpamTrash: true });
   if (ids.length === 0) return [];
   return loadMessages(ids);
 }
@@ -247,7 +251,7 @@ async function searchSentSinceMinutes(minutes) {
   const gmail = getGmailClient();
   const mins = Math.max(1, Number(minutes) || 60);
   const afterEpoch = Math.floor((Date.now() - mins * 60 * 1000) / 1000);
-  const ids = await listMessageIds(gmail, `in:sent after:${afterEpoch}`, 100);
+  const ids = await listMessageIds(gmail, `in:sent after:${afterEpoch}`, 500);
   return loadMessages(ids);
 }
 

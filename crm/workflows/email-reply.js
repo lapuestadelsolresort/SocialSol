@@ -5,14 +5,24 @@ const { sql } = require('@databases/sqlite');
 const { addSuppression } = require('../lib/suppressions');
 const { classifyReply, normalizeEmail } = require('../lib/email-conversations');
 const { sendGmailReply, readSentMessage } = require('../lib/gmail-client');
+const { sendOwnerRezMessage, readOwnerRezMessage } = require('../lib/ownerrez-messages');
+const { projectDirectGmailInbound } = require('../lib/inbound-email-crm');
 const { loadPolicy } = require('../lib/channel-policy');
 
 const PROPOSAL_TTL_MS = 15 * 60_000;
 const QUALITIES = new Set(['hot', 'not_interested', 'ambiguous']);
 
-function prospectorChannelId(policy = loadPolicy()) {
+function policyChannelId(name, policy = loadPolicy()) {
   return Object.entries(policy.channels || {})
-    .find(([, channel]) => channel.name === 'prospector-paulina')?.[0] || null;
+    .find(([, channel]) => channel.name === name)?.[0] || null;
+}
+
+function prospectorChannelId(policy = loadPolicy()) {
+  return policyChannelId('prospector-paulina', policy);
+}
+
+function sarahEmailChannelId(policy = loadPolicy()) {
+  return policyChannelId('sarah-email', policy);
 }
 
 function replySubject(subject) {
@@ -122,9 +132,18 @@ function quotedBody(body, limit = 2800) {
   return text ? `> ${text.split('\n').join('\n> ')}` : '> (empty message)';
 }
 
+function providerMetadata(event) {
+  try {
+    const parsed = JSON.parse(event.provider_metadata_json || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 const observeDefinition = {
   name: 'email.message.observe',
-  version: 3,
+  version: 4,
   capability: 'email.read',
   mutates: false,
   notificationChannelName: 'prospector-paulina',
@@ -152,6 +171,7 @@ const observeDefinition = {
         const event = state.load_event;
         let classification = null;
         let projection = { suppressionRepaired: false, suppressed: false };
+        let crmProjection = { inquiry: false, reason: 'not_direct_gmail_inbound' };
         if (event.direction === 'inbound' && event.outreach_send_id) {
           const classified = classifyReply(event.body_text || event.raw_body_text || '');
           classification = {
@@ -160,6 +180,8 @@ const observeDefinition = {
             confidence: classified.confidence,
           };
           projection = await applyClassification(db, event, classification);
+        } else if (event.direction === 'inbound' && event.provider === 'gmail') {
+          crmProjection = await projectDirectGmailInbound(db, event);
         }
         const classificationChanged = Boolean(classification && event.sentiment
           && (event.sentiment !== classification.quality
@@ -175,6 +197,7 @@ const observeDefinition = {
             direction: event.direction,
             outreachSendId: event.outreach_send_id,
             providerThreadId: event.provider_thread_id,
+            crmProjection,
             bodyHash: store.sha256(event.body_text || ''),
             classification: classification ? {
               quality: classification.quality,
@@ -192,6 +215,7 @@ const observeDefinition = {
           previousClassification: event.sentiment || null,
           previousClassificationReason: event.sentiment_notes || null,
           evidenceId: evidence.id,
+          crmProjection,
           ...projection,
         };
       },
@@ -201,21 +225,31 @@ const observeDefinition = {
       async run({ db, run, state, store }) {
         const event = state.load_event;
         const projected = state.project_event;
-        const channelId = event.slack_channel_id || event.send_slack_channel_id || prospectorChannelId();
+        const channelId = event.slack_channel_id || event.send_slack_channel_id
+          || (event.outreach_send_id ? prospectorChannelId() : sarahEmailChannelId());
         const threadTs = event.slack_thread_ts || event.send_slack_thread_ts || null;
         if (!channelId) return { queued: false, reason: 'no_channel' };
         const quality = projected.classification?.quality || 'ambiguous';
         let message;
         if (!event.outreach_send_id) {
+          const providerLabel = event.provider === 'ownerrez'
+            ? `OwnerRez ${providerMetadata(event).channel || 'channel'}`
+            : 'Sarah’s Gmail';
+          const person = event.contact_name || event.sender_name || event.from_address || 'unknown sender';
+          const inbound = event.direction === 'inbound';
+          const contactId = projected.crmProjection?.contactId || event.contact_id || null;
+          const leadId = projected.crmProjection?.leadId || event.crm_lead_id || null;
           message = [
-            '⚠️ *Unresolved email reply* — no outreach send could be matched.',
-            `From: ${event.from_address || '(unknown)'}`,
-            `Subject: ${event.subject || '(none)'}`,
-            '',
-            quotedBody(event.body_text),
-            '',
-            `Email event: ${event.id} · Workflow: ${run.id}`,
-          ].join('\n');
+            inbound ? `📨 *New ${providerLabel} message from ${person}*`
+              : `📤 *${providerLabel} response recorded for ${person}*`,
+            event.subject ? `Subject: ${event.subject}` : null,
+            '', quotedBody(event.body_text), '',
+            projected.crmProjection?.leadCreated ? `CRM lead #${projected.crmProjection.leadId} and contact #${projected.crmProjection.contactId} created.`
+              : contactId || leadId ? [contactId ? `CRM contact #${contactId}` : null, leadId ? `Lead #${leadId}` : null].filter(Boolean).join(' · ')
+                : inbound && event.provider === 'gmail' ? 'Visibility only — this sender was not classified as a new inquiry.' : null,
+            inbound ? 'To answer from this thread: `!email reply <your message>`' : null,
+            `Email event: ${event.id} · Workflow: ${run.id} · Evidence: ${projected.evidenceId}`,
+          ].filter(Boolean).join('\n');
         } else if (event.direction === 'outbound') {
           message = [
             `📤 *Email response recorded* — ${event.to_address || event.contact_email}`,
@@ -248,7 +282,15 @@ const observeDefinition = {
           runId: run.id,
           topic: 'slack.notification',
           idempotencyKey: projectionKey,
-          payload: { channelId, threadTs, message, emailThreadId: event.id },
+          payload: {
+            channelId, threadTs, message, emailThreadId: event.id,
+            ...(!event.outreach_send_id ? {
+              emailConversation: {
+                provider: event.provider,
+                providerThreadId: event.provider_thread_id,
+              },
+            } : {}),
+          },
         });
         return { queued: true, channelId, threadTs };
       },
@@ -279,33 +321,51 @@ const proposeDefinition = {
       key: 'resolve_thread', effectClass: 'read', maxAttempts: 1,
       async run({ db, run, input }) {
         const threadTs = typeof input.threadTs === 'string' ? input.threadTs.trim() : '';
-        const rows = await db.query(sql`SELECT os.*, c.name AS contact_name, c.email AS contact_email
-          FROM outreach_sends os JOIN contacts c ON c.id=os.contact_id
-          WHERE os.slack_message_ts=${threadTs} ORDER BY os.sent_at DESC LIMIT 1`);
-        const send = rows[0];
-        if (!send || !send.sent_at) throw new Error('sent outreach message was not found for this Slack thread');
-        if (run.channel_id !== send.slack_channel_id) throw new Error('email reply must be proposed from the original outreach channel');
-        if (threadTs && threadTs !== send.slack_message_ts) throw new Error('email reply must be proposed in the original draft thread');
         const [inbound] = await db.query(sql`SELECT * FROM email_threads
-          WHERE outreach_send_id=${send.id} AND direction='inbound'
+          WHERE direction='inbound'
+            AND slack_channel_id=${run.channel_id}
+            AND (slack_thread_ts=${threadTs} OR slack_message_ts=${threadTs})
           ORDER BY COALESCE(received_at, created_at) DESC LIMIT 1`);
-        if (!inbound) throw new Error('no recorded inbound email exists for this outreach thread');
+        if (!inbound) throw new Error('no recorded inbound message exists for this Slack thread');
+
+        let send = null;
+        let contact = null;
+        if (inbound.outreach_send_id) {
+          [send] = await db.query(sql`SELECT os.*, c.name AS contact_name, c.email AS contact_email
+            FROM outreach_sends os JOIN contacts c ON c.id=os.contact_id
+            WHERE os.id=${inbound.outreach_send_id} LIMIT 1`);
+          if (!send || !send.sent_at) throw new Error('sent outreach message was not found for this Slack thread');
+          if (threadTs !== send.slack_message_ts) throw new Error('email reply must be proposed in the original draft thread');
+        } else if (inbound.contact_id) {
+          [contact] = await db.query(sql`SELECT * FROM contacts WHERE id=${inbound.contact_id} LIMIT 1`);
+        }
+
+        const provider = String(inbound.provider || 'gmail').toLowerCase();
+        if (!['gmail', 'ownerrez'].includes(provider)) throw new Error(`email replies do not support provider ${provider}`);
+        if (!inbound.provider_thread_id) throw new Error(`${provider} thread identity is missing`);
+        const toAddress = provider === 'gmail'
+          ? normalizeEmail(send?.contact_email || contact?.email || inbound.from_address)
+          : `ownerrez-thread:${inbound.provider_thread_id}`;
+        if (provider === 'gmail' && !toAddress) throw new Error('Gmail reply recipient is missing');
+        const authoritativeSubject = send?.subject || inbound.subject;
         return {
-          sendId: send.id,
-          contactId: send.contact_id,
-          contactName: send.contact_name,
-          toAddress: send.contact_email,
+          provider,
+          sendId: send?.id || null,
+          contactId: send?.contact_id || inbound.contact_id || null,
+          contactName: send?.contact_name || contact?.name || inbound.sender_name || inbound.from_address,
+          toAddress,
           // The original outreach subject is authoritative. A malformed older
           // Gmail reply may carry mojibake in its Subject header; using it here
           // would perpetuate that corruption in every subsequent response.
-          subject: replySubject(send.subject || inbound.subject),
-          slackChannelId: send.slack_channel_id,
-          slackThreadTs: send.slack_message_ts,
+          subject: provider === 'gmail' ? replySubject(authoritativeSubject)
+            : String(authoritativeSubject || 'OwnerRez guest conversation'),
+          slackChannelId: inbound.slack_channel_id,
+          slackThreadTs: threadTs,
           inboundEmailThreadId: inbound.id,
           providerThreadId: inbound.provider_thread_id,
-          inReplyTo: inbound.rfc_message_id,
-          references: [inbound.references_header, inbound.rfc_message_id]
-            .filter(Boolean).join(' ').trim(),
+          inReplyTo: provider === 'gmail' ? inbound.rfc_message_id : null,
+          references: provider === 'gmail' ? [inbound.references_header, inbound.rfc_message_id]
+            .filter(Boolean).join(' ').trim() : null,
         };
       },
     },
@@ -315,6 +375,7 @@ const proposeDefinition = {
         const target = state.resolve_thread;
         const bodyText = input.message.trim();
         const requestHash = store.sha256({
+          provider: target.provider, providerThreadId: target.providerThreadId,
           sendId: target.sendId, to: target.toAddress, subject: target.subject,
           bodyText, inboundEmailThreadId: target.inboundEmailThreadId,
         });
@@ -322,18 +383,19 @@ const proposeDefinition = {
         const acceptanceHash = store.sha256(`${proposalId}:${requestHash}`).slice(0, 12);
         const expiresAt = new Date(Date.now() + PROPOSAL_TTL_MS).toISOString();
         await db.query(sql`INSERT INTO email_reply_proposals (
-          id, outreach_send_id, contact_id, inbound_email_thread_id, to_address,
+          id, provider, outreach_send_id, contact_id, inbound_email_thread_id, to_address,
           subject, body_text, request_hash, acceptance_hash, proposed_by,
           slack_channel_id, slack_thread_ts, proposal_run_id, expires_at
         ) VALUES (
-          ${proposalId}, ${target.sendId}, ${target.contactId}, ${target.inboundEmailThreadId},
+          ${proposalId}, ${target.provider}, ${target.sendId}, ${target.contactId}, ${target.inboundEmailThreadId},
           ${target.toAddress}, ${target.subject}, ${bodyText}, ${requestHash},
           ${acceptanceHash}, ${run.actor_user_id}, ${target.slackChannelId},
           ${target.slackThreadTs}, ${run.id}, ${expiresAt}
         )`);
         const evidence = await store.createEvidence(db, {
           runId: run.id, stepKey, source: 'human.slack_email_proposal', sourceRef: proposalId,
-          expiresAt, payload: { proposalId, sendId: target.sendId, requestHash, to: target.toAddress },
+          expiresAt, payload: { proposalId, provider: target.provider, providerThreadId: target.providerThreadId,
+            sendId: target.sendId, requestHash, to: target.toAddress },
         });
         return {
           proposalId, acceptanceHash, expiresAt, requestHash, bodyText, evidenceId: evidence.id,
@@ -348,6 +410,7 @@ const proposeDefinition = {
       proposalId: state.persist_proposal.proposalId,
       outreachSendId: state.resolve_thread.sendId,
       recipient: state.resolve_thread.contactName || state.resolve_thread.toAddress,
+      provider: state.resolve_thread.provider,
       toAddress: state.resolve_thread.toAddress,
       requestHash: state.persist_proposal.requestHash,
       bodyText: state.persist_proposal.bodyText,
@@ -372,7 +435,9 @@ const confirmDefinition = {
       key: 'accept_proposal', effectClass: 'local_write', maxAttempts: 2,
       async run({ db, run, input }) {
         const [proposal] = await db.query(sql`SELECT erp.*, et.provider_thread_id,
-          et.rfc_message_id AS in_reply_to, et.references_header
+          et.rfc_message_id AS in_reply_to, et.references_header,
+          et.from_address AS inbound_from_address,
+          et.provider_metadata_json AS inbound_provider_metadata_json
           FROM email_reply_proposals erp
           JOIN email_threads et ON et.id=erp.inbound_email_thread_id
           WHERE erp.id=${input.proposalId}`);
@@ -405,11 +470,15 @@ const confirmDefinition = {
       key: 'register_effect', effectClass: 'local_write', maxAttempts: 1,
       async run({ db, run, state, store, stepKey }) {
         const proposal = state.accept_proposal;
+        const provider = String(proposal.provider || 'gmail');
+        const operation = provider === 'ownerrez' ? 'ownerrez.messages.post' : 'gmail.message.send';
         const effect = await store.createEffect(db, {
-          runId: run.id, stepKey, effectType: 'message_delivery', provider: 'gmail',
-          operation: 'gmail.message.send', idempotencyKey: `${proposal.id}:gmail:send`,
-          request: { proposalId: proposal.id, requestHash: proposal.request_hash, bodyHash: store.sha256(proposal.body_text) },
-          target: { sendId: proposal.outreach_send_id, contactId: proposal.contact_id, to: proposal.to_address },
+          runId: run.id, stepKey, effectType: 'message_delivery', provider,
+          operation, idempotencyKey: `${proposal.id}:${provider}:send`,
+          request: { proposalId: proposal.id, requestHash: proposal.request_hash,
+            providerThreadId: proposal.provider_thread_id, bodyHash: store.sha256(proposal.body_text) },
+          target: { sendId: proposal.outreach_send_id, contactId: proposal.contact_id,
+            to: proposal.to_address, providerThreadId: proposal.provider_thread_id },
         });
         await db.query(sql`UPDATE email_reply_proposals SET workflow_effect_id=${effect.id}, updated_at=datetime('now') WHERE id=${proposal.id}`);
         return { effectId: effect.id };
@@ -424,19 +493,24 @@ const confirmDefinition = {
         if (existing?.provider_ref && existing.status !== 'requested') {
           return { effectId, messageId: existing.provider_ref, threadId: proposal.provider_thread_id, replayed: true };
         }
-        const sender = services.sendEmail || sendGmailReply;
+        const provider = String(proposal.provider || 'gmail');
+        const sender = provider === 'ownerrez'
+          ? services.sendOwnerRezMessage || sendOwnerRezMessage
+          : services.sendEmail || sendGmailReply;
         let result;
         try {
-          result = await sender({
-            to: proposal.to_address, subject: proposal.subject, body: proposal.body_text,
-            threadId: proposal.provider_thread_id, inReplyTo: proposal.in_reply_to,
-            references: proposal.references_header,
-            messageId: `socialsol-${proposal.id}@lapuestadelsolresort.com`,
-          });
+          result = provider === 'ownerrez'
+            ? await sender({ threadId: proposal.provider_thread_id, body: proposal.body_text })
+            : await sender({
+              to: proposal.to_address, subject: proposal.subject, body: proposal.body_text,
+              threadId: proposal.provider_thread_id, inReplyTo: proposal.in_reply_to,
+              references: proposal.references_header,
+              messageId: `socialsol-${proposal.id}@lapuestadelsolresort.com`,
+            });
         } catch (error) {
           if (error.code !== 'ambiguous_external_result') {
             await store.transitionEffect(db, { effectId, status: 'failed', providerStatus: 'request_failed',
-              errorCode: error.code || 'gmail_send_failed', errorMessage: error.message });
+              errorCode: error.code || `${provider}_send_failed`, errorMessage: error.message });
           }
           await db.query(sql`UPDATE email_reply_proposals SET status=${error.code === 'ambiguous_external_result' ? 'ambiguous' : 'failed'},
             processing_error=${String(error.message).slice(0, 1000)}, updated_at=datetime('now') WHERE id=${proposal.id}`);
@@ -447,7 +521,7 @@ const confirmDefinition = {
             status: 'accepted_by_provider', providerStatus: 'accepted',
             response: { messageId: result.id, threadId: result.threadId } });
         } catch (cause) {
-          const error = new Error(`Gmail accepted ${result.id}, but acceptance could not be committed: ${cause.message}`);
+          const error = new Error(`${provider} accepted ${result.id}, but acceptance could not be committed: ${cause.message}`);
           error.code = 'ambiguous_external_result';
           error.retryable = false;
           throw error;
@@ -460,33 +534,50 @@ const confirmDefinition = {
       async run({ db, run, state, services, store, stepKey }) {
         const proposal = state.accept_proposal;
         const sent = state.send_via_gmail;
-        const reader = services.readEmail || readSentMessage;
+        const provider = String(proposal.provider || 'gmail');
+        const reader = provider === 'ownerrez'
+          ? services.readOwnerRezMessage || readOwnerRezMessage
+          : services.readEmail || readSentMessage;
         let message;
         try {
-          message = await reader(sent.messageId);
+          message = provider === 'ownerrez'
+            ? await reader(sent.messageId, proposal.provider_thread_id)
+            : await reader(sent.messageId);
         } catch (cause) {
-          const error = new Error(`Gmail Sent readback failed: ${cause.message}`);
-          error.code = 'gmail_readback_unavailable';
+          const error = new Error(`${provider} message readback failed: ${cause.message}`);
+          error.code = `${provider}_readback_unavailable`;
           error.retryable = true;
           error.requiresManualReview = true;
           throw error;
         }
-        if (!message.labelIds?.includes('SENT')) {
+        if (provider === 'gmail' && !message.labelIds?.includes('SENT')) {
           const error = new Error('Gmail readback did not show the message in Sent');
           error.code = 'gmail_sent_label_not_visible';
           error.retryable = true;
           error.requiresManualReview = true;
           throw error;
         }
-        if (normalizeEmail(message.to) !== normalizeEmail(proposal.to_address)) throw new Error('Gmail readback recipient mismatch');
+        if (provider === 'gmail' && normalizeEmail(message.to) !== normalizeEmail(proposal.to_address)) {
+          throw new Error('Gmail readback recipient mismatch');
+        }
+        if (provider === 'ownerrez') {
+          if (String(message.threadId) !== String(proposal.provider_thread_id)) throw new Error('OwnerRez readback thread mismatch');
+          if (message.isDraft || message.removedAt) throw new Error('OwnerRez readback did not show a durable sent message');
+          if (message.body !== proposal.body_text) throw new Error('OwnerRez readback body mismatch');
+          if (['guest', 'cotraveler', 'third_party_booker'].includes(message.fromRole)) {
+            throw new Error('OwnerRez readback sender role mismatch');
+          }
+        }
         const evidence = await store.createEvidence(db, {
-          runId: run.id, stepKey, source: 'gmail.api.readback', sourceRef: sent.messageId,
+          runId: run.id, stepKey, source: `${provider}.api.readback`, sourceRef: sent.messageId,
           payload: { messageId: sent.messageId, threadId: message.threadId,
-            rfcMessageId: message.messageId, labelIds: message.labelIds,
-            to: normalizeEmail(message.to), bodyHash: store.sha256(proposal.body_text) },
+            rfcMessageId: message.messageId || null, labelIds: message.labelIds || null,
+            fromRole: message.fromRole || null,
+            to: provider === 'gmail' ? normalizeEmail(message.to) : proposal.to_address,
+            bodyHash: store.sha256(proposal.body_text) },
         });
         await store.transitionEffect(db, { effectId: sent.effectId, status: 'verified_by_readback',
-          providerStatus: 'sent_label_verified', providerRef: sent.messageId,
+          providerStatus: provider === 'gmail' ? 'sent_label_verified' : 'message_readback_verified', providerRef: sent.messageId,
           response: { evidenceId: evidence.id, threadId: message.threadId, rfcMessageId: message.messageId } });
         return { evidenceId: evidence.id, message };
       },
@@ -497,31 +588,41 @@ const confirmDefinition = {
         const proposal = state.accept_proposal;
         const sent = state.send_via_gmail;
         const readback = state.verify_readback;
+        const provider = String(proposal.provider || 'gmail');
         const now = readback.message.internalDate || new Date().toISOString();
+        const fromAddress = provider === 'gmail' ? readback.message.from?.address || null : 'ownerrez:host';
+        const toAddress = provider === 'gmail' ? proposal.to_address
+          : proposal.inbound_from_address || proposal.to_address;
+        const rfcMessageId = provider === 'gmail' ? readback.message.messageId : null;
+        const inReplyTo = provider === 'gmail' ? readback.message.inReplyTo : null;
+        const references = provider === 'gmail' ? readback.message.references : null;
+        const providerMetadata = provider === 'ownerrez'
+          ? proposal.inbound_provider_metadata_json : null;
         let event;
         try {
           await db.tx(async tx => {
             const rows = await tx.query(sql`INSERT OR IGNORE INTO email_threads (
                 contact_id, outreach_send_id, direction, subject, body_text,
                 from_address, to_address, received_at, provider, provider_message_id,
-                provider_thread_id, rfc_message_id, in_reply_to, references_header,
+                provider_thread_id, provider_metadata_json, rfc_message_id, in_reply_to, references_header,
                 raw_body_text, actor_user_id, processing_status, processed_at,
                 slack_channel_id, slack_thread_ts, workflow_run_id, workflow_effect_id
               ) VALUES (
                 ${proposal.contact_id}, ${proposal.outreach_send_id}, 'outbound', ${proposal.subject},
-                ${proposal.body_text}, ${readback.message.from?.address || null}, ${proposal.to_address},
-                ${now}, 'gmail', ${sent.messageId}, ${readback.message.threadId},
-                ${readback.message.messageId}, ${readback.message.inReplyTo},
-                ${readback.message.references}, ${proposal.body_text}, ${run.actor_user_id},
+                ${proposal.body_text}, ${fromAddress}, ${toAddress},
+                ${now}, ${provider}, ${sent.messageId}, ${readback.message.threadId},
+                ${providerMetadata}, ${rfcMessageId}, ${inReplyTo},
+                ${references}, ${proposal.body_text}, ${run.actor_user_id},
                 'processed', ${now}, ${proposal.slack_channel_id}, ${proposal.slack_thread_ts},
                 ${run.id}, ${sent.effectId}
               ) RETURNING *`);
             [event] = rows;
-            if (!event) [event] = await tx.query(sql`SELECT * FROM email_threads WHERE provider='gmail' AND provider_message_id=${sent.messageId}`);
+            if (!event) [event] = await tx.query(sql`SELECT * FROM email_threads
+              WHERE provider=${provider} AND provider_message_id=${sent.messageId}`);
             await tx.query(sql`UPDATE email_reply_proposals SET status='completed',
               provider_message_id=${sent.messageId}, provider_thread_id=${readback.message.threadId},
               processing_error=NULL, completed_at=${now}, updated_at=${now} WHERE id=${proposal.id}`);
-            await store.recordEvent(tx, { runId: run.id, stepKey, type: 'outbound_email_projection_persisted',
+            await store.recordEvent(tx, { runId: run.id, stepKey, type: 'outbound_message_projection_persisted',
               payload: { emailThreadId: event.id, effectId: sent.effectId, providerRef: sent.messageId } });
           });
         } catch (error) {
@@ -540,14 +641,16 @@ const confirmDefinition = {
         const sent = state.send_via_gmail;
         const verified = state.verify_readback;
         const eventId = state.persist_projection.emailThreadId;
+        const provider = String(proposal.provider || 'gmail');
+        const transport = provider === 'ownerrez' ? 'OwnerRez' : 'Gmail';
         const message = [
-          `📤 *Email sent to ${proposal.to_address}*`,
+          `📤 *${transport} message sent${provider === 'gmail' ? ` to ${proposal.to_address}` : ''}*`,
           '', quotedBody(proposal.body_text), '',
-          'Gmail acceptance and Sent-folder readback are verified.',
+          `${transport} acceptance and provider readback are verified.`,
           `Email event: ${eventId} · Workflow: ${run.id} · Effect: ${sent.effectId} · Evidence: ${verified.evidenceId}`,
         ].join('\n');
         await store.enqueueOutbox(db, { runId: run.id, topic: 'slack.notification',
-          idempotencyKey: `${proposal.id}:gmail-send:slack`,
+          idempotencyKey: `${proposal.id}:${provider}-send:slack`,
           payload: { channelId: proposal.slack_channel_id, threadTs: proposal.slack_thread_ts,
             message, emailThreadId: eventId } });
         return { queued: true };
@@ -559,6 +662,7 @@ const confirmDefinition = {
       status: 'verified_by_readback', proposalId: state.accept_proposal.id,
       outreachSendId: state.accept_proposal.outreach_send_id,
       recipient: state.accept_proposal.to_address,
+      provider: state.accept_proposal.provider,
       messageId: state.send_via_gmail.messageId,
       emailThreadId: state.persist_projection.emailThreadId,
       effectId: state.send_via_gmail.effectId,

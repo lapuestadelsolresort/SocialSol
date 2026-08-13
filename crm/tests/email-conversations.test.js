@@ -14,7 +14,7 @@ const {
   resolveOutreachSend,
   stripQuotedHistory,
 } = require('../lib/email-conversations');
-const { ensureSchemaAsync } = require('../lib/workflow-schema');
+const { ensureSchemaAsync, rebuildEmailReplyProposalsAsync } = require('../lib/workflow-schema');
 
 async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'email-conversations-'));
@@ -134,4 +134,62 @@ test('legacy email_threads upgrades and Gmail ingestion is matched and idempoten
     const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM email_threads`);
     assert.equal(count, 1);
   });
+});
+
+test('legacy Gmail reply proposals migrate without losing pending confirmations', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'email-proposals-'));
+  const db = createDB(path.join(directory, 'crm.db'));
+  try {
+    await db.query(sql`CREATE TABLE email_reply_proposals (
+      id TEXT PRIMARY KEY,
+      outreach_send_id INTEGER NOT NULL,
+      contact_id INTEGER NOT NULL,
+      inbound_email_thread_id INTEGER NOT NULL,
+      to_address TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body_text TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      acceptance_hash TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      proposed_by TEXT NOT NULL,
+      confirmed_by TEXT,
+      slack_channel_id TEXT NOT NULL,
+      slack_thread_ts TEXT NOT NULL,
+      proposal_run_id TEXT,
+      confirmation_run_id TEXT,
+      provider_message_id TEXT,
+      provider_thread_id TEXT,
+      workflow_effect_id TEXT,
+      processing_error TEXT,
+      expires_at TEXT NOT NULL,
+      confirmed_at TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`);
+    await db.query(sql`INSERT INTO email_reply_proposals (
+      id, outreach_send_id, contact_id, inbound_email_thread_id,
+      to_address, subject, body_text, request_hash, acceptance_hash,
+      proposed_by, slack_channel_id, slack_thread_ts, expires_at,
+      created_at, updated_at
+    ) VALUES (
+      'proposal-legacy', 12, 34, 56, 'guest@example.com', 'Re: Stay',
+      'Yes, those dates work.', 'request-hash', 'accept-hash', 'U-SARAH',
+      'CPAULINA', '123.45', '2026-08-13T22:00:00Z',
+      '2026-08-13T20:00:00Z', '2026-08-13T20:00:00Z'
+    )`);
+    assert.equal(await rebuildEmailReplyProposalsAsync(db, sql), true);
+    const columns = new Map((await db.query(sql`PRAGMA table_info(email_reply_proposals)`))
+      .map(column => [column.name, column]));
+    assert.equal(columns.get('outreach_send_id').notnull, 0);
+    assert.equal(columns.get('contact_id').notnull, 0);
+    assert.equal(columns.get('provider').notnull, 1);
+    const [proposal] = await db.query(sql`SELECT * FROM email_reply_proposals WHERE id='proposal-legacy'`);
+    assert.equal(proposal.provider, 'gmail');
+    assert.equal(proposal.body_text, 'Yes, those dates work.');
+    assert.equal(proposal.status, 'pending');
+  } finally {
+    await db.dispose();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

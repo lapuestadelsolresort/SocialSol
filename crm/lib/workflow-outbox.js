@@ -69,8 +69,26 @@ async function failOutbox(db, row, error) {
 
 async function deliverSlackNotification(db, row, payload, services = {}) {
   const post = services.postToChannel || postToChannel;
+  let threadTs = payload.threadTs || null;
+  let conversationRows = [];
+  if (!threadTs && payload.emailConversation?.provider && payload.emailConversation?.providerThreadId) {
+    conversationRows = await db.query(sql`SELECT id, slack_thread_ts, slack_message_ts
+      FROM email_threads
+      WHERE provider=${String(payload.emailConversation.provider)}
+        AND provider_thread_id=${String(payload.emailConversation.providerThreadId)}
+        AND slack_channel_id=${String(payload.channelId)}
+      ORDER BY id`);
+    const root = conversationRows.find(event => event.slack_thread_ts || event.slack_message_ts);
+    threadTs = root?.slack_thread_ts || root?.slack_message_ts || null;
+    if (!threadTs && conversationRows[0]
+        && Number(conversationRows[0].id) !== Number(payload.emailThreadId)) {
+      const error = new Error('email conversation Slack root is not ready');
+      error.code = 'email_slack_root_pending';
+      throw error;
+    }
+  }
   const result = await post(payload.channelId, payload.message, {
-    threadTs: payload.threadTs || null,
+    threadTs,
     account: payload.account || process.env.OPENCLAW_SLACK_ACCOUNT || '',
   });
   if (!result.ok) throw new Error(result.error || 'Slack notification failed');
@@ -81,6 +99,13 @@ async function deliverSlackNotification(db, row, payload, services = {}) {
   if (payload.emailThreadId && result.ts) {
     await db.query(sql`UPDATE email_threads SET slack_message_ts=${result.ts},
       updated_at=datetime('now') WHERE id=${Number(payload.emailThreadId)}`);
+  }
+  if (payload.emailConversation?.provider && payload.emailConversation?.providerThreadId && result.ts) {
+    const rootTs = threadTs || result.ts;
+    await db.query(sql`UPDATE email_threads SET slack_channel_id=${String(payload.channelId)},
+      slack_thread_ts=${rootTs}, updated_at=datetime('now')
+      WHERE provider=${String(payload.emailConversation.provider)}
+        AND provider_thread_id=${String(payload.emailConversation.providerThreadId)}`);
   }
   return result;
 }

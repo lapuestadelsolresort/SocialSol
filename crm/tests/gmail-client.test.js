@@ -47,3 +47,22 @@ test('Gmail sending requests both readback and send delegation scopes', () => {
     'https://www.googleapis.com/auth/gmail.send',
   ]));
 });
+
+test('Gmail mailbox listing can include Spam without including Trash', async () => {
+  const calls = [];
+  const gmail = {
+    users: { messages: { list: async input => {
+      calls.push(input);
+      return { data: { messages: [{ id: 'm1' }] } };
+    } } },
+  };
+  const ids = await _internal.listMessageIds(
+    gmail,
+    '-in:trash -in:chats -in:sent after:123',
+    500,
+    { includeSpamTrash: true },
+  );
+  assert.deepEqual(ids, ['m1']);
+  assert.equal(calls[0].includeSpamTrash, true);
+  assert.match(calls[0].q, /-in:trash/);
+});

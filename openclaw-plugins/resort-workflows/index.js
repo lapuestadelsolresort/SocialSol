@@ -271,9 +271,10 @@ export function formatWorkflowReply(payload) {
   }
   if (run.workflow_name === 'email.reply.propose') {
     const output = run.output || {};
+    const transport = output.provider === 'ownerrez' ? 'OwnerRez message' : 'email';
     return [
-      'No email has been sent.',
-      `Recipient: ${output.recipient || output.toAddress || 'unknown'} · Draft #${output.outreachSendId || 'unknown'}`,
+      `No ${transport} has been sent.`,
+      `Recipient: ${output.recipient || output.toAddress || 'unknown'}${output.outreachSendId ? ` · Draft #${output.outreachSendId}` : ''}`,
       `Immutable request: ${output.requestHash || 'unknown'}`,
       '',
       `> ${String(output.bodyText || '').split('\n').join('\n> ')}`,
@@ -285,8 +286,9 @@ export function formatWorkflowReply(payload) {
   }
   if (run.workflow_name === 'email.reply.confirm') {
     const output = run.output || {};
+    const provider = output.provider === 'ownerrez' ? 'OwnerRez' : 'Gmail';
     return [
-      `Email to ${output.recipient || 'the contact'} was accepted by Gmail and verified in Sent.`,
+      `${provider} message to ${output.recipient || 'the contact'} was accepted and verified by provider readback.`,
       `Proposal: ${output.proposalId || 'unknown'} · Email event: ${output.emailThreadId || 'unknown'}`,
       `Workflow: ${run.id}${output.effectId ? ` · Effect: ${output.effectId}` : ''}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
     ].join('\n');
@@ -931,7 +933,7 @@ export function createEmailClaimHandler({ config, execute = callControlPlane, lo
     if (command.error) {
       return {
         handled: true,
-        reply: { text: 'Not sent. Use `!email reply <message>` in the original draft thread. Confirm there with the exact emitted `!email confirm ...` command.' },
+        reply: { text: 'Not sent. Use `!email reply <message>` in the original message thread. Confirm there with the exact emitted `!email confirm ...` command.' },
       };
     }
     const workflow = command.action === 'confirm' ? 'email.reply.confirm'

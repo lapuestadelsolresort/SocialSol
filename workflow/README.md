@@ -69,6 +69,13 @@ flowchart LR
 - Meta DMs: the former loopback HTTP sender is retired. Instagram/Facebook
   replies use `!dm <dm-id> <message>` in `#social-sol`, a command-only durable
   workflow, and provider acceptance is never presented as delivery.
+- Sarah messages: the five-minute Gmail ledger projects every new mailbox
+  message into `#sarah-email`, while OwnerRez `thread_message` webhooks project
+  Airbnb/Vrbo messages through the same ledger. Each provider conversation has
+  one Slack root. `!email reply` is intercepted before the model and follows an
+  immutable same-user/same-thread confirmation path; Gmail and OwnerRez sends
+  each require exact provider readback. Direct replies Sarah sends outside
+  Slack are captured into the original thread.
 - Paid media: `marketing.snapshot.read` records live Meta delivery, exact CRM
   conversions, tracking health, and the only bounded actions available to
   autonomy. Evidence must cover at least three completed local days; daily

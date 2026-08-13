@@ -17,6 +17,8 @@
     <string>__SOCIALSOL_ROOT__</string>
     <key>PROSPECTOR_SLACK_CHANNEL</key>
     <string>__PROSPECTOR_SLACK_CHANNEL__</string>
+    <key>SARAH_EMAIL_SLACK_CHANNEL</key>
+    <string>__SARAH_EMAIL_SLACK_CHANNEL__</string>
     <key>OPENCLAW_SLACK_ACCOUNT</key>
     <string>__OPENCLAW_SLACK_ACCOUNT__</string>
     <key>GMAIL_IMPERSONATE_USER</key>

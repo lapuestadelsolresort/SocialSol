@@ -72,7 +72,7 @@ test('narrow live workflow cutovers remove the shadow-only prompt for their owni
   }
 });
 
-test('Prospector rendering exposes only thread-bound email commands to the trusted adapter', () => {
+test('email console rendering exposes only thread-bound commands to both authorized channels', () => {
   const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
   process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';
   try {
@@ -82,15 +82,20 @@ test('Prospector rendering exposes only thread-bound email commands to the trust
         live_workflows: ['email.reply.propose', 'email.reply.confirm', 'email.message.classify'],
         channels: {
           CPAULINA: { name: 'prospector-paulina', capabilities: ['paulina.read', 'email.read', 'email.send'] },
+          CEMAIL: { name: 'sarah-email', capabilities: ['email.read', 'email.send', 'crm.read', 'crm.write'] },
         },
       },
       currentConfig: { channels: { slack: { accounts: { 'test-account': {} } } } },
     });
-    assert.deepEqual(patch.plugins.entries['resort-workflows'].config.emailChannelIds, ['CPAULINA']);
+    assert.deepEqual(patch.plugins.entries['resort-workflows'].config.emailChannelIds, ['CPAULINA', 'CEMAIL']);
     const channel = patch.channels.slack.accounts['test-account'].channels.CPAULINA;
     assert.match(channel.systemPrompt, /same thread sends through Gmail/);
     assert.match(channel.systemPrompt, /top-level email commands never send/);
     assert.deepEqual(channel.tools.allow, ['resort_workflow']);
+    const sarah = patch.channels.slack.accounts['test-account'].channels.CEMAIL;
+    assert.match(sarah.systemPrompt, /Gmail and OwnerRez/);
+    assert.match(sarah.systemPrompt, /same user in that same thread/);
+    assert.deepEqual(sarah.tools.allow, ['resort_workflow']);
   } finally {
     if (previousAccount === undefined) delete process.env.OPENCLAW_SLACK_ACCOUNT;
     else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;

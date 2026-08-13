@@ -12,6 +12,7 @@ const createDB = createDBModule.default || createDBModule;
 const { sql } = require('@databases/sqlite');
 const { ensureSchemaAsync } = require('../lib/workflow-schema');
 const { buildRouter } = require('../routes/ownerrez');
+const { messageEntityId, messageThreadIds } = require('../workflows/ownerrez-event');
 
 async function request(app, body) {
   const server = http.createServer(app);
@@ -68,4 +69,14 @@ test('OwnerRez returns a retryable error when the database is unavailable', asyn
     loadCredentials: () => ({ user: 'hook-user', pass: 'hook-pass' }),
   }));
   assert.equal((await request(app, { event_type: 'inquiry_created' })).status, 503);
+});
+
+test('OwnerRez message webhooks resolve their exact nested thread for ledger ingestion', () => {
+  assert.deepEqual(messageThreadIds({
+    entity: { thread: { id: 884422 } },
+  }), [884422]);
+  assert.deepEqual(messageThreadIds({
+    entity: { thread_ids: [884422, 884423, 884422] },
+  }), [884422, 884423]);
+  assert.equal(messageEntityId({ entity: { id: 112025999 } }), 112025999);
 });
