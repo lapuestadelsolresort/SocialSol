@@ -7,8 +7,50 @@ const { expenseAccountChoices } = require('./accounting-config');
 
 const ENDPOINT = 'https://api.openai.com/v1/responses';
 const DEFAULT_MODEL = 'gpt-4.1';
-const MAX_FILES = 5;
+const MAX_FILES = 20;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+
+function reimbursementExtractionSchema(categoryKeys, fileIds) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['items', 'confidence', 'review_reason'],
+    properties: {
+      items: {
+        type: 'array',
+        minItems: fileIds.length || 1,
+        maxItems: fileIds.length || 1,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'file_ref_id', 'document_type', 'vendor', 'transaction_date', 'currency',
+            'amount', 'description', 'category_key', 'confidence', 'review_reason',
+          ],
+          properties: {
+            file_ref_id: fileIds.length
+              ? { type: 'string', enum: fileIds }
+              : { type: 'null' },
+            document_type: {
+              type: 'string',
+              enum: ['receipt', 'invoice', 'quotation', 'payment_confirmation', 'other'],
+            },
+            vendor: { type: ['string', 'null'] },
+            transaction_date: { type: ['string', 'null'], description: 'YYYY-MM-DD' },
+            currency: { type: ['string', 'null'], enum: ['MXN', 'USD', null] },
+            amount: { type: ['number', 'null'] },
+            description: { type: ['string', 'null'] },
+            category_key: { type: ['string', 'null'], enum: [...categoryKeys, null] },
+            confidence: { type: 'number', minimum: 0, maximum: 1 },
+            review_reason: { type: ['string', 'null'] },
+          },
+        },
+      },
+      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      review_reason: { type: ['string', 'null'] },
+    },
+  };
+}
 
 function extractionSchema(categoryKeys) {
   return {
@@ -51,6 +93,26 @@ function buildInstructions({ ownerName, liabilityAccountName, accounts }) {
     `The owner ledger account is ${liabilityAccountName}. For owner_paid_expense choose only the debit expense category below.`,
     'Choose the narrowest supported category. If classification is genuinely ambiguous, use null and explain why.',
     'Do not invent missing fields. Lower confidence when the document is unreadable, fields conflict, or payment provenance is unclear.',
+    '',
+    'Allowed expense categories:',
+    choices,
+  ].join('\n');
+}
+
+function buildReimbursementInstructions({ accounts, fileIds }) {
+  const choices = accounts.map(account => `${account.key}: ${account.name}`).join('\n');
+  return [
+    'Extract a reimbursement bundle posted in a dedicated resort receipt channel.',
+    'Channel membership is conclusive intent: every top-level post is a business transaction paid by the human submitter and must be logged for reimbursement.',
+    'A quotation or estimate posted here is also a reimbursable transaction. Extract it normally; do not reject it merely because it says cotización, quote, or estimate.',
+    fileIds.length
+      ? `Return exactly one item for each attached source file (${fileIds.length} total), using each supplied file_ref_id exactly once.`
+      : 'There is no attachment. Return exactly one item extracted from the Slack text with file_ref_id null.',
+    'Each item amount is that document’s total in its original currency. Never use a balance, subtotal when a total exists, or unit price when an extended total exists.',
+    'Use the document transaction date, not the Slack upload date, and format it YYYY-MM-DD.',
+    'Choose the narrowest supported expense category. Quotations for repair parts, plumbing, filters, hardware, or installed equipment are normally maintenance unless the document clearly supports another category.',
+    'Do not combine files, omit a file, or invent missing fields. If a document is unreadable, return null for the missing field and explain it in review_reason.',
+    'All items in one reimbursement must use the same currency. Report the document faithfully if they differ; the workflow will hold the bundle for review.',
     '',
     'Allowed expense categories:',
     choices,
@@ -110,6 +172,145 @@ function validateExtraction(value, categoryKeys) {
     throw new Error('receipt extraction returned invalid confidence');
   }
   return value;
+}
+
+function validateReimbursementExtraction(value, categoryKeys, fileIds) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('reimbursement extraction was not an object');
+  }
+  if (!Array.isArray(value.items) || value.items.length !== (fileIds.length || 1)) {
+    throw new Error('reimbursement extraction did not return one item per source document');
+  }
+  const seen = new Set();
+  for (const item of value.items) {
+    if (!['receipt', 'invoice', 'quotation', 'payment_confirmation', 'other'].includes(item.document_type)) {
+      throw new Error('reimbursement extraction returned an invalid document type');
+    }
+    if (fileIds.length) {
+      if (!fileIds.includes(item.file_ref_id) || seen.has(item.file_ref_id)) {
+        throw new Error('reimbursement extraction did not bind each source file exactly once');
+      }
+      seen.add(item.file_ref_id);
+    } else if (item.file_ref_id !== null) {
+      throw new Error('text-only reimbursement extraction returned a file reference');
+    }
+    if (item.transaction_date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(item.transaction_date)) {
+      throw new Error('reimbursement extraction returned an invalid date');
+    }
+    if (item.currency !== null && !['MXN', 'USD'].includes(item.currency)) {
+      throw new Error('reimbursement extraction returned an invalid currency');
+    }
+    if (item.amount !== null && (!Number.isFinite(item.amount) || item.amount <= 0)) {
+      throw new Error('reimbursement extraction returned an invalid amount');
+    }
+    if (item.category_key !== null && !categoryKeys.includes(item.category_key)) {
+      throw new Error('reimbursement extraction returned an unknown expense category');
+    }
+    if (!Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1) {
+      throw new Error('reimbursement extraction returned invalid item confidence');
+    }
+  }
+  if (fileIds.length && seen.size !== fileIds.length) {
+    throw new Error('reimbursement extraction omitted a source file');
+  }
+  if (!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1) {
+    throw new Error('reimbursement extraction returned invalid confidence');
+  }
+  return value;
+}
+
+async function requestStructuredExtraction({ content, schema, schemaName, maxOutputTokens }, options = {}) {
+  const model = process.env.RECEIPT_EXTRACTION_MODEL || DEFAULT_MODEL;
+  const request = {
+    model,
+    store: false,
+    max_output_tokens: maxOutputTokens,
+    input: [{ role: 'user', content }],
+    text: { format: { type: 'json_schema', name: schemaName, strict: true, schema } },
+  };
+  const apiKey = options.apiKey || getOpenAIKey();
+  const fetchImpl = options.fetchImpl || fetch;
+  let response;
+  try {
+    response = await fetchImpl(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(90_000),
+    });
+  } catch (error) {
+    return { ok: false, confidence: 0, reviewReason: `OpenAI extraction request failed: ${error.message}` };
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.status === 'failed' || payload.status === 'incomplete') {
+    const detail = payload.error?.message || payload.incomplete_details?.reason || `HTTP ${response.status}`;
+    return { ok: false, confidence: 0, reviewReason: `OpenAI extraction unavailable: ${String(detail).slice(0, 240)}` };
+  }
+  return { payload, model, request };
+}
+
+async function extractReimbursementReceipt({ messageText, files }, options = {}) {
+  const accounts = options.accounts || expenseAccountChoices();
+  const categoryKeys = accounts.map(account => account.key);
+  const selectedFiles = (Array.isArray(files) ? files : []).slice(0, MAX_FILES);
+  if (Array.isArray(files) && files.length > MAX_FILES) {
+    return { ok: false, confidence: 0, reviewReason: `receipt bundle exceeds ${MAX_FILES} files` };
+  }
+  const fileIds = selectedFiles.map(file => String(file.id || '')).filter(Boolean);
+  if (fileIds.length !== selectedFiles.length || new Set(fileIds).size !== fileIds.length) {
+    return { ok: false, confidence: 0, reviewReason: 'receipt source files do not have unique Slack file ids' };
+  }
+  const schema = reimbursementExtractionSchema(categoryKeys, fileIds);
+  const content = [{
+    type: 'input_text',
+    text: [
+      buildReimbursementInstructions({ accounts, fileIds }),
+      '',
+      'Slack message:',
+      String(messageText || '').slice(0, 12_000) || '(no accompanying text)',
+      '',
+      `Source file ids in attachment order: ${fileIds.join(', ') || '(none)'}`,
+    ].join('\n'),
+  }];
+  let totalBytes = 0;
+  for (const file of selectedFiles) {
+    const item = fileContentBlock(file);
+    totalBytes += item.bytes;
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      return { ok: false, confidence: 0, reviewReason: `receipt attachments exceed ${MAX_TOTAL_BYTES} bytes` };
+    }
+    content.push(item.block);
+  }
+  const response = await requestStructuredExtraction({
+    content,
+    schema,
+    schemaName: 'reimbursement_receipt_bundle',
+    maxOutputTokens: Math.min(6000, 800 + (selectedFiles.length || 1) * 500),
+  }, options);
+  if (!response.payload) return response;
+  try {
+    const raw = responseText(response.payload);
+    if (!raw) throw new Error('no structured output text');
+    const extracted = validateReimbursementExtraction(JSON.parse(raw), categoryKeys, fileIds);
+    return {
+      ok: true,
+      extracted,
+      confidence: extracted.confidence,
+      responseId: response.payload.id || null,
+      model: response.payload.model || response.model,
+      usage: response.payload.usage || null,
+      requestHash: crypto.createHash('sha256')
+        .update(JSON.stringify({ model: response.model, schema }))
+        .digest('hex'),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      confidence: 0,
+      responseId: response.payload.id || null,
+      reviewReason: `OpenAI extraction parse failed: ${error.message}`,
+    };
+  }
 }
 
 async function extractOwnerExpense({ messageText, files, profile }, options = {}) {
@@ -194,9 +395,13 @@ module.exports = {
   MAX_FILES,
   MAX_TOTAL_BYTES,
   buildInstructions,
+  buildReimbursementInstructions,
   extractOwnerExpense,
+  extractReimbursementReceipt,
   extractionSchema,
+  reimbursementExtractionSchema,
   fileContentBlock,
   responseText,
   validateExtraction,
+  validateReimbursementExtraction,
 };

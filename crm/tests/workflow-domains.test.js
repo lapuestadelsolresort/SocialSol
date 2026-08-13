@@ -88,7 +88,7 @@ async function seedWorkflowRun(db, {
 test('registry exposes fixed domain graphs instead of arbitrary command execution', () => {
   const definitions = new Map(listDefinitions().map(item => [item.name, item]));
   for (const expected of [
-    'whatsapp.reply', 'whatsapp.inbound.process', 'meta.dm.reply', 'receipt.ingest', 'receipt.annotate', 'receipt.reconcile',
+    'whatsapp.reply', 'whatsapp.inbound.process', 'meta.dm.reply', 'receipt.ingest', 'receipt.process', 'receipt.annotate', 'receipt.reconcile',
     'social.content.upsert', 'social.content.publish', 'social.publish_routine',
     'paulina.daily', 'paulina.prepare_daily', 'paulina.performance.read', 'regina.daily', 'regina.campaign',
     'guest.reply.draft', 'crm.sync', 'crm.pipeline.read',
@@ -311,13 +311,20 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     const definition = getDefinition('receipt.ingest');
     const request = {
       idempotencyKey: 'slack:RECEIPT-A:171.2:receipt.ingest',
-      triggerType: 'slack', triggerRef: '171.2', channelId: 'RECEIPT-A', actorUserId: 'UTESTWORKER',
-      input: { slackMessageId: '171.2', messageText: 'Materials 1250 MXN', fileRefs: [{ id: 'F1', name: 'receipt.jpg' }] },
+      triggerType: 'slack_receipt_hook', triggerRef: '171.2', channelId: 'RECEIPT-A', actorUserId: 'UTESTWORKER',
+      input: { slackMessageId: '171.2' },
     };
-    const first = await startGraph(db, definition, request);
+    const services = { fetchSlackReceipt: async () => ({
+      channelId: 'RECEIPT-A', messageId: '171.2', messageText: 'Materials 1250 MXN',
+      submittedAt: '2026-08-10T12:00:00.000Z', shouldProcess: true,
+      files: [{ id: 'F1', name: 'receipt.jpg', mimetype: 'image/jpeg', size: 100,
+        sha256: 'a'.repeat(64), localPath: '/runtime/receipt.jpg' }],
+    }) };
+    const first = await startGraph(db, definition, request, services);
     const replay = await startGraph(db, definition, request);
     assert.equal(first.id, replay.id);
-    assert.equal(first.output.status, 'verified_by_readback');
+    assert.equal(first.output.status, 'queued');
+    assert.ok(first.output.processRunId);
     const [{ count }] = await db.query(sql`SELECT COUNT(*) AS count FROM accounting_receipts`);
     assert.equal(count, 1);
 

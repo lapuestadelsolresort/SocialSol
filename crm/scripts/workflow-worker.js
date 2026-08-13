@@ -16,7 +16,7 @@ const { sendMetaDm } = require('../lib/meta-dm');
 const { requestOwnerRez } = require('../lib/ownerrez-api');
 const { runCommand } = require('../lib/workflow-command');
 const { fetchSlackReceiptSource } = require('../lib/slack-receipt-source');
-const { extractOwnerExpense } = require('../lib/receipt-extraction');
+const { extractOwnerExpense, extractReimbursementReceipt } = require('../lib/receipt-extraction');
 const { sendGmailReply, readSentMessage, searchEmailActivity } = require('../lib/gmail-client');
 const { sendOwnerRezMessage, readOwnerRezMessage } = require('../lib/ownerrez-messages');
 const { authorize, loadPolicy } = require('../lib/channel-policy');
@@ -40,6 +40,7 @@ function executionServices() {
     runCommand,
     fetchSlackReceipt: params => fetchSlackReceiptSource(params),
     extractOwnerExpense: params => extractOwnerExpense(params),
+    extractReimbursementReceipt: params => extractReimbursementReceipt(params),
     sendEmail: params => sendGmailReply(params),
     readEmail: messageId => readSentMessage(messageId),
     readEmailActivity: params => searchEmailActivity(params),

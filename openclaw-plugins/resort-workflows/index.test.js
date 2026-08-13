@@ -297,7 +297,7 @@ test('parses clear next/upcoming reservation reads but excludes other OwnerRez i
   assert.equal(parseReservationReadRequest('Who owns the resort?', options), null);
 });
 
-test('receipt hook binds channel, sender, and Slack file ids from the trusted event', async () => {
+test('receipt hook binds channel and sender while exact source files are refetched downstream', async () => {
   const config = pluginConfig({
     receiptChannelIds: ['C123RECEIPT'], slackAccountId: 'ig-drafts', shadowMode: false,
   });
@@ -317,8 +317,23 @@ test('receipt hook binds channel, sender, and Slack file ids from the trusted ev
   assert.equal(calls.length, 1);
   assert.equal(calls[0].context.channelId, 'C123RECEIPT');
   assert.equal(calls[0].context.actorUserId, 'U-WORKER');
-  assert.deepEqual(calls[0].input.fileRefs, [{ id: 'F-1', name: 'receipt.jpg', mimetype: 'image/jpeg', size: 100 }]);
+  assert.deepEqual(calls[0].input, { slackMessageId: '171.25' });
   assert.equal(calls[0].idempotencyKey, 'slack:C123RECEIPT:171.25:receipt.ingest');
+});
+
+test('receipt hook treats thread replies as discussion, not new reimbursements', async () => {
+  const config = pluginConfig({ receiptChannelIds: ['C123RECEIPT'], shadowMode: false });
+  const calls = [];
+  await createReceiptHandler({
+    config,
+    execute: async (_config, request) => { calls.push(request); return COMPLETED; },
+  })({
+    content: 'Confirmed', messageId: '171.26', senderId: 'U-WORKER', threadId: '171.25',
+    metadata: { channelId: 'C123RECEIPT' },
+  }, {
+    channelId: 'slack', conversationId: 'C123RECEIPT', messageId: '171.26', senderId: 'U-WORKER',
+  });
+  assert.equal(calls.length, 0);
 });
 
 test('accounting CSV hook stages trusted Slack uploads for the fixed inbox workflow', async () => {
@@ -776,6 +791,9 @@ test('model-facing tool cannot invoke command-only WhatsApp sends', async () => 
   }), error => error.code === 'workflow_command_required');
   await assert.rejects(() => tool.execute('tool-call-4', {
     workflow: 'marketing.change.confirm', input: {},
+  }), error => error.code === 'workflow_command_required');
+  await assert.rejects(() => tool.execute('tool-call-5', {
+    workflow: 'receipt.ingest', input: { slackMessageId: 'model-guessed' },
   }), error => error.code === 'workflow_command_required');
   delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
 });

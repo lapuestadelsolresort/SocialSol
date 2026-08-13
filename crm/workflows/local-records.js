@@ -4,7 +4,8 @@ const crypto = require('node:crypto');
 const { sql } = require('@databases/sqlite');
 const { callOne } = require('../lib/voice-service');
 const { loadPolicy } = require('../lib/channel-policy');
-const { loadAccountingConfig } = require('../lib/accounting-config');
+const { expenseAccount, loadAccountingConfig } = require('../lib/accounting-config');
+const { policySnapshot } = require('../lib/workflow-execution-policy');
 
 const PAYMENT_REFERENCE_RE = /\b(?:LPDSR|LPDS-R-)[A-F0-9]{16}\b/g;
 const KAPITAL_SAFE_PAYMENT_REFERENCE_RE = /^LPDSR[A-F0-9]{16}$/;
@@ -74,79 +75,77 @@ function buildReceiptPaymentInstruction({
 
 function validateReceipt(input) {
   if (!input || typeof input !== 'object') throw new Error('receipt input is required');
-  if (!String(input.slackMessageId || '').trim()) throw new Error('trusted Slack message id is required');
-  const text = String(input.messageText || '').trim();
-  const files = Array.isArray(input.fileRefs) ? input.fileRefs : [];
-  if (!text && files.length === 0) throw new Error('receipt message has no text or file references');
+  if (!/^\d+(?:\.\d+)?$/.test(String(input.slackMessageId || ''))) {
+    throw new Error('trusted Slack message timestamp is required');
+  }
 }
 
 const receiptIngest = {
   name: 'receipt.ingest',
-  version: 1,
+  version: 2,
   capability: 'receipts.submit',
   mutates: true,
+  allowedTriggers: ['slack_receipt_hook'],
   validate: validateReceipt,
   steps: [
     {
-      key: 'register_effect', maxAttempts: 1,
-      async run({ db, run, input, store, stepKey }) {
-        const source = {
+      key: 'fetch_source', effectClass: 'external_read', maxAttempts: 2,
+      async run({ run, input, services }) {
+        if (typeof services.fetchSlackReceipt !== 'function') {
+          throw new Error('Slack receipt source service is unavailable');
+        }
+        return services.fetchSlackReceipt({
           channelId: run.channel_id,
-          slackMessageId: input.slackMessageId,
-          messageText: String(input.messageText || ''),
-          fileRefs: input.fileRefs || [],
-        };
-        const effect = await store.createEffect(db, {
-          runId: run.id,
-          stepKey,
-          effectType: 'local_record_write',
-          provider: 'sqlite',
-          operation: 'accounting_receipt.upsert',
-          idempotencyKey: `${run.id}:sqlite:accounting_receipt.upsert`,
-          request: source,
-          target: { channelId: run.channel_id, messageId: input.slackMessageId },
+          messageId: input.slackMessageId,
+          threadTs: input.threadTs || null,
         });
-        return { effectId: effect.id, sourceHash: store.sha256(source) };
       },
     },
     {
-      key: 'persist_receipt', maxAttempts: 3,
-      async run({ db, run, input, state, store }) {
-        const id = crypto.randomUUID();
-        const submittedAt = input.submittedAt || new Date().toISOString();
-        const fileRefs = (Array.isArray(input.fileRefs) ? input.fileRefs : []).map(file => ({
+      key: 'persist_receipt', effectClass: 'local_write', maxAttempts: 2,
+      async run({ db, run, input, state, store, stepKey }) {
+        const source = state.fetch_source;
+        const files = (Array.isArray(source.files) ? source.files : []).map(file => ({
           id: String(file.id || '').slice(0, 160),
           name: String(file.name || '').slice(0, 300),
-          mimetype: String(file.mimetype || file.mimeType || '').slice(0, 160),
+          mimetype: String(file.mimetype || '').slice(0, 160),
           size: Number.isFinite(Number(file.size)) ? Number(file.size) : null,
+          sha256: String(file.sha256 || '').slice(0, 64),
+          localPath: String(file.localPath || '').slice(0, 2000),
         }));
+        const messageText = String(source.messageText || '');
+        if (!messageText.trim() && files.length === 0) {
+          return { ignored: true, reason: 'empty Slack receipt post' };
+        }
+        const sourceHash = store.sha256({
+          channelId: run.channel_id,
+          messageId: input.slackMessageId,
+          messageText,
+          files: files.map(({ id, name, mimetype, size, sha256 }) => ({ id, name, mimetype, size, sha256 })),
+        });
+        const id = crypto.randomUUID();
         await db.query(sql`INSERT OR IGNORE INTO accounting_receipts (
             id, slack_channel_id, slack_message_id, slack_thread_ts, submitted_by,
             submitted_at, message_text, file_refs_json, source_hash, status,
             workflow_run_id
           ) VALUES (
-            ${id}, ${run.channel_id}, ${input.slackMessageId}, ${input.threadTs || null},
-            ${run.actor_user_id}, ${submittedAt}, ${String(input.messageText || '')},
-            ${JSON.stringify(fileRefs)}, ${state.register_effect.sourceHash}, 'received', ${run.id}
+            ${id}, ${run.channel_id}, ${input.slackMessageId}, ${input.threadTs || input.slackMessageId},
+            ${run.actor_user_id}, ${source.submittedAt || input.submittedAt || new Date().toISOString()},
+            ${messageText}, ${JSON.stringify(files)}, ${sourceHash}, 'received', ${run.id}
           )`);
-        const [row] = await db.query(sql`SELECT id, source_hash, status FROM accounting_receipts
+        let [row] = await db.query(sql`SELECT * FROM accounting_receipts
           WHERE slack_channel_id=${run.channel_id} AND slack_message_id=${input.slackMessageId}`);
-        if (!row) throw new Error('receipt did not persist');
-        await store.transitionEffect(db, {
-          effectId: state.register_effect.effectId,
-          providerRef: row.id,
-          status: 'accepted_by_provider',
-          providerStatus: 'sqlite_committed',
-        });
-        return { receiptId: row.id, status: row.status };
-      },
-    },
-    {
-      key: 'verify_readback', maxAttempts: 2,
-      async run({ db, run, state, store, stepKey }) {
-        const [row] = await db.query(sql`SELECT id, slack_channel_id, slack_message_id, source_hash, status
-          FROM accounting_receipts WHERE id=${state.persist_receipt.receiptId}`);
-        if (!row || row.source_hash !== state.register_effect.sourceHash) {
+        if (row && row.source_hash !== sourceHash && row.status === 'received' && !row.qbo_entity_id) {
+          await db.query(sql`UPDATE accounting_receipts SET
+            slack_thread_ts=${input.threadTs || input.slackMessageId}, submitted_by=${run.actor_user_id},
+            submitted_at=${source.submittedAt || input.submittedAt || row.submitted_at},
+            message_text=${messageText}, file_refs_json=${JSON.stringify(files)},
+            source_hash=${sourceHash}, review_reason=NULL, extraction_json=NULL,
+            workflow_run_id=${run.id}, updated_at=datetime('now')
+            WHERE id=${row.id} AND status='received' AND qbo_entity_id IS NULL`);
+          [row] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${row.id}`);
+        }
+        if (!row || row.source_hash !== sourceHash) {
           const error = new Error('receipt readback hash mismatch');
           error.code = 'receipt_readback_mismatch';
           throw error;
@@ -154,22 +153,42 @@ const receiptIngest = {
         const evidence = await store.createEvidence(db, {
           runId: run.id,
           stepKey,
-          source: 'sqlite.accounting_receipts',
-          sourceRef: row.id,
-          payload: row,
+          source: 'slack.message.readback',
+          sourceRef: input.slackMessageId,
+          payload: { receiptId: row.id, sourceHash, fileCount: files.length },
         });
-        await store.transitionEffect(db, {
-          effectId: state.register_effect.effectId,
-          status: 'verified_by_readback',
-          providerStatus: 'row_hash_verified',
-          response: { evidenceId: evidence.id, payloadHash: evidence.payloadHash },
+        return {
+          receiptId: row.id, status: row.status, sourceHash,
+          evidenceId: evidence.id, ignored: false,
+        };
+      },
+    },
+    {
+      key: 'queue_processing', effectClass: 'local_write', maxAttempts: 2,
+      async run({ db, run, state, store }) {
+        if (state.persist_receipt.ignored) return { skipped: true, status: 'ignored' };
+        const policy = loadPolicy({ fresh: true });
+        const created = await store.createRun(db, {
+          definition: receiptProcess,
+          idempotencyKey: `receipt:${state.persist_receipt.receiptId}:process:v1:${state.persist_receipt.sourceHash.slice(0, 24)}`,
+          triggerType: 'workflow',
+          triggerRef: run.id,
+          channelId: run.channel_id,
+          actorUserId: run.actor_user_id,
+          input: { receiptId: state.persist_receipt.receiptId },
+          policySnapshot: policySnapshot(policy, receiptProcess),
         });
-        return { receiptId: row.id, evidenceId: evidence.id, status: row.status };
+        return { processRunId: created.run.id, queued: created.created, status: 'queued' };
       },
     },
   ],
   output({ state }) {
-    return { ...state.verify_readback, effectId: state.register_effect.effectId, status: 'verified_by_readback' };
+    return {
+      status: state.queue_processing.status,
+      receiptId: state.persist_receipt.receiptId || null,
+      evidenceId: state.persist_receipt.evidenceId || null,
+      processRunId: state.queue_processing.processRunId || null,
+    };
   },
 };
 
@@ -355,6 +374,11 @@ function normalizeReceiptItems(input) {
       throw new Error(`item ${offset + 1} has invalid categoryKey`);
     }
     if (itemCategoryName.length > 160) throw new Error(`item ${offset + 1} categoryName is too long`);
+    const extractionConfidence = item.extractionConfidence === undefined
+      ? 1 : Number(item.extractionConfidence);
+    if (!Number.isFinite(extractionConfidence) || extractionConfidence < 0 || extractionConfidence > 1) {
+      throw new Error(`item ${offset + 1} extractionConfidence must be between 0 and 1`);
+    }
     return {
       itemIndex: offset + 1,
       fileRefId,
@@ -365,6 +389,7 @@ function normalizeReceiptItems(input) {
       description: description || null,
       categoryKey: itemCategoryKey || null,
       categoryName: itemCategoryName || null,
+      extractionConfidence,
     };
   });
   const total = items.reduce((sum, item) => sum + item.amount, 0);
@@ -418,6 +443,22 @@ const receiptAnnotate = {
       const previousPaymentReference = receipt.payment_reference || null;
       const normalizedReference = kapitalSafePaymentReference(previousPaymentReference, receipt.id);
       const paymentReference = normalizedReference.paymentReference;
+      let priorExtraction = {};
+      if (run.trigger_type === 'workflow' && receipt.extraction_json) {
+        try { priorExtraction = JSON.parse(receipt.extraction_json); } catch { priorExtraction = {}; }
+      }
+      const extractionRecord = run.trigger_type === 'workflow'
+        ? {
+          ...priorExtraction,
+          annotation: {
+            source: 'automatic_receipt_process', processRunId: run.trigger_ref,
+            actorUserId: run.actor_user_id, itemCount: request.items.length,
+          },
+        }
+        : {
+          source: 'channel_member', actorUserId: run.actor_user_id,
+          itemCount: input.items === undefined ? null : request.items.length,
+        };
       const attachedFileIds = new Set((() => {
         try { return JSON.parse(receipt.file_refs_json || '[]'); } catch { return []; }
       })().map(file => String(file?.id || '')).filter(Boolean));
@@ -437,10 +478,8 @@ const receiptAnnotate = {
           description=${request.description}, category_key=${request.categoryKey}, category_name=${request.categoryName},
           payment_reference=${paymentReference},
           reimbursement_recipient_user_id=${request.reimbursementRecipientUserId},
-          extraction_json=${JSON.stringify({
-            source: 'channel_member', actorUserId: run.actor_user_id,
-            itemCount: input.items === undefined ? null : request.items.length,
-          })}, status='extracted', workflow_run_id=${run.id}, updated_at=datetime('now')
+          extraction_json=${JSON.stringify(extractionRecord)},
+          status='extracted', workflow_run_id=${run.id}, updated_at=datetime('now')
           WHERE id=${input.receiptId}`);
         if (input.items !== undefined) {
           await tx.query(sql`DELETE FROM accounting_receipt_items WHERE receipt_id=${input.receiptId}`);
@@ -451,7 +490,7 @@ const receiptAnnotate = {
             ) VALUES (
               ${crypto.randomUUID()}, ${input.receiptId}, ${item.itemIndex}, ${item.fileRefId},
               ${item.vendor}, ${item.transactionDate}, ${item.currency}, ${item.amount},
-              ${item.description}, ${item.categoryKey}, ${item.categoryName}, 1
+              ${item.description}, ${item.categoryKey}, ${item.categoryName}, ${item.extractionConfidence}
             )`);
           }
         }
@@ -545,6 +584,249 @@ const receiptAnnotate = {
   }],
   output({ state }) {
     return { ...state.write_annotation, ...state.queue_payment_instruction, status: 'verified_by_readback' };
+  },
+};
+
+function parseReceiptFiles(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function validReceiptDate(value) {
+  const text = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === text;
+}
+
+function reimbursementReviewReasons(result) {
+  if (!result?.ok) return [result?.reviewReason || 'receipt extraction was unavailable'];
+  const reasons = [];
+  const items = Array.isArray(result.extracted?.items) ? result.extracted.items : [];
+  if (!items.length) reasons.push('no reimbursement items were extracted');
+  const currencies = new Set();
+  items.forEach((item, offset) => {
+    const label = `item ${offset + 1}`;
+    if (!String(item.vendor || '').trim()) reasons.push(`${label} vendor is missing`);
+    if (!validReceiptDate(item.transaction_date)) reasons.push(`${label} date is missing or invalid`);
+    if (!['MXN', 'USD'].includes(item.currency)) reasons.push(`${label} currency is missing`);
+    else currencies.add(item.currency);
+    if (!Number.isFinite(Number(item.amount)) || Number(item.amount) <= 0) reasons.push(`${label} amount is missing`);
+    if (!String(item.description || '').trim()) reasons.push(`${label} description is missing`);
+    if (!String(item.category_key || '').trim()) reasons.push(`${label} expense category is missing`);
+    if (Number(item.confidence) < 0.8) {
+      reasons.push(`${label} confidence ${Number(item.confidence || 0).toFixed(2)} is below 0.80`);
+    }
+  });
+  if (currencies.size > 1) reasons.push('items use different currencies');
+  if (Number(result.extracted?.confidence) < 0.8) {
+    reasons.push(`bundle confidence ${Number(result.extracted?.confidence || 0).toFixed(2)} is below 0.80`);
+  }
+  return [...new Set(reasons)];
+}
+
+function automaticAnnotationInput(receipt, result) {
+  const sourceFiles = parseReceiptFiles(receipt.file_refs_json);
+  const fileOrder = new Map(sourceFiles.map((file, index) => [String(file.id || ''), index]));
+  const extracted = [...result.extracted.items].sort((left, right) => {
+    if (!sourceFiles.length) return 0;
+    return (fileOrder.get(String(left.file_ref_id)) ?? Number.MAX_SAFE_INTEGER)
+      - (fileOrder.get(String(right.file_ref_id)) ?? Number.MAX_SAFE_INTEGER);
+  });
+  const items = extracted.map(item => {
+    const account = expenseAccount(item.category_key, { fresh: true });
+    if (!account) throw new Error(`unknown reimbursement expense category: ${item.category_key}`);
+    return {
+      fileRefId: item.file_ref_id,
+      vendor: String(item.vendor).trim(),
+      transactionDate: item.transaction_date,
+      currency: item.currency,
+      amount: Number(item.amount),
+      description: String(item.description).trim(),
+      categoryKey: item.category_key,
+      categoryName: String(account.name),
+      extractionConfidence: Number(item.confidence),
+    };
+  });
+  const currencies = [...new Set(items.map(item => item.currency))];
+  if (currencies.length !== 1) throw new Error('automatic reimbursement annotation requires one currency');
+  const categoryKeys = [...new Set(items.map(item => item.categoryKey))];
+  const vendors = [...new Set(items.map(item => item.vendor))];
+  const total = Number(items.reduce((sum, item) => sum + item.amount, 0).toFixed(2));
+  return {
+    receiptId: receipt.id,
+    reimbursementRecipientUserId: receipt.submitted_by,
+    vendor: vendors.length === 1 ? vendors[0] : 'Multiple vendors',
+    transactionDate: items.map(item => item.transactionDate).sort().at(-1),
+    currency: currencies[0],
+    amount: total,
+    description: items.length === 1
+      ? items[0].description
+      : `Reimbursement bundle with ${items.length} source documents`,
+    categoryKey: categoryKeys.length === 1 ? items[0].categoryKey : null,
+    categoryName: categoryKeys.length === 1 ? items[0].categoryName : null,
+    items,
+  };
+}
+
+const receiptProcess = {
+  name: 'receipt.process',
+  version: 1,
+  capability: 'receipts.write',
+  mutates: true,
+  allowedTriggers: ['workflow'],
+  validate(input) {
+    if (!/^[0-9a-f-]{36}$/i.test(String(input?.receiptId || ''))) throw new Error('valid receiptId is required');
+  },
+  steps: [
+    {
+      key: 'load_receipt', effectClass: 'read', maxAttempts: 2,
+      async run({ db, run, input }) {
+        const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${input.receiptId}`);
+        if (!receipt) throw new Error('receipt was not found');
+        if (receipt.slack_channel_id !== run.channel_id) {
+          const error = new Error('receipt belongs to another channel');
+          error.code = 'receipt_scope_violation';
+          throw error;
+        }
+        return {
+          receipt,
+          alreadyProcessed: ['extracted', 'matched', 'posted'].includes(receipt.status)
+            || Boolean(receipt.payment_reference),
+        };
+      },
+    },
+    {
+      key: 'extract', effectClass: 'external_read', maxAttempts: 2,
+      async run({ state, services }) {
+        if (state.load_receipt.alreadyProcessed) return { skipped: true };
+        if (typeof services.extractReimbursementReceipt !== 'function') {
+          return { ok: false, confidence: 0, reviewReason: 'reimbursement extraction service is unavailable' };
+        }
+        try {
+          return await services.extractReimbursementReceipt({
+            messageText: state.load_receipt.receipt.message_text,
+            files: parseReceiptFiles(state.load_receipt.receipt.file_refs_json),
+          });
+        } catch (error) {
+          return {
+            ok: false,
+            confidence: 0,
+            reviewReason: `receipt extraction failed safely: ${String(error.message || error).slice(0, 240)}`,
+          };
+        }
+      },
+    },
+    {
+      key: 'persist_extraction', effectClass: 'local_write', maxAttempts: 2,
+      async run({ db, run, state, store, stepKey }) {
+        const receipt = state.load_receipt.receipt;
+        if (state.load_receipt.alreadyProcessed) {
+          return { receiptId: receipt.id, skipped: true, shouldAnnotate: false, reasons: [] };
+        }
+        const result = state.extract;
+        const reasons = reimbursementReviewReasons(result);
+        const annotationInput = reasons.length === 0 ? automaticAnnotationInput(receipt, result) : null;
+        const reviewReason = reasons.join('; ').slice(0, 1000) || null;
+        await db.query(sql`UPDATE accounting_receipts SET
+          extraction_confidence=${Number(result?.extracted?.confidence || result?.confidence || 0)},
+          review_reason=${reviewReason},
+          extraction_json=${JSON.stringify({
+            source: 'openai_responses', responseId: result?.responseId || null,
+            model: result?.model || null, requestHash: result?.requestHash || null,
+            extracted: result?.ok ? result.extracted : null,
+            reviewReason: result?.reviewReason || null,
+            channelIntent: 'submitter_reimbursement',
+          })},
+          status=${reasons.length ? 'needs_review' : 'received'},
+          workflow_run_id=${run.id}, updated_at=datetime('now') WHERE id=${receipt.id}`);
+        const evidence = await store.createEvidence(db, {
+          runId: run.id,
+          stepKey,
+          source: 'openai.responses.reimbursement_extraction',
+          sourceRef: result?.responseId || receipt.id,
+          confidence: Number(result?.extracted?.confidence || result?.confidence || 0),
+          payload: {
+            receiptId: receipt.id,
+            itemCount: result?.extracted?.items?.length || 0,
+            shouldAnnotate: reasons.length === 0,
+            reasons,
+          },
+        });
+        return {
+          receiptId: receipt.id,
+          skipped: false,
+          shouldAnnotate: reasons.length === 0,
+          reasons,
+          annotationInput,
+          evidenceId: evidence.id,
+        };
+      },
+    },
+    {
+      key: 'queue_annotation', effectClass: 'local_write', maxAttempts: 2,
+      async run({ db, run, state, store }) {
+        if (!state.persist_extraction.shouldAnnotate) return { skipped: true };
+        const annotationInput = state.persist_extraction.annotationInput;
+        const digest = store.sha256(annotationInput).slice(0, 24);
+        const policy = loadPolicy({ fresh: true });
+        const created = await store.createRun(db, {
+          definition: receiptAnnotate,
+          idempotencyKey: `receipt:${annotationInput.receiptId}:automatic-annotation:${digest}`,
+          triggerType: 'workflow',
+          triggerRef: run.id,
+          channelId: run.channel_id,
+          actorUserId: run.actor_user_id,
+          input: annotationInput,
+          policySnapshot: policySnapshot(policy, receiptAnnotate),
+        });
+        return { annotationRunId: created.run.id, queued: created.created };
+      },
+    },
+    {
+      key: 'notify_review', effectClass: 'internal_notification', maxAttempts: 2,
+      async run({ db, run, state, store }) {
+        if (state.persist_extraction.skipped || state.persist_extraction.shouldAnnotate) return { skipped: true };
+        const receipt = state.load_receipt.receipt;
+        const message = [
+          '🧾 I logged this post as a reimbursement, but automatic extraction needs review before I can issue the Kapital payment instruction.',
+          `Review needed: ${state.persist_extraction.reasons.join('; ')}`,
+          `Receipt: ${receipt.id} · Workflow: ${run.id}`,
+        ].join('\n');
+        const outbox = await store.enqueueOutbox(db, {
+          runId: run.id,
+          topic: 'slack.notification',
+          idempotencyKey: `receipt:${receipt.id}:automatic-extraction-review`,
+          payload: {
+            channelId: receipt.slack_channel_id,
+            threadTs: receipt.slack_thread_ts || receipt.slack_message_id,
+            message,
+          },
+        });
+        return { outboxId: outbox.id, status: outbox.status };
+      },
+    },
+  ],
+  output({ state }) {
+    if (state.persist_extraction.skipped) {
+      return { status: 'already_processed', receiptId: state.persist_extraction.receiptId };
+    }
+    if (!state.persist_extraction.shouldAnnotate) {
+      return {
+        status: 'needs_review', receiptId: state.persist_extraction.receiptId,
+        evidenceId: state.persist_extraction.evidenceId,
+        outboxId: state.notify_review.outboxId || null,
+      };
+    }
+    return {
+      status: 'queued', receiptId: state.persist_extraction.receiptId,
+      evidenceId: state.persist_extraction.evidenceId,
+      annotationRunId: state.queue_annotation.annotationRunId,
+    };
   },
 };
 
@@ -660,6 +942,7 @@ module.exports = {
   receiptAnnotate,
   receiptIngest,
   receiptPaymentReference,
+  receiptProcess,
   receiptReconcile,
   socialContentUpsert,
   validateGuestDraft,

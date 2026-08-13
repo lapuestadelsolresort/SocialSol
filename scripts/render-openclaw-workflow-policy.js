@@ -43,7 +43,7 @@ const CHANNEL_MUTATION_WORKFLOWS = {
 };
 
 function receiptPrompt(name) {
-  return `This is the scoped ${name} receipt channel. Channel members may submit or amend this channel's receipts and read only this channel's receipt ledger through resort_workflow. When one Slack post contains multiple receipt or invoice files, inspect every attachment and pass one receipt.annotate item per source document; the item amounts must sum to the parent reimbursement amount. receipt.annotate creates the stable Kapital reference and queues the itemized confirmation/payment instruction in the original thread. Set reimbursementRecipientUserId only when the reimbursement recipient is not the Slack submitter. Never invent or manually format a payment reference. Cross-channel accounting data is not available here.`;
+  return `This is the scoped ${name} receipt channel. Every top-level post by a configured channel member is a resort transaction submitted for reimbursement, including a receipt, invoice, quotation, estimate, or text-only expense. The automatic receipt hook re-reads the exact Slack post, extracts one item per source document, logs it, creates the Kapital-safe reference, and queues the itemized confirmation/payment instruction in the original thread. Do not call receipt.ingest or reconstruct receipt ids from chat context. Channel members may amend this channel's receipts and read only this channel's receipt ledger through resort_workflow. Never invent or manually format a payment reference. Cross-channel accounting data is not available here.`;
 }
 
 function ownerExpensePrompt(name) {
@@ -93,7 +93,7 @@ function render({ policy, currentConfig, pluginIds = [] }) {
           : noAuthorityPrompt(channel.name));
     const namedMutations = CHANNEL_MUTATION_WORKFLOWS[channel.name] || [];
     const hasLiveMutation = namedMutations.some(workflow => liveWorkflows.has(workflow))
-      || (receipt && ['receipt.ingest', 'receipt.annotate',
+      || (receipt && ['receipt.ingest', 'receipt.process', 'receipt.annotate',
         'receipt.owner_expense.ingest', 'receipt.owner_expense.process', 'receipt.owner_expense.confirm']
         .some(workflow => liveWorkflows.has(workflow)));
     const workflowOnly = policy.shadow_mode !== true || hasLiveMutation || channel.name === 'reservations';
