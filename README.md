@@ -58,7 +58,7 @@ business at sale.
 | Regina reengagement + send digest | Daily 7:30am PT | `#reengager-regina` |
 | Encrypted backups + Healthchecks monitoring | Daily | `#ops-alerts` |
 | Accounting weekly tests (7 checks) | Monday 8am PT | `#accounting` |
-| Paloma all-channel task reconciliation | Every 10 min, plus real-time Slack events | Every Slack channel Paloma has joined |
+| Paloma all-channel task reconciliation cron | Every 10 min, plus real-time Slack events | Every Slack channel Paloma has joined |
 
 ### Shared infrastructure
 

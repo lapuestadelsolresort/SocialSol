@@ -16,7 +16,7 @@
     "enabled": true,
     "slack_account": "replace-with-openclaw-slack-account-id",
     "agent_id": "paloma",
-    "heartbeat_every": "10m",
+    "monitor_every": "10m",
     "timeout_seconds": 300,
     "initial_lookback_minutes": 60
   }

@@ -51,9 +51,9 @@ committed.
 - New tasks receive one bilingual acknowledgment in the original thread
 - Chatter stays silent
 
-### 2. Reconciliation heartbeat
+### 2. Reconciliation cron
 - Runs every 10 minutes in an isolated OpenClaw session; successful
-  `HEARTBEAT_OK` acknowledgments stay silent and failures route to Paloma's
+  `NO_REPLY` acknowledgments stay silent and failures route to Paloma's
   tracker channel
 - Rediscovers every current Slack membership instead of using a static list
 - Reads all messages after each channel's durable `scan_state` checkpoint

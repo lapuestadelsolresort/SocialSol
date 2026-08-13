@@ -3,9 +3,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
-  heartbeatConfig,
+  cronMatches,
   joinedChannels,
   mergeSoulMonitoringBlock,
+  monitorCronConfig,
   monitoredChannelConfig,
   soulMonitoringBlock,
 } = require('./monitoring-contract');
@@ -35,18 +36,25 @@ test('monitoredChannelConfig disables mention gating without erasing channel pol
   assert.deepEqual(result.channels.CLEGACY01, current.CLEGACY01);
 });
 
-test('heartbeat is isolated, success-silent, failure-routed, dynamic, and checkpoint-safe', () => {
-  const heartbeat = heartbeatConfig({
+test('monitor cron is isolated, success-silent, failure-routed, dynamic, and checkpoint-safe', () => {
+  const monitor = monitorCronConfig({
     accountId: 'paloma-test', databasePath: '/tmp/paloma/tasks.db',
     trackerChannelId: 'CPALOMA01', every: '10m',
   });
-  assert.equal(heartbeat.every, '10m');
-  assert.equal(heartbeat.target, 'slack');
-  assert.equal(heartbeat.to, 'channel:CPALOMA01');
-  assert.equal(heartbeat.isolatedSession, true);
-  assert.match(heartbeat.prompt, /every non-archived channel/);
-  assert.match(heartbeat.prompt, /direct @mention followed by an imperative request is a task candidate/);
-  assert.match(heartbeat.prompt, /leave the affected checkpoint unchanged/);
+  assert.equal(monitor.every, '10m');
+  assert.equal(monitor.everyMs, 600000);
+  assert.equal(monitor.delivery.to, 'channel:CPALOMA01');
+  assert.equal(monitor.sessionTarget, 'isolated');
+  assert.match(monitor.message, /every non-archived channel/);
+  assert.match(monitor.message, /direct @mention followed by an imperative request is a task candidate/);
+  assert.match(monitor.message, /leave the affected checkpoint unchanged/);
+  assert.match(monitor.message, /exactly NO_REPLY/);
+  assert.ok(cronMatches({
+    agentId: 'paloma', name: monitor.name, description: monitor.description, enabled: true,
+    schedule: { kind: 'every', everyMs: 600000 }, sessionTarget: 'isolated',
+    payload: { kind: 'agentTurn', message: monitor.message, timeoutSeconds: 300 },
+    delivery: monitor.delivery,
+  }, monitor, 'paloma'));
 });
 
 test('managed SOUL block is idempotent and applies task detection to every joined channel', () => {
@@ -72,6 +80,7 @@ test('cutover plan targets the requested agent without replacing its Slack accou
       { id: 'other', workspace: '/tmp/other' },
       { id: 'paloma', workspace: '/tmp/paloma' },
     ],
+    cronJobs: [],
     groups,
     soul: '# Paloma\n',
     root: '/tmp/socialsol',
@@ -86,7 +95,8 @@ test('cutover plan targets the requested agent without replacing its Slack accou
   });
   assert.equal(plan.agentIndex, 1);
   assert.deepEqual(plan.changedChannelIds, ['CJOINED02']);
-  assert.equal(plan.heartbeat.to, 'channel:CPALOMA01');
+  assert.equal(plan.monitorCron.delivery.to, 'channel:CPALOMA01');
+  assert.equal(plan.cronChanged, true);
   assert.equal(accountChannelPath('paloma-test', 'CJOINED02'),
     'channels.slack.accounts["paloma-test"].channels["CJOINED02"]');
 });

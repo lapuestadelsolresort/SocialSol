@@ -9,9 +9,9 @@ const { spawnSync } = require('node:child_process');
 const { isDeepStrictEqual } = require('node:util');
 const { ROOT } = require('../lib/runtime-paths');
 const {
-  heartbeatConfig,
-  joinedChannels,
+  cronMatches,
   mergeSoulMonitoringBlock,
+  monitorCronConfig,
   monitoredChannelConfig,
   soulMonitoringBlock,
 } = require('../paloma/lib/monitoring-contract');
@@ -67,27 +67,43 @@ function accountChannelPath(accountId, channelId) {
   return `channels.slack.accounts[${JSON.stringify(accountId)}].channels[${JSON.stringify(channelId)}]`;
 }
 
+function cronWriteArgs(contract, agentId) {
+  return [
+    '--agent', agentId,
+    '--name', contract.name,
+    '--description', contract.description,
+    '--every', contract.every,
+    '--session', contract.sessionTarget,
+    '--message', contract.message,
+    '--timeout-seconds', String(contract.timeoutSeconds),
+    '--announce',
+    '--channel', contract.delivery.channel,
+    '--account', contract.delivery.accountId,
+    '--to', contract.delivery.to,
+  ];
+}
+
 function monitoringSettings(config, args) {
   const monitoring = config.monitoring || {};
   if (monitoring.enabled === false) throw new Error('Paloma monitoring is disabled in runtime config');
   return {
     accountId: option(args, '--account', process.env.PALOMA_SLACK_ACCOUNT || monitoring.slack_account),
     agentId: option(args, '--agent', process.env.PALOMA_AGENT_ID || monitoring.agent_id || 'paloma'),
-    every: option(args, '--every', monitoring.heartbeat_every || '10m'),
+    every: option(args, '--every', monitoring.monitor_every || monitoring.heartbeat_every || '10m'),
     timeoutSeconds: Number(option(args, '--timeout-seconds', monitoring.timeout_seconds || 300)),
     lookbackMinutes: Number(option(args, '--lookback-minutes', monitoring.initial_lookback_minutes || 60)),
     trackerChannelId: config.channels?.tracker,
   };
 }
 
-function planMonitoring({ config, account, agents, groups, soul, root, settings }) {
+function planMonitoring({ config, account, agents, cronJobs, groups, soul, root, settings }) {
   if (!account || account.enabled === false) throw new Error('Paloma Slack account is missing or disabled');
   const agentIndex = agents.findIndex(agent => agent.id === settings.agentId);
   if (agentIndex === -1) throw new Error(`OpenClaw agent ${settings.agentId} was not found`);
   const databasePath = path.join(root, 'paloma', 'data', 'tasks.db');
   const channelPlan = monitoredChannelConfig(account.channels, groups);
   if (!channelPlan.joined.length) throw new Error('Paloma Slack account is not a member of any active channels');
-  const heartbeat = heartbeatConfig({
+  const monitorCron = monitorCronConfig({
     accountId: settings.accountId,
     databasePath,
     trackerChannelId: settings.trackerChannelId,
@@ -100,14 +116,22 @@ function planMonitoring({ config, account, agents, groups, soul, root, settings 
   const changedChannelIds = channelPlan.joined
     .filter(channel => !isDeepStrictEqual(account.channels?.[channel.id] || {}, channelPlan.channels[channel.id]))
     .map(channel => channel.id);
+  const matchingCronJobs = (cronJobs || []).filter(job => job.name === monitorCron.name);
+  if (matchingCronJobs.some(job => job.agentId !== settings.agentId)) {
+    throw new Error(`${monitorCron.name} is already owned by a different OpenClaw agent`);
+  }
+  if (matchingCronJobs.length > 1) throw new Error(`multiple ${monitorCron.name} cron jobs exist`);
+  const cronJob = matchingCronJobs[0] || null;
   return {
     agentIndex,
-    heartbeat,
+    cronJob,
+    monitorCron,
     nextSoul,
     joined: channelPlan.joined,
     channels: channelPlan.channels,
     changedChannelIds,
-    heartbeatChanged: !isDeepStrictEqual(agents[agentIndex].heartbeat || null, heartbeat),
+    cronChanged: !cronMatches(cronJob, monitorCron, settings.agentId),
+    legacyHeartbeatPresent: Boolean(agents[agentIndex].heartbeat),
     soulChanged: soul !== nextSoul,
     config,
   };
@@ -130,12 +154,16 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     'config', 'get', `channels.slack.accounts[${JSON.stringify(settings.accountId)}]`, '--json',
   ], dependencies);
   const agents = openClawJson(['config', 'get', 'agents.list', '--json'], dependencies);
+  const cronPayload = openClawJson(['cron', 'list', '--all', '--json'], dependencies);
   const agent = agents.find(candidate => candidate.id === settings.agentId);
   if (!agent?.workspace) throw new Error(`OpenClaw agent ${settings.agentId} has no workspace`);
   const soulPath = path.resolve(option(args, '--soul-path', path.join(expandHome(agent.workspace), 'SOUL.md')));
   const soul = fs.readFileSync(soulPath, 'utf8');
-  const plan = planMonitoring({ config, account, agents, groups, soul, root, settings });
-  const changed = plan.changedChannelIds.length > 0 || plan.heartbeatChanged || plan.soulChanged;
+  const plan = planMonitoring({
+    config, account, agents, cronJobs: cronPayload.jobs || [], groups, soul, root, settings,
+  });
+  const changed = plan.changedChannelIds.length > 0 || plan.cronChanged
+    || plan.legacyHeartbeatPresent || plan.soulChanged;
   const command = dependencies.runOpenClaw || runOpenClaw;
   const summary = {
     ok: true,
@@ -146,9 +174,10 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     joinedChannelCount: plan.joined.length,
     joinedChannelNames: plan.joined.map(channel => channel.name),
     realtimeChannelUpdates: plan.changedChannelIds.length,
-    heartbeatEvery: plan.heartbeat.every,
-    heartbeatTarget: plan.heartbeat.target,
-    heartbeatChanged: plan.heartbeatChanged,
+    monitorEvery: plan.monitorCron.every,
+    monitorTarget: plan.monitorCron.delivery.to,
+    cronChanged: plan.cronChanged,
+    legacyHeartbeatRemoval: plan.legacyHeartbeatPresent,
     soulChanged: plan.soulChanged,
   };
   if (!confirmProduction) {
@@ -158,10 +187,9 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
         JSON.stringify(plan.channels[channelId]), '--strict-json', '--merge', '--dry-run',
       ], dependencies);
     }
-    if (plan.heartbeatChanged) {
+    if (plan.legacyHeartbeatPresent) {
       command([
-        'config', 'set', `agents.list[${plan.agentIndex}].heartbeat`,
-        JSON.stringify(plan.heartbeat), '--strict-json', '--dry-run',
+        'config', 'unset', `agents.list[${plan.agentIndex}].heartbeat`, '--dry-run',
       ], dependencies);
     }
     return summary;
@@ -171,6 +199,7 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
   const openClawConfigPath = expandHome(command(['config', 'file'], dependencies));
   const configBackup = backupFile(openClawConfigPath, backupDirectory, 'openclaw.pre-paloma-monitoring');
   const soulBackup = backupFile(soulPath, backupDirectory, 'paloma-soul.pre-all-channel-monitoring');
+  let createdCronId = '';
   try {
     // Put the behavioral contract in place before widening real-time event delivery.
     if (plan.soulChanged) writeAtomic(soulPath, plan.nextSoul);
@@ -180,31 +209,48 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
         JSON.stringify(plan.channels[channelId]), '--strict-json', '--merge',
       ], dependencies);
     }
-    if (plan.heartbeatChanged) {
-      command([
-        'config', 'set', `agents.list[${plan.agentIndex}].heartbeat`,
-        JSON.stringify(plan.heartbeat), '--strict-json',
-      ], dependencies);
+    if (plan.cronChanged) {
+      if (plan.cronJob) {
+        command(['cron', 'edit', plan.cronJob.id, ...cronWriteArgs(plan.monitorCron, settings.agentId)], dependencies);
+        if (!plan.cronJob.enabled) command(['cron', 'enable', plan.cronJob.id], dependencies);
+      } else {
+        const created = openClawJson([
+          'cron', 'add', ...cronWriteArgs(plan.monitorCron, settings.agentId), '--json',
+        ], dependencies);
+        createdCronId = created.id || '';
+      }
+    }
+    if (plan.legacyHeartbeatPresent) {
+      command(['config', 'unset', `agents.list[${plan.agentIndex}].heartbeat`], dependencies);
     }
 
     const verifiedAccount = openClawJson([
       'config', 'get', `channels.slack.accounts[${JSON.stringify(settings.accountId)}]`, '--json',
     ], dependencies);
     const verifiedAgents = openClawJson(['config', 'get', 'agents.list', '--json'], dependencies);
-    const verifiedHeartbeat = verifiedAgents[plan.agentIndex]?.heartbeat;
+    const verifiedCronPayload = openClawJson(['cron', 'list', '--all', '--json'], dependencies);
+    const verifiedCronJobs = (verifiedCronPayload.jobs || [])
+      .filter(job => job.name === plan.monitorCron.name && job.agentId === settings.agentId);
     for (const channel of plan.joined) {
       const policy = verifiedAccount.channels?.[channel.id];
       if (!policy?.enabled || policy.requireMention !== false) {
         throw new Error(`verification failed for joined Slack channel ${channel.name}`);
       }
     }
-    if (!isDeepStrictEqual(verifiedHeartbeat, plan.heartbeat)) {
-      throw new Error('verification failed for Paloma heartbeat configuration');
+    if (verifiedAgents[plan.agentIndex]?.heartbeat) {
+      throw new Error('verification failed while retiring unsupported Paloma heartbeat configuration');
+    }
+    if (verifiedCronJobs.length !== 1
+        || !cronMatches(verifiedCronJobs[0], plan.monitorCron, settings.agentId)) {
+      throw new Error('verification failed for Paloma monitor cron configuration');
     }
     if (fs.readFileSync(soulPath, 'utf8') !== plan.nextSoul) {
       throw new Error('verification failed for Paloma SOUL monitoring contract');
     }
   } catch (error) {
+    if (createdCronId) {
+      try { command(['cron', 'rm', createdCronId], dependencies); } catch {}
+    }
     fs.copyFileSync(configBackup, openClawConfigPath);
     fs.copyFileSync(soulBackup, soulPath);
     throw new Error(`Paloma monitoring cutover rolled back: ${error.message}`);
@@ -222,6 +268,7 @@ if (require.main === module) {
 module.exports = {
   accountChannelPath,
   configure,
+  cronWriteArgs,
   expandHome,
   monitoringSettings,
   option,
