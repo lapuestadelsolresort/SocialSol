@@ -11,5 +11,13 @@
     "daniel": "replace-with-slack-user-id",
     "mayela": "replace-with-slack-user-id",
     "jason": "replace-with-slack-user-id"
+  },
+  "monitoring": {
+    "enabled": true,
+    "slack_account": "replace-with-openclaw-slack-account-id",
+    "agent_id": "paloma",
+    "heartbeat_every": "10m",
+    "timeout_seconds": 300,
+    "initial_lookback_minutes": 60
   }
 }
