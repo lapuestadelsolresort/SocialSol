@@ -58,6 +58,16 @@ reconcile on that exact concept plus amount and currency; the legacy ±3-day
 rule is used only for older receipts that have no payment reference. A matched
 bundle is written to QBO with one expense line per receipt item so mixed
 categories remain split even though Kapital contains one reimbursement.
+If an uncoded transfer has the same payee, currency, and amount within 30 days
+of a successfully reconciled coded reimbursement, it is held as a possible
+duplicate instead of being auto-posted.
+
+Before any QBO write, overlapping transactions are checked through the
+refresh-aware QBO client. An expired access token is refreshed automatically;
+if authentication, the duplicate query, or its response cannot be verified,
+the statement fails closed before creating any QBO entity. The completion
+message in `#accounting` reports principal writes, separate SPEI fee records,
+deduplicated transactions, and every transaction held for review.
 
 Configure the Slack user(s) who submit Kapital reimbursements. The command is
 a dry run unless `--confirm-production` is supplied and backs up the ignored

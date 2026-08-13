@@ -2,12 +2,16 @@ import json
 import sys
 import tempfile
 import unittest
+import urllib.error
+from datetime import date
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from qbo_push import QBOClient, allocate_receipt_item_usd, qbo_request_id  # noqa: E402
+from qbo_push import (  # noqa: E402
+    QBOClient, allocate_receipt_item_usd, push_classified_to_qbo, qbo_request_id,
+)
 
 
 class FakeResponse:
@@ -103,6 +107,67 @@ class QBOIntegrityTests(unittest.TestCase):
             result = client.read_entity('purchase', '42')
         self.assertEqual(result['Id'], '42')
         self.assertIn('/purchase/42?', seen[0])
+
+    def test_query_refreshes_a_stale_access_token_before_retry(self):
+        seen_tokens = []
+        expired = urllib.error.HTTPError('https://quickbooks.example', 401, 'expired', {}, None)
+
+        def fake_urlopen(request, timeout=0):
+            seen_tokens.append(request.get_header('Authorization'))
+            if len(seen_tokens) == 1:
+                raise expired
+            return FakeResponse({'QueryResponse': {}})
+
+        client = self.client()
+
+        def refresh():
+            client.access_token = 'refreshed-token'
+            return True
+
+        client.refresh_auth = refresh
+        try:
+            with patch('urllib.request.urlopen', fake_urlopen):
+                result = client.query('SELECT Id FROM Purchase MAXRESULTS 1')
+        finally:
+            expired.close()
+        self.assertEqual(result, {'QueryResponse': {}})
+        self.assertEqual(seen_tokens, ['Bearer token', 'Bearer refreshed-token'])
+
+    def test_qbo_write_fails_before_create_when_dedup_cannot_be_verified(self):
+        client = Mock()
+        client.query.side_effect = RuntimeError('QBO unavailable')
+        results = {
+            'auto': [{
+                'date': date(2026, 8, 6), 'amount': 5000, 'amount_usd': 290.19,
+                'currency': 'MXN', 'reference': 'Clave: 136-06/08/2026/06-1',
+                'category': 'contract_labor', 'category_name': 'Contract Labor',
+            }],
+            'guess': [],
+            'unknown': [],
+        }
+        with patch('qbo_push.QBOClient', return_value=client):
+            with self.assertRaisesRegex(RuntimeError, 'dedup preflight failed'):
+                push_classified_to_qbo(results, dry_run=False)
+        client.create_purchase.assert_not_called()
+
+    def test_qbo_summary_enumerates_transactions_held_for_review(self):
+        client = Mock()
+        client.query.return_value = {'QueryResponse': {}}
+        results = {
+            'auto': [],
+            'guess': [{
+                'date': date(2026, 8, 6), 'amount': 2105, 'currency': 'MXN',
+                'reason': 'duplicate reimbursement requires review',
+            }],
+            'unknown': [{
+                'date': date(2026, 8, 10), 'amount': 2499, 'currency': 'MXN',
+                'reason': 'manual classification required',
+            }],
+        }
+        with patch('qbo_push.QBOClient', return_value=client):
+            summary = push_classified_to_qbo(results, dry_run=True)
+        self.assertEqual(summary['review_required'], 2)
+        self.assertEqual([row['amount'] for row in summary['review_details']], [2105, 2499])
 
     def test_journal_entry_create_and_readback_use_canonical_endpoints(self):
         seen = []

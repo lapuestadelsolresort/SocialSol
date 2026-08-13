@@ -372,6 +372,7 @@ test('receipt reconciliation uses an exact payment reference before the legacy d
     }
     const bankRows = [
       ['bank-ref-match', '2026-08-20', 'Reembolso LPDSRA1B2C3D4E5F60718', 2105],
+      ['bank-uncoded-duplicate', '2026-08-06', 'Uncoded duplicate reimbursement', 2105],
       ['bank-ref-wrong-amount', '2026-08-13', 'LPDS-R-B1C2D3E4F5061728', 3000],
       ['bank-date-only-decoy', '2026-08-13', 'Other payment', 3086],
       ['bank-legacy', '2026-08-11', 'Legacy reimbursement', 500],

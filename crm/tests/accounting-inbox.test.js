@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { accountingWorkflowsLive, archiveProcessedFile, main } = require('../scripts/accounting-inbox');
+const { buildQboNotificationMessage } = require('../workflows/operational-jobs');
 
 test('accounting inbox honors narrow live workflows while global shadow remains enabled', () => {
   assert.equal(accountingWorkflowsLive({
@@ -70,4 +71,36 @@ test('accounting inbox reconciles receipt references before attempting the QBO w
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('QBO completion notification exposes every held accounting exception', () => {
+  const message = buildQboNotificationMessage({
+    run: { id: 'workflow-1' },
+    state: {
+      verify_readback: {
+        summary: {
+          principalWritten: 5,
+          feeRecordsWritten: 10,
+          dedupSkipped: 6,
+          reviewRequired: 2,
+          reviewDetails: [
+            {
+              date: '2026-08-06', currency: 'MXN', amount: 2105,
+              reason: 'duplicate reimbursement requires review',
+            },
+            {
+              date: '2026-08-10', currency: 'MXN', amount: 2499,
+              reason: 'manual classification required',
+            },
+          ],
+        },
+      },
+    },
+  });
+  assert.match(message, /Principal transactions written: 5/);
+  assert.match(message, /SPEI fee records written: 10/);
+  assert.match(message, /Existing transactions skipped: 6/);
+  assert.match(message, /Held for review: 2/);
+  assert.match(message, /2026-08-06 MXN 2,105\.00/);
+  assert.match(message, /2026-08-10 MXN 2,499\.00/);
 });

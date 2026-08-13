@@ -500,6 +500,20 @@ def push_classified_to_qbo(
         'income_pushed': 0,
         'transfers_pushed': 0,
         'skipped': 0,
+        'review_required': sum(len(results.get(bucket, [])) for bucket in ('guess', 'unknown')),
+        'review_details': [
+            {
+                'date': str(transaction.get('date') or ''),
+                'amount': transaction.get('amount'),
+                'currency': transaction.get('currency') or 'MXN',
+                'bucket': bucket,
+                'reason': transaction.get('reason') or 'manual classification required',
+                'description': str(transaction.get('description') or '')[:160],
+                'payment_reference': transaction.get('payment_reference'),
+            }
+            for bucket in ('guess', 'unknown')
+            for transaction in results.get(bucket, [])
+        ],
         'errors': [],
         'warnings': [],
         'details': [],
@@ -521,7 +535,9 @@ def push_classified_to_qbo(
         all_txns.extend(results.get('guess', []))
 
     try:
-        new_txns, dupes = check_for_duplicates(all_txns, client.access_token, client.base_url)
+        # QBOClient.query refreshes a stale access token on 401. Query failures
+        # propagate so the writer fails closed before creating any entity.
+        new_txns, dupes = check_for_duplicates(all_txns, client.query)
         summary['dedup_skipped'] = len(dupes)
         if dupes:
             for d in dupes:
