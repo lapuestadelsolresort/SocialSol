@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  createAccountingStatementHandler,
+  createControlledChannelToolGuard,
   createFinalizeHandler,
   createEmailClaimHandler,
   createEmailReplyDispatchHandler,
@@ -291,6 +293,69 @@ test('receipt hook binds channel, sender, and Slack file ids from the trusted ev
   assert.equal(calls[0].idempotencyKey, 'slack:C123RECEIPT:171.25:receipt.ingest');
 });
 
+test('accounting CSV hook stages trusted Slack uploads for the fixed inbox workflow', async () => {
+  const config = pluginConfig({
+    accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts', shadowMode: true,
+    liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
+  });
+  const calls = [];
+  await createAccountingStatementHandler({
+    config,
+    stage: async request => {
+      calls.push(request);
+      return { files: [{ name: 'statement.csv', staged: true }] };
+    },
+  })({
+    messageId: '1786640000.25', senderId: 'U-JASON',
+    metadata: {
+      channelId: 'CACCOUNTING',
+      files: [{ id: 'F-CSV', name: 'ECta826.csv', mimetype: 'text/csv', size: 4200 }],
+    },
+  }, {
+    channelId: 'slack', accountId: 'ig-drafts', conversationId: 'CACCOUNTING',
+    messageId: '1786640000.25', senderId: 'U-JASON',
+  });
+  assert.deepEqual(calls, [{
+    channelId: 'CACCOUNTING', messageId: '1786640000.25', threadTs: null,
+  }]);
+});
+
+test('accounting CSV hook ignores non-CSV uploads and other channels', async () => {
+  const config = pluginConfig({
+    accountingChannelIds: ['CACCOUNTING'], shadowMode: true,
+    liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
+  });
+  const handler = createAccountingStatementHandler({
+    config,
+    stage: async () => assert.fail('non-accounting CSV event must not be staged'),
+  });
+  await handler({
+    messageId: '1786640000.26', metadata: {
+      channelId: 'CACCOUNTING', files: [{ id: 'F-PDF', name: 'invoice.pdf', mimetype: 'application/pdf' }],
+    },
+  }, { channelId: 'slack', conversationId: 'CACCOUNTING', messageId: '1786640000.26' });
+  await handler({
+    messageId: '1786640000.27', metadata: {
+      channelId: 'C-OTHER', files: [{ id: 'F-CSV', name: 'statement.csv', mimetype: 'text/csv' }],
+    },
+  }, { channelId: 'slack', conversationId: 'C-OTHER', messageId: '1786640000.27' });
+});
+
+test('accounting CSV hook does not stage files before the complete workflow is live', async () => {
+  const config = pluginConfig({
+    accountingChannelIds: ['CACCOUNTING'], shadowMode: true,
+    liveWorkflowNames: ['accounting.classify', 'qbo.write'],
+  });
+  await createAccountingStatementHandler({
+    config,
+    stage: async () => assert.fail('partial accounting cutover must not stage a statement'),
+  })({
+    messageId: '1786640000.28', metadata: {
+      channelId: 'CACCOUNTING', files: [{ id: 'F-CSV', name: 'statement.csv', mimetype: 'text/csv' }],
+    },
+  }, { channelId: 'slack', conversationId: 'CACCOUNTING', messageId: '1786640000.28' });
+});
+
 test('owner-expense receipt hook selects the guarded workflow', async () => {
   const config = pluginConfig({
     receiptChannelIds: ['C123OWNER'], ownerExpenseChannelIds: ['C123OWNER'],
@@ -513,10 +578,34 @@ test('reservations tool guard blocks shell bypass even when OpenClaw misses the 
     channelId: 'c-res',
   }), {
     block: true,
-    blockReason: '#reservations is restricted to the durable resort_workflow control plane.',
+    blockReason: 'This controlled resort channel is restricted to the durable resort_workflow control plane.',
   });
   assert.equal(await guard({ toolName: 'resort_workflow', params: {} }, {
     channelId: 'c-res',
+  }), undefined);
+  assert.equal(await guard({ toolName: 'exec', params: {} }, {
+    channelId: 'C-OTHER',
+  }), undefined);
+});
+
+test('controlled-channel tool guard blocks direct accounting and receipt tool bypasses', async () => {
+  const guard = createControlledChannelToolGuard({
+    config: pluginConfig({ controlledChannelIds: ['C-ACCOUNTING', 'C-RECEIPT'] }),
+  });
+  assert.deepEqual(await guard({ toolName: 'exec', params: {} }, {
+    channelId: 'c-accounting',
+  }), {
+    block: true,
+    blockReason: 'This controlled resort channel is restricted to the durable resort_workflow control plane.',
+  });
+  assert.deepEqual(await guard({ toolName: 'qbo_push', params: {} }, {
+    channelId: 'C-RECEIPT',
+  }), {
+    block: true,
+    blockReason: 'This controlled resort channel is restricted to the durable resort_workflow control plane.',
+  });
+  assert.equal(await guard({ toolName: 'resort_workflow', params: {} }, {
+    channelId: 'C-ACCOUNTING',
   }), undefined);
   assert.equal(await guard({ toolName: 'exec', params: {} }, {
     channelId: 'C-OTHER',

@@ -103,10 +103,13 @@ after every domain has completed its independent cutover.
 `graph-social-routine` owns the durable GTKU series after the legacy GTKU
 LaunchAgent is unloaded.
 
-The accounting inbox graph has no legacy autonomous QBO writer; add a statement
-to `accounting/inbox/` only after the dry-run classification has been reviewed.
-The first live statement should be a known historical statement whose QBO
-records already exist, proving deduplication without creating records.
+The accounting inbox graph has no legacy autonomous QBO writer. A CSV attached
+in the allowlisted `#accounting` channel is refetched from the exact Slack
+message and staged automatically in `accounting/inbox/`; the watched graph then
+runs classification, receipt reconciliation, and QBO readback in that order.
+Unknown or duplicate candidates remain held, while only auto-classified rows
+cross the QBO write boundary. Direct shell and QBO tools are blocked in the
+channel so they cannot become a second producer.
 
 WhatsApp has no staff-controlled test phone. Arm a passive canary for the next
 genuine inbound: inbound stored → durable `#whatsapp` thread posted → explicit

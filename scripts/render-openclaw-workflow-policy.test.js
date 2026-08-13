@@ -11,12 +11,13 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   const patch = render({
     policy: {
       shadow_mode: true,
-      live_workflows: ['meta.dm.reply', 'receipt.owner_expense.ingest'],
+      live_workflows: ['meta.dm.reply', 'receipt.owner_expense.ingest', 'qbo.write'],
       channels: {
         CWA123: { name: 'whatsapp', capabilities: ['whatsapp.read', 'whatsapp.send'] },
         CSOCIAL1: { name: 'social-sol', capabilities: ['social.write'] },
         CRECEIPT1: { name: 'receipt-daniel', capabilities: ['receipts.submit', 'accounting.read_scoped'] },
         COWNER1: { name: 'receipt-jorge', capabilities: ['receipts.submit', 'accounting.read_scoped', 'qbo.owner_expense.write'] },
+        CACCT1: { name: 'accounting', capabilities: ['accounting.write', 'qbo.write'] },
       },
     },
     currentConfig: {
@@ -28,12 +29,15 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   const account = patch.channels.slack.accounts['test-account'];
   assert.equal(account.groupPolicy, 'allowlist');
   assert.equal(Object.hasOwn(account, 'groupAllowFrom'), false);
-  assert.deepEqual(Object.keys(account.channels).sort(), ['COWNER1', 'CRECEIPT1', 'CSOCIAL1', 'CWA123']);
+  assert.deepEqual(Object.keys(account.channels).sort(), ['CACCT1', 'COWNER1', 'CRECEIPT1', 'CSOCIAL1', 'CWA123']);
   assert.equal(Object.hasOwn(account.channels.CWA123, 'users'), false);
   assert.deepEqual(account.channels.CWA123.tools.alsoAllow, ['resort_workflow']);
   assert.equal(patch.plugins.entries['resort-workflows'].config.shadowMode, true);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.receiptChannelIds, ['CRECEIPT1', 'COWNER1']);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.ownerExpenseChannelIds, ['COWNER1']);
+  assert.deepEqual(patch.plugins.entries['resort-workflows'].config.accountingChannelIds, ['CACCT1']);
+  assert.match(account.channels.CACCT1.systemPrompt, /CSV attachments are captured automatically/);
+  assert.match(account.channels.CACCT1.systemPrompt, /Never manually save an upload/);
   assert.match(account.channels.COWNER1.systemPrompt, /owner-ledger channel/);
   assert.match(account.channels.COWNER1.systemPrompt, /confirm repayment/);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.socialChannelIds, ['CSOCIAL1']);

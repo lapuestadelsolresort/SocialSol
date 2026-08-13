@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { stageSlackAccountingStatement } = require('../../crm/lib/accounting-slack-inbox.js');
 
 const WORKFLOW_SCHEMA = {
   type: 'object',
@@ -77,6 +81,7 @@ function pluginConfig(value = {}) {
     reservationsChannelIds: new Set(Array.isArray(parsed.reservationsChannelIds) ? parsed.reservationsChannelIds.filter(Boolean) : []),
     receiptChannelIds: new Set(Array.isArray(parsed.receiptChannelIds) ? parsed.receiptChannelIds.filter(Boolean) : []),
     ownerExpenseChannelIds: new Set(Array.isArray(parsed.ownerExpenseChannelIds) ? parsed.ownerExpenseChannelIds.filter(Boolean) : []),
+    accountingChannelIds: new Set(Array.isArray(parsed.accountingChannelIds) ? parsed.accountingChannelIds.filter(Boolean) : []),
     controlledChannelIds: new Set(Array.isArray(parsed.controlledChannelIds) ? parsed.controlledChannelIds.filter(Boolean) : []),
     controlPlaneTokenEnv: String(parsed.controlPlaneTokenEnv || 'RESORT_WORKFLOW_CONTROL_TOKEN'),
     controlPlaneTokenFile: String(parsed.controlPlaneTokenFile || ''),
@@ -761,18 +766,28 @@ export function createEmailReplyDispatchHandler(options = {}) {
   };
 }
 
-export function createReservationToolGuard({ config } = {}) {
-  const reservations = new Set(
-    [...config.reservationsChannelIds].map(channelId => String(channelId).toLowerCase()),
+export function createControlledChannelToolGuard({ config } = {}) {
+  const controlled = new Set(
+    [...config.controlledChannelIds].map(channelId => String(channelId).toLowerCase()),
   );
   return async (event, ctx) => {
-    const channelId = String(ctx?.channelId || '').replace(/^channel:/, '').toLowerCase();
-    if (!reservations.has(channelId) || event?.toolName === 'resort_workflow') return undefined;
+    const channelId = String(ctx?.channelId || channelIdFromToolContext(ctx) || '')
+      .replace(/^channel:/, '').toLowerCase();
+    if (!controlled.has(channelId) || event?.toolName === 'resort_workflow') return undefined;
     return {
       block: true,
-      blockReason: '#reservations is restricted to the durable resort_workflow control plane.',
+      blockReason: 'This controlled resort channel is restricted to the durable resort_workflow control plane.',
     };
   };
+}
+
+export function createReservationToolGuard({ config } = {}) {
+  return createControlledChannelToolGuard({
+    config: {
+      ...config,
+      controlledChannelIds: config.reservationsChannelIds,
+    },
+  });
 }
 
 export function createInboundClaimHandler({ config, execute = callControlPlane, logger = null } = {}) {
@@ -1168,6 +1183,46 @@ export function createReceiptHandler({ config, execute = callControlPlane, logge
   };
 }
 
+export function createAccountingStatementHandler({
+  config,
+  stage = stageSlackAccountingStatement,
+  logger = null,
+} = {}) {
+  return async (event, ctx) => {
+    if (ctx?.channelId !== 'slack') return;
+    if (config.slackAccountId && ctx.accountId && ctx.accountId !== config.slackAccountId) return;
+    const channelId = resolveSlackConversationId(event, ctx);
+    if (!channelId || !config.accountingChannelIds.has(channelId)) return;
+    const workflowReady = ['accounting.classify', 'receipt.reconcile', 'qbo.write']
+      .every(workflow => workflowIsLive(config, workflow));
+    if (!workflowReady) {
+      logger?.info?.('resort-workflows shadow: accounting CSV intake is disabled until the full statement workflow is live');
+      return;
+    }
+    const fileRefs = extractFileRefs(event.metadata || {});
+    const hasCsv = fileRefs.some(file => String(file.name || '').toLowerCase().endsWith('.csv')
+      || /^(?:text|application)\/csv(?:$|;)/i.test(String(file.mimetype || '')));
+    if (!hasCsv) return;
+
+    const messageId = String(ctx.messageId || event.messageId || '');
+    if (!messageId) {
+      logger?.error?.('resort-workflows accounting CSV skipped: trusted message identity unavailable');
+      return;
+    }
+    try {
+      const result = await stage({
+        channelId,
+        messageId,
+        threadTs: event.threadId ? String(event.threadId) : null,
+      });
+      const staged = result.files?.filter(file => file.staged).length || 0;
+      logger?.info?.(`resort-workflows accounting CSV intake: staged ${staged} of ${result.files?.length || 0} file(s) from ${messageId}`);
+    } catch (error) {
+      logger?.error?.(`resort-workflows accounting CSV intake failed: ${error.code || error.message}`);
+    }
+  };
+}
+
 const plugin = {
   id: 'resort-workflows',
   name: 'Resort Workflows',
@@ -1182,7 +1237,7 @@ const plugin = {
     // reply_dispatch is the terminal pre-model hook for ordinary Slack channels.
     api.on('reply_dispatch', createReservationReplyDispatchHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('reply_dispatch', createEmailReplyDispatchHandler({ config, logger: api.logger }), { priority: 195, timeoutMs: 70_000 });
-    api.on('before_tool_call', createReservationToolGuard({ config }), { priority: 50, timeoutMs: 5_000 });
+    api.on('before_tool_call', createControlledChannelToolGuard({ config }), { priority: 50, timeoutMs: 5_000 });
     api.on('inbound_claim', createReservationReadClaimHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('inbound_claim', createInboundClaimHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });
     api.on('inbound_claim', createOwnerRezClaimHandler({ config, logger: api.logger }), { priority: 210, timeoutMs: 70_000 });
@@ -1191,6 +1246,7 @@ const plugin = {
     api.on('inbound_claim', createMarketingConfirmClaimHandler({ config, logger: api.logger }), { priority: 207, timeoutMs: 70_000 });
     api.on('inbound_claim', createManualReviewClaimHandler({ config, logger: api.logger }), { priority: 220, timeoutMs: 35_000 });
     api.on('inbound_claim', createReceiptConfirmClaimHandler({ config, logger: api.logger }), { priority: 215, timeoutMs: 70_000 });
+    api.on('message_received', createAccountingStatementHandler({ config, logger: api.logger }), { priority: 110, timeoutMs: 70_000 });
     api.on('message_received', createReceiptHandler({ config, logger: api.logger }), { priority: 100, timeoutMs: 70_000 });
     api.on('before_agent_finalize', createFinalizeHandler({ config }), { priority: 100, timeoutMs: 5_000 });
   },
