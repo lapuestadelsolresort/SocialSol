@@ -49,7 +49,7 @@ details, and operational settings.
 
 Paloma's runtime config also identifies her dedicated OpenClaw Slack account
 and agent. Preview and apply the all-membership event policy, managed SOUL
-contract, and ten-minute reconciliation heartbeat with:
+contract, and ten-minute reconciliation cron with:
 
 ```bash
 npm run configure:paloma-monitoring

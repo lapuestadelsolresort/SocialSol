@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { heartbeatPrompt } = require('../lib/monitoring-contract');
+const { monitorPrompt } = require('../lib/monitoring-contract');
 
 const root = path.resolve(__dirname, '..', '..');
 const configPath = path.resolve(process.env.PALOMA_CONFIG_PATH || path.join(root, 'paloma', 'config.json'));
@@ -15,7 +15,7 @@ const accountId = process.env.PALOMA_SLACK_ACCOUNT || monitoring.slack_account;
 const agentId = process.env.PALOMA_AGENT_ID || monitoring.agent_id || 'paloma';
 if (!accountId) throw new Error('Paloma monitoring.slack_account is required');
 const timeoutSeconds = Number(monitoring.timeout_seconds || 300);
-const message = heartbeatPrompt({
+const message = monitorPrompt({
   accountId,
   databasePath: path.join(root, 'paloma', 'data', 'tasks.db'),
   lookbackMinutes: Number(monitoring.initial_lookback_minutes || 60),

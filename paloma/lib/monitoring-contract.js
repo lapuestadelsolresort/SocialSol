@@ -45,7 +45,7 @@ function monitoredChannelConfig(currentChannels, groups) {
   return { channels: next, joined };
 }
 
-function heartbeatPrompt({ accountId, databasePath, lookbackMinutes = 60 }) {
+function monitorPrompt({ accountId, databasePath, lookbackMinutes = 60 }) {
   const account = requiredString(accountId, 'Paloma Slack account id');
   const database = path.resolve(requiredString(databasePath, 'Paloma task database path'));
   const lookback = Number(lookbackMinutes);
@@ -66,29 +66,59 @@ This is Paloma's periodic reconciliation backstop. Real-time Slack events are th
 6. Before inserting, check tasks.source_ts for exact idempotency. For each new task, use the database's exact current column names, preserve the original Spanish, add an English translation, record source_channel/source_ts/thread_ts and reporter, assign the explicitly mentioned staff member when present, and use open status unless the message itself proves completion. Post exactly one brief bilingual acknowledgment in the original Slack thread. Do not acknowledge duplicates.
 7. Also reconcile human thread replies that clearly change an existing task's status, recording task_updates. Do not turn greetings, thanks, ordinary discussion, or acknowledgments into tasks, and do not post on non-task chatter.
 8. Advance a channel's scan_state.last_scanned_ts to the greatest fully inspected Slack timestamp only after all messages through that timestamp were processed successfully. Upsert updated_at=datetime('now'). On any read, database, or Slack-write failure, leave the affected checkpoint unchanged so the next scan retries safely.
-9. Finish with exactly HEARTBEAT_OK only when every joined channel was inspected successfully. Otherwise report the failing channel and operation; never claim a clean scan after a partial failure.`;
+9. Finish with exactly NO_REPLY only when every joined channel was inspected successfully. Otherwise report the failing channel and operation; never claim a clean scan after a partial failure.`;
 }
 
-function heartbeatConfig({
+function durationMilliseconds(value) {
+  const match = String(value || '').trim().match(/^(\d+)(ms|s|m|h)$/);
+  if (!match) throw new Error('Paloma monitor interval must use ms, s, m, or h');
+  const multipliers = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+  return Number(match[1]) * multipliers[match[2]];
+}
+
+function monitorCronConfig({
   accountId, databasePath, trackerChannelId, every = '10m', timeoutSeconds = 300, lookbackMinutes = 60,
 }) {
-  const interval = requiredString(every, 'Paloma heartbeat interval');
+  const interval = requiredString(every, 'Paloma monitor interval');
   const timeout = Number(timeoutSeconds);
   if (!Number.isInteger(timeout) || timeout < 30 || timeout > 1800) {
-    throw new Error('Paloma heartbeat timeout must be an integer from 30 to 1800 seconds');
+    throw new Error('Paloma monitor timeout must be an integer from 30 to 1800 seconds');
   }
   const tracker = slackChannelId(trackerChannelId);
   if (!tracker) throw new Error('Paloma tracker Slack channel id is invalid');
   return {
+    name: 'paloma-all-channel-monitor',
+    description: 'Reconcile tasks from every active Slack channel joined by Paloma',
     every: interval,
-    target: 'slack',
-    to: `channel:${tracker}`,
-    accountId: requiredString(accountId, 'Paloma Slack account id'),
-    prompt: heartbeatPrompt({ accountId, databasePath, lookbackMinutes }),
+    everyMs: durationMilliseconds(interval),
+    sessionTarget: 'isolated',
+    message: monitorPrompt({ accountId, databasePath, lookbackMinutes }),
     timeoutSeconds: timeout,
-    lightContext: false,
-    isolatedSession: true,
+    delivery: {
+      mode: 'announce',
+      channel: 'slack',
+      to: `channel:${tracker}`,
+      accountId: requiredString(accountId, 'Paloma Slack account id'),
+    },
   };
+}
+
+function cronMatches(job, expected, agentId) {
+  return Boolean(job
+    && job.agentId === agentId
+    && job.name === expected.name
+    && job.description === expected.description
+    && job.enabled === true
+    && job.schedule?.kind === 'every'
+    && job.schedule.everyMs === expected.everyMs
+    && job.sessionTarget === expected.sessionTarget
+    && job.payload?.kind === 'agentTurn'
+    && job.payload.message === expected.message
+    && job.payload.timeoutSeconds === expected.timeoutSeconds
+    && job.delivery?.mode === expected.delivery.mode
+    && job.delivery.channel === expected.delivery.channel
+    && job.delivery.to === expected.delivery.to
+    && job.delivery.accountId === expected.delivery.accountId);
 }
 
 function soulMonitoringBlock({ accountId, databasePath }) {
@@ -123,10 +153,12 @@ function mergeSoulMonitoringBlock(current, block) {
 module.exports = {
   SOUL_BLOCK_END,
   SOUL_BLOCK_START,
-  heartbeatConfig,
-  heartbeatPrompt,
+  cronMatches,
+  durationMilliseconds,
   joinedChannels,
   mergeSoulMonitoringBlock,
+  monitorCronConfig,
+  monitorPrompt,
   monitoredChannelConfig,
   slackChannelId,
   soulMonitoringBlock,
