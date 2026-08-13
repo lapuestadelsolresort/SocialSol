@@ -11,7 +11,7 @@ const { ensureSchemaAsync } = require('../lib/workflow-schema');
 
 async function auditClassifications(db) {
   const rows = await db.query(sql`SELECT id, outreach_send_id, body_text,
-      raw_body_text, sentiment, classification_source
+      raw_body_text, sentiment, sentiment_notes, classification_source
     FROM email_threads
     WHERE direction='inbound'
       AND classification_source='email_conversation_classifier'
@@ -23,13 +23,19 @@ async function auditClassifications(db) {
       id: row.id,
       outreachSendId: row.outreach_send_id,
       previous: row.sentiment,
+      previousReason: row.sentiment_notes,
       next: next.quality,
       reason: next.reason,
       normalizedText: next.normalizedText,
       bodyChanged: String(row.body_text || '') !== next.normalizedText,
       classificationChanged: row.sentiment !== next.quality,
+      reasonChanged: row.sentiment === next.quality
+        && String(row.sentiment_notes || '') !== String(next.reason || ''),
     };
-  }).filter(row => row.bodyChanged || row.classificationChanged);
+  }).map(row => ({
+    ...row,
+    requiresRequeue: row.classificationChanged || row.reasonChanged,
+  })).filter(row => row.bodyChanged || row.requiresRequeue);
 }
 
 async function main(args = process.argv.slice(2), deps = {}) {
@@ -45,7 +51,7 @@ async function main(args = process.argv.slice(2), deps = {}) {
     if (apply) {
       await db.tx(async tx => {
         for (const change of changes) {
-          if (change.classificationChanged) {
+          if (change.requiresRequeue) {
             await tx.query(sql`UPDATE email_threads SET body_text=${change.normalizedText},
               processing_status='pending', processing_error=NULL, processed_at=NULL,
               workflow_run_id=NULL, updated_at=datetime('now') WHERE id=${change.id}`);
@@ -60,7 +66,7 @@ async function main(args = process.argv.slice(2), deps = {}) {
       ok: true,
       mode: apply ? 'apply' : 'dry-run',
       normalized: changes.filter(row => row.bodyChanged).length,
-      requeued: changes.filter(row => row.classificationChanged).length,
+      requeued: changes.filter(row => row.requiresRequeue).length,
       changes: changes.map(({ normalizedText, ...row }) => row),
     };
   } finally {
