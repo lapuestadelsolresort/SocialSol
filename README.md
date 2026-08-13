@@ -36,7 +36,7 @@ business at sale.
 | **Sarah Email Console** | Guest comms | Complete Gmail + OwnerRez Airbnb/Vrbo message ledger with guarded thread replies | `#sarah-email` |
 | **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |
 | **Corporate Intelligence** | Finance/legal | Analysis of Mexican corporate docs, tax filings, and property trusts (see "Not in this repo") | `#corporate` |
-| **QuickBooks Integration** | Finance | Automated expense tracking via Slack receipt channels → Kapital CSV → QBO pipeline, plus guarded owner-paid expense journals and review-gated repayments against configured liability accounts. Full read/write API. | `#accounting` |
+| **QuickBooks Integration** | Finance | Automated expense tracking via Slack receipt channels (every configured member's top-level post is reimbursement intent; every attached document becomes an item, including quotations) → Kapital reference/CSV reconciliation → QBO pipeline, plus guarded owner-paid expense journals and review-gated repayments against configured liability accounts. Full read/write API. | `#accounting` |
 
 ### Supporting automations
 

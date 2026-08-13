@@ -1,7 +1,7 @@
 {
   "version": 1,
   "shadow_mode": true,
-  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "email.reply.propose", "email.reply.confirm", "email.message.classify", "marketing.change.confirm", "meta.campaign.autonomous", "marketing.report.daily", "meta.audience.sync", "ownerrez.mutation.confirm", "receipt.owner_expense.ingest", "receipt.owner_expense.process", "receipt.owner_expense.confirm"],
+  "live_workflows": ["whatsapp.reply", "meta.dm.reply", "email.reply.propose", "email.reply.confirm", "email.message.classify", "marketing.change.confirm", "meta.campaign.autonomous", "marketing.report.daily", "meta.audience.sync", "ownerrez.mutation.confirm", "receipt.ingest", "receipt.process", "receipt.annotate", "receipt.owner_expense.ingest", "receipt.owner_expense.process", "receipt.owner_expense.confirm"],
   "always_on_effects": ["whatsapp.inbound.process:send_conversion"],
   "channels": {
     "REPLACE_WITH_WHATSAPP_CHANNEL_ID": {

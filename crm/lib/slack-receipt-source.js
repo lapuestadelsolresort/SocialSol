@@ -7,7 +7,7 @@ const path = require('node:path');
 const { ROOT } = require('../../lib/runtime-paths');
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
-const MAX_FILES = 5;
+const MAX_FILES = 20;
 const DEFAULT_OPENCLAW_CONFIG_PATH = path.join(os.homedir(), '.openclaw', 'openclaw.json');
 const DEFAULT_RECEIPT_FILES_DIR = path.join(ROOT, 'runtime', 'receipt-files');
 

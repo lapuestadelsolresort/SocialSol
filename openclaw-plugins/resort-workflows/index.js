@@ -61,6 +61,7 @@ const COMMAND_ONLY_WORKFLOWS = new Set([
   'meta.dm.reply',
   'ownerrez.mutation.confirm',
   'marketing.change.confirm',
+  'receipt.ingest',
   'receipt.owner_expense.ingest',
   'receipt.owner_expense.process',
   'receipt.owner_expense.confirm',
@@ -1173,6 +1174,9 @@ export function createReceiptHandler({ config, execute = callControlPlane, logge
     if (config.slackAccountId && ctx.accountId && ctx.accountId !== config.slackAccountId) return;
     const channelId = resolveSlackConversationId(event, ctx);
     if (!channelId || !config.receiptChannelIds.has(channelId)) return;
+    // A receipt-channel thread is discussion about the original reimbursement,
+    // not a second reimbursement. Only top-level posts enter the automatic flow.
+    if (event.threadId) return;
     const workflow = config.ownerExpenseChannelIds.has(channelId)
       ? 'receipt.owner_expense.ingest'
       : 'receipt.ingest';
@@ -1191,10 +1195,6 @@ export function createReceiptHandler({ config, execute = callControlPlane, logge
         workflow,
         input: {
           slackMessageId: messageId,
-          threadTs: event.threadId ? String(event.threadId) : null,
-          messageText: String(event.content || ''),
-          submittedAt: eventTimestampIso(event.timestamp),
-          fileRefs: extractFileRefs(event.metadata || {}),
         },
         context: { channelId, actorUserId, messageId, entrypoint: 'slack_receipt_hook' },
         idempotencyKey: `slack:${channelId}:${messageId}:${workflow}`,

@@ -67,6 +67,7 @@ test('receipt channel configurator atomically registers accounting and workflow 
       capabilities: ['receipts.submit', 'receipts.write', 'accounting.read_scoped'],
     });
     assert.ok(policy.live_workflows.includes('receipt.ingest'));
+    assert.ok(policy.live_workflows.includes('receipt.process'));
     assert.ok(policy.live_workflows.includes('receipt.annotate'));
     assert.ok(policy.live_workflows.includes('receipt.reconcile'));
     assert.equal(fs.readdirSync(path.join(directory, 'backups')).length, 2);
