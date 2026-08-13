@@ -295,7 +295,10 @@ const proposeDefinition = {
           contactId: send.contact_id,
           contactName: send.contact_name,
           toAddress: send.contact_email,
-          subject: replySubject(inbound.subject || send.subject),
+          // The original outreach subject is authoritative. A malformed older
+          // Gmail reply may carry mojibake in its Subject header; using it here
+          // would perpetuate that corruption in every subsequent response.
+          subject: replySubject(send.subject || inbound.subject),
           slackChannelId: send.slack_channel_id,
           slackThreadTs: send.slack_message_ts,
           inboundEmailThreadId: inbound.id,

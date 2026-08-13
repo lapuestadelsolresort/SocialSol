@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createFinalizeHandler,
   createEmailClaimHandler,
+  createEmailReplyDispatchHandler,
   createInboundClaimHandler,
   createMetaDmClaimHandler,
   createMarketingConfirmClaimHandler,
@@ -100,6 +101,92 @@ test('email reply commands bind the trusted Slack user, message, channel, and th
   }, {});
   assert.equal(topLevel.handled, true);
   assert.match(topLevel.reply.text, /original draft thread/);
+});
+
+test('email reply dispatch claims ordinary Slack commands before the model runs', async () => {
+  const config = pluginConfig({
+    emailChannelIds: ['CPAULINA'], slackAccountId: 'ig-drafts', shadowMode: true,
+    liveWorkflowNames: ['email.reply.propose', 'email.reply.confirm', 'email.message.classify'],
+  });
+  const calls = [];
+  const sent = [];
+  let finalized = null;
+  let idleReason = null;
+  const counts = { tool: 0, block: 0, final: 0 };
+  const handler = createEmailReplyDispatchHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: {
+        id: 'email-proposal-run', workflow_name: 'email.reply.propose', status: 'completed',
+        output: {
+          outreachSendId: 10343, recipient: 'Jason', requestHash: 'request-hash',
+          bodyText: request.input.message, expiresAt: '2026-08-13T17:03:36.296Z',
+          confirmationCommand: '!email confirm proposal-id acceptance-hash',
+        },
+      } };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', Surface: 'slack', AccountId: 'ig-drafts',
+      OriginatingChannel: 'slack', OriginatingTo: 'channel:CPAULINA',
+      MessageSidFull: '1786639502.209419', MessageThreadId: '1786639076.817359',
+      SenderId: 'U-JASON', BodyForCommands: '!email reply yes how about 5?',
+      CommandAuthorized: true,
+    },
+    sendPolicy: 'allow',
+  }, {
+    dispatcher: {
+      sendFinalReply(payload) { sent.push(payload); counts.final += 1; return true; },
+      getQueuedCounts() { return { ...counts }; },
+    },
+    recordProcessed(outcome, details) { finalized = { outcome, details }; },
+    markIdle(reason) { idleReason = reason; },
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.queuedFinal, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workflow, 'email.reply.propose');
+  assert.equal(calls[0].input.threadTs, '1786639076.817359');
+  assert.equal(calls[0].context.actorUserId, 'U-JASON');
+  assert.equal(calls[0].context.messageId, '1786639502.209419');
+  assert.match(sent[0].text, /No email has been sent/);
+  assert.match(sent[0].text, /!email confirm proposal-id acceptance-hash/);
+  assert.equal(finalized.outcome, 'completed');
+  assert.equal(finalized.details.reason, 'email_workflow_reply_dispatch');
+  assert.equal(idleReason, 'message_completed');
+});
+
+test('email reply dispatch gives the correct help for malformed email commands', async () => {
+  const config = pluginConfig({
+    emailChannelIds: ['CPAULINA'], slackAccountId: 'ig-drafts', shadowMode: true,
+    liveWorkflowNames: ['email.reply.propose', 'email.reply.confirm', 'email.message.classify'],
+  });
+  const sent = [];
+  const handler = createEmailReplyDispatchHandler({
+    config,
+    execute: async () => assert.fail('malformed commands must not execute'),
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:CPAULINA', MessageSidFull: '1786639440.570049',
+      MessageThreadId: '1786639076.817359', SenderId: 'U-JASON',
+      BodyForCommands: '!email yes how about 5pm?',
+    },
+    sendPolicy: 'allow',
+  }, {
+    dispatcher: {
+      sendFinalReply(payload) { sent.push(payload); return true; },
+      getQueuedCounts() { return { final: sent.length }; },
+    },
+    recordProcessed() {}, markIdle() {},
+  });
+  assert.equal(result.handled, true);
+  assert.match(sent[0].text, /!email reply <message>/);
+  assert.doesNotMatch(sent[0].text, /!approve|!edit|!reject/);
 });
 
 test('parses only exact paid-media confirmation commands', () => {

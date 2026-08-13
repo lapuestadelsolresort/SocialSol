@@ -721,6 +721,44 @@ export function createReservationReplyDispatchHandler(options = {}) {
   };
 }
 
+// `inbound_claim` is not invoked for ordinary Slack channel conversations in
+// OpenClaw 2026.5. Claim email commands again at the terminal pre-model
+// `reply_dispatch` boundary so neither valid commands nor malformed `!email`
+// attempts reach the model and produce improvised instructions or mutations.
+export function createEmailReplyDispatchHandler(options = {}) {
+  const claim = createEmailClaimHandler(options);
+  const logger = options.logger || null;
+  return async (event, ctx) => {
+    if (event?.isTailDispatch) return undefined;
+    const inboundEvent = reservationClaimEventFromFinalizedContext(event?.ctx);
+    const result = await claim(inboundEvent, {
+      channelId: inboundEvent.channel,
+      accountId: inboundEvent.accountId,
+      conversationId: inboundEvent.conversationId,
+      messageId: inboundEvent.messageId,
+      senderId: inboundEvent.senderId,
+    });
+    if (!result?.handled) return undefined;
+
+    let queuedFinal = false;
+    if (!event.suppressUserDelivery && event.sendPolicy !== 'deny' && result.reply) {
+      try {
+        await ctx.onReplyStart?.();
+        queuedFinal = ctx.dispatcher.sendFinalReply(result.reply);
+      } catch (error) {
+        logger?.error?.(`resort-workflows deterministic email reply delivery failed: ${error.message}`);
+      }
+    }
+    ctx.recordProcessed?.('completed', { reason: 'email_workflow_reply_dispatch' });
+    ctx.markIdle?.('message_completed');
+    return {
+      handled: true,
+      queuedFinal,
+      counts: ctx.dispatcher.getQueuedCounts(),
+    };
+  };
+}
+
 export function createReservationToolGuard({ config } = {}) {
   const reservations = new Set(
     [...config.reservationsChannelIds].map(channelId => String(channelId).toLowerCase()),
@@ -1141,6 +1179,7 @@ const plugin = {
     // OpenClaw 2026.5 invokes inbound_claim only for plugin-bound conversations.
     // reply_dispatch is the terminal pre-model hook for ordinary Slack channels.
     api.on('reply_dispatch', createReservationReplyDispatchHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
+    api.on('reply_dispatch', createEmailReplyDispatchHandler({ config, logger: api.logger }), { priority: 195, timeoutMs: 70_000 });
     api.on('before_tool_call', createReservationToolGuard({ config }), { priority: 50, timeoutMs: 5_000 });
     api.on('inbound_claim', createReservationReadClaimHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('inbound_claim', createInboundClaimHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });
