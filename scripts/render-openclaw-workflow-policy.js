@@ -43,7 +43,7 @@ const CHANNEL_MUTATION_WORKFLOWS = {
 };
 
 function receiptPrompt(name) {
-  return `This is the scoped ${name} receipt channel. Channel members may submit or amend this channel's receipts and read only this channel's receipt ledger through resort_workflow. Cross-channel accounting data is not available here.`;
+  return `This is the scoped ${name} receipt channel. Channel members may submit or amend this channel's receipts and read only this channel's receipt ledger through resort_workflow. When one Slack post contains multiple receipt or invoice files, inspect every attachment and pass one receipt.annotate item per source document; the item amounts must sum to the parent reimbursement amount. Cross-channel accounting data is not available here.`;
 }
 
 function ownerExpensePrompt(name) {

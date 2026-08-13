@@ -261,6 +261,18 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
         transactionDate: '2026-08-10', vendor: 'Hardware',
         categoryKey: 'maintenance', categoryName: 'Maintenance',
         description: 'Replacement hardware for villa doors',
+        items: [
+          {
+            fileRefId: 'F1', amount: 1000, currency: 'MXN', transactionDate: '2026-08-10',
+            vendor: 'Hardware A', categoryKey: 'maintenance', categoryName: 'Maintenance',
+            description: 'Door locks',
+          },
+          {
+            amount: 250, currency: 'MXN', transactionDate: '2026-08-10',
+            vendor: 'Cleaner', categoryKey: 'cleaning_services', categoryName: 'Cleaning Services',
+            description: 'Cleanup after installation',
+          },
+        ],
       },
     });
     assert.equal(annotated.status, 'completed', annotated.error_message);
@@ -272,6 +284,18 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
       category_key: 'maintenance',
       category_name: 'Maintenance',
     });
+    assert.equal(annotated.output.itemCount, 2);
+    const items = await db.query(sql`SELECT item_index, file_ref_id, amount, category_key
+      FROM accounting_receipt_items WHERE receipt_id=${first.output.receiptId} ORDER BY item_index`);
+    assert.deepEqual(items, [
+      { item_index: 1, file_ref_id: 'F1', amount: 1000, category_key: 'maintenance' },
+      { item_index: 2, file_ref_id: null, amount: 250, category_key: 'cleaning_services' },
+    ]);
+
+    assert.throws(() => annotate.validate({
+      receiptId: first.output.receiptId, amount: 1250, currency: 'MXN',
+      items: [{ amount: 1200, currency: 'MXN' }],
+    }), /does not equal receipt amount/);
 
     const denied = await startGraph(db, annotate, {
       idempotencyKey: 'slack:RECEIPT-B:171.4:receipt.annotate',

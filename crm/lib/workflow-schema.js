@@ -201,6 +201,23 @@ const SCHEMA_STATEMENTS = [
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(slack_channel_id, slack_message_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS accounting_receipt_items (
+    id TEXT PRIMARY KEY,
+    receipt_id TEXT NOT NULL REFERENCES accounting_receipts(id) ON DELETE CASCADE,
+    item_index INTEGER NOT NULL,
+    file_ref_id TEXT,
+    vendor TEXT,
+    transaction_date TEXT,
+    currency TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT,
+    category_key TEXT,
+    category_name TEXT,
+    extraction_confidence REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(receipt_id, item_index)
+  )`,
   `CREATE TABLE IF NOT EXISTS accounting_reconciliations (
     id TEXT PRIMARY KEY,
     receipt_id TEXT NOT NULL REFERENCES accounting_receipts(id),
@@ -405,6 +422,10 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_workflow_manual_reviews_status
      ON workflow_manual_reviews(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_accounting_receipts_status ON accounting_receipts(status, submitted_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_accounting_receipt_items_receipt
+     ON accounting_receipt_items(receipt_id, item_index)`,
+  `CREATE INDEX IF NOT EXISTS idx_accounting_receipt_items_category
+     ON accounting_receipt_items(category_key, transaction_date)`,
   `CREATE INDEX IF NOT EXISTS idx_accounting_reconciliations_status ON accounting_reconciliations(status, updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_accounting_bank_txn_match ON accounting_bank_transactions(transaction_date, amount, currency)`,
   `CREATE INDEX IF NOT EXISTS idx_social_content_status ON social_content(status, scheduled_for)`,
