@@ -10,7 +10,12 @@ const {
   monitoredChannelConfig,
   soulMonitoringBlock,
 } = require('./monitoring-contract');
-const { accountChannelPath, planMonitoring } = require('../../scripts/configure-paloma-monitoring');
+const {
+  accountChannelPath,
+  cronFailureAlertArgs,
+  cronWriteArgs,
+  planMonitoring,
+} = require('../../scripts/configure-paloma-monitoring');
 
 const groups = [
   { id: 'channel:CJOINED01', name: 'villa-one', raw: { is_member: true, is_archived: false } },
@@ -44,17 +49,35 @@ test('monitor cron is isolated, success-silent, failure-routed, dynamic, and che
   assert.equal(monitor.every, '10m');
   assert.equal(monitor.everyMs, 600000);
   assert.equal(monitor.delivery.to, 'channel:CPALOMA01');
+  assert.equal(monitor.delivery.mode, 'none');
+  assert.equal(monitor.failureAlert.after, 1);
+  assert.equal(monitor.failureAlert.to, 'channel:CPALOMA01');
+  assert.equal(monitor.failureAlert.includeSkipped, false);
   assert.equal(monitor.sessionTarget, 'isolated');
   assert.match(monitor.message, /every non-archived channel/);
   assert.match(monitor.message, /direct @mention followed by an imperative request is a task candidate/);
   assert.match(monitor.message, /leave the affected checkpoint unchanged/);
+  assert.match(monitor.message, /send exactly one concise alert to channel:CPALOMA01/);
   assert.match(monitor.message, /exactly NO_REPLY/);
   assert.ok(cronMatches({
     agentId: 'paloma', name: monitor.name, description: monitor.description, enabled: true,
     schedule: { kind: 'every', everyMs: 600000 }, sessionTarget: 'isolated',
     payload: { kind: 'agentTurn', message: monitor.message, timeoutSeconds: 300 },
     delivery: monitor.delivery,
+    failureAlert: monitor.failureAlert,
   }, monitor, 'paloma'));
+  assert.ok(cronWriteArgs(monitor, 'paloma').includes('--no-deliver'));
+  assert.ok(!cronWriteArgs(monitor, 'paloma').includes('--announce'));
+  assert.deepEqual(cronFailureAlertArgs(monitor), [
+    '--failure-alert',
+    '--failure-alert-after', '1',
+    '--failure-alert-channel', 'slack',
+    '--failure-alert-to', 'channel:CPALOMA01',
+    '--failure-alert-account-id', 'paloma-test',
+    '--failure-alert-mode', 'announce',
+    '--failure-alert-cooldown', '600000ms',
+    '--failure-alert-exclude-skipped',
+  ]);
 });
 
 test('managed SOUL block is idempotent and applies task detection to every joined channel', () => {

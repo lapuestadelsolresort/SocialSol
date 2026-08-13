@@ -45,9 +45,11 @@ function monitoredChannelConfig(currentChannels, groups) {
   return { channels: next, joined };
 }
 
-function monitorPrompt({ accountId, databasePath, lookbackMinutes = 60 }) {
+function monitorPrompt({ accountId, databasePath, trackerChannelId, lookbackMinutes = 60 }) {
   const account = requiredString(accountId, 'Paloma Slack account id');
   const database = path.resolve(requiredString(databasePath, 'Paloma task database path'));
+  const tracker = slackChannelId(trackerChannelId);
+  if (!tracker) throw new Error('Paloma tracker Slack channel id is invalid');
   const lookback = Number(lookbackMinutes);
   if (!Number.isInteger(lookback) || lookback < 1 || lookback > 1440) {
     throw new Error('Paloma monitoring lookback must be an integer from 1 to 1440 minutes');
@@ -66,7 +68,7 @@ This is Paloma's periodic reconciliation backstop. Real-time Slack events are th
 6. Before inserting, check tasks.source_ts for exact idempotency. For each new task, use the database's exact current column names, preserve the original Spanish, add an English translation, record source_channel/source_ts/thread_ts and reporter, assign the explicitly mentioned staff member when present, and use open status unless the message itself proves completion. Post exactly one brief bilingual acknowledgment in the original Slack thread. Do not acknowledge duplicates.
 7. Also reconcile human thread replies that clearly change an existing task's status, recording task_updates. Do not turn greetings, thanks, ordinary discussion, or acknowledgments into tasks, and do not post on non-task chatter.
 8. Advance a channel's scan_state.last_scanned_ts to the greatest fully inspected Slack timestamp only after all messages through that timestamp were processed successfully. Upsert updated_at=datetime('now'). On any read, database, or Slack-write failure, leave the affected checkpoint unchanged so the next scan retries safely.
-9. Finish with exactly NO_REPLY only when every joined channel was inspected successfully. Otherwise report the failing channel and operation; never claim a clean scan after a partial failure.`;
+9. When every joined channel was inspected successfully, finish with exactly NO_REPLY. On a partial failure, send exactly one concise alert to channel:${tracker} with openclaw message send --channel slack --account ${account} --target channel:${tracker} --message <FAILURE_SUMMARY>, naming the failing channel and operation, then finish with exactly NO_REPLY. Never claim a clean scan after a partial failure.`;
 }
 
 function durationMilliseconds(value) {
@@ -92,12 +94,21 @@ function monitorCronConfig({
     every: interval,
     everyMs: durationMilliseconds(interval),
     sessionTarget: 'isolated',
-    message: monitorPrompt({ accountId, databasePath, lookbackMinutes }),
+    message: monitorPrompt({ accountId, databasePath, trackerChannelId: tracker, lookbackMinutes }),
     timeoutSeconds: timeout,
     delivery: {
-      mode: 'announce',
+      mode: 'none',
       channel: 'slack',
       to: `channel:${tracker}`,
+      accountId: requiredString(accountId, 'Paloma Slack account id'),
+    },
+    failureAlert: {
+      after: 1,
+      channel: 'slack',
+      to: `channel:${tracker}`,
+      cooldownMs: 600_000,
+      includeSkipped: false,
+      mode: 'announce',
       accountId: requiredString(accountId, 'Paloma Slack account id'),
     },
   };
@@ -118,7 +129,14 @@ function cronMatches(job, expected, agentId) {
     && job.delivery?.mode === expected.delivery.mode
     && job.delivery.channel === expected.delivery.channel
     && job.delivery.to === expected.delivery.to
-    && job.delivery.accountId === expected.delivery.accountId);
+    && job.delivery.accountId === expected.delivery.accountId
+    && job.failureAlert?.after === expected.failureAlert.after
+    && job.failureAlert.channel === expected.failureAlert.channel
+    && job.failureAlert.to === expected.failureAlert.to
+    && job.failureAlert.cooldownMs === expected.failureAlert.cooldownMs
+    && job.failureAlert.includeSkipped === expected.failureAlert.includeSkipped
+    && job.failureAlert.mode === expected.failureAlert.mode
+    && job.failureAlert.accountId === expected.failureAlert.accountId);
 }
 
 function soulMonitoringBlock({ accountId, databasePath }) {
