@@ -120,6 +120,12 @@ test('re-observation repairs this classifier\'s exact collapsed-quote false nega
     await db.query(sql`UPDATE suppressions SET source='email_conversation_classifier',
       notes=${`Email event #${event.id} classified not_interested`}
       WHERE email='gretel@example.com'`);
+    await db.query(sql`INSERT INTO workflow_outbox (
+      id, topic, idempotency_key, payload_json, status, completed_at
+    ) VALUES (
+      'old-email-notification', 'slack.notification',
+      ${`email-thread:${event.id}:slack`}, '{}', 'completed', datetime('now')
+    )`);
 
     const run = await startGraph(db, observeDefinition, {
       idempotencyKey: 'email:gmail:gmail-in-1:observe:v2',
@@ -137,6 +143,8 @@ test('re-observation repairs this classifier\'s exact collapsed-quote false nega
     const [{ count: suppressionCount }] = await db.query(sql`SELECT COUNT(*) AS count FROM suppressions`);
     assert.equal(suppressionCount, 0);
     const [outbox] = await db.query(sql`SELECT * FROM workflow_outbox WHERE run_id=${run.id}`);
+    assert.equal(outbox.idempotency_key,
+      `email-thread:${event.id}:classification:ambiguous:v2:slack`);
     const payload = JSON.parse(outbox.payload_json);
     assert.equal(payload.threadTs, '1786549495.693669');
     assert.match(payload.message, /classification corrected/i);

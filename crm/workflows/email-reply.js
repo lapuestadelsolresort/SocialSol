@@ -202,6 +202,7 @@ const observeDefinition = {
         const channelId = event.slack_channel_id || event.send_slack_channel_id || prospectorChannelId();
         const threadTs = event.slack_thread_ts || event.send_slack_thread_ts || null;
         if (!channelId) return { queued: false, reason: 'no_channel' };
+        const quality = projected.classification?.quality || 'ambiguous';
         let message;
         if (!event.outreach_send_id) {
           message = [
@@ -221,7 +222,6 @@ const observeDefinition = {
             `Email event: ${event.id} · Draft #${event.outreach_send_id} · Workflow: ${run.id} · Evidence: ${projected.evidenceId}`,
           ].join('\n');
         } else {
-          const quality = projected.classification?.quality || 'ambiguous';
           const heading = projected.classificationChanged
             ? `🔄 *Email classification corrected for ${event.contact_name || event.from_address || event.contact_email}*`
             : `📬 *Reply from ${event.contact_name || ''} <${event.from_address || event.contact_email}>*`;
@@ -239,10 +239,13 @@ const observeDefinition = {
             `Email event: ${event.id} · Workflow: ${run.id} · Evidence: ${projected.evidenceId}`,
           ].filter(Boolean).join('\n');
         }
+        const projectionKey = projected.classificationChanged
+          ? `email-thread:${event.id}:classification:${quality}:v${observeDefinition.version}:slack`
+          : `email-thread:${event.id}:slack`;
         await store.enqueueOutbox(db, {
           runId: run.id,
           topic: 'slack.notification',
-          idempotencyKey: `email-thread:${event.id}:slack`,
+          idempotencyKey: projectionKey,
           payload: { channelId, threadTs, message, emailThreadId: event.id },
         });
         return { queued: true, channelId, threadTs };
