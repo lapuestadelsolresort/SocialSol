@@ -91,6 +91,7 @@ async function deliverSlackNotification(db, row, payload, services = {}) {
     threadTs,
     account: payload.account || process.env.OPENCLAW_SLACK_ACCOUNT || '',
     presentation: payload.presentation || null,
+    slackBlocks: payload.slackBlocks || null,
   });
   if (!result.ok) throw new Error(result.error || 'Slack notification failed');
   if (payload.metaMessageId && result.ts) {

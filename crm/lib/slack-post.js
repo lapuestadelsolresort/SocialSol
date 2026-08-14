@@ -17,9 +17,66 @@
 //   { payload: { result: { messageId: '1741234567.123456' } } }
 
 const { execFile } = require('child_process');
+const { loadSlackCredential } = require('./slack-receipt-source');
 
 const OPENCLAW = process.env.OPENCLAW_BIN || '/opt/homebrew/bin/openclaw';
 const DEFAULT_ACCOUNT = process.env.OPENCLAW_SLACK_ACCOUNT || '';
+
+async function postSlackBlocks(channelId, message, opts = {}) {
+  const {
+    threadTs = null,
+    account = DEFAULT_ACCOUNT,
+    slackBlocks,
+    credential = null,
+    fetchImpl = fetch,
+  } = opts;
+  if (!/^[A-Z][A-Z0-9]+$/.test(String(channelId || ''))) {
+    return { ok: false, ts: null, channelId, raw: null, error: 'Invalid Slack channel id', stderr: null };
+  }
+  if (!Array.isArray(slackBlocks) || slackBlocks.length === 0 || slackBlocks.length > 50) {
+    return { ok: false, ts: null, channelId, raw: null, error: 'Invalid Slack Block Kit payload', stderr: null };
+  }
+  let resolvedCredential;
+  try {
+    resolvedCredential = credential || loadSlackCredential({ accountId: account });
+  } catch (error) {
+    return {
+      ok: false, ts: null, channelId, raw: null,
+      error: String(error.message || error), stderr: null,
+    };
+  }
+  try {
+    const response = await fetchImpl('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resolvedCredential.token}`,
+        'Content-Type': 'application/json; charset=utf-8',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        channel: channelId,
+        text: String(message || ''),
+        blocks: slackBlocks,
+        ...(threadTs ? { thread_ts: String(threadTs) } : {}),
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const raw = await response.json().catch(() => ({}));
+    if (!response.ok || raw.ok !== true || !raw.ts) {
+      return {
+        ok: false, ts: null, channelId, raw,
+        error: `Slack chat.postMessage failed: ${raw.error || response.status}`,
+        stderr: null,
+      };
+    }
+    return { ok: true, ts: String(raw.ts), channelId, raw, error: null, stderr: null };
+  } catch (error) {
+    return {
+      ok: false, ts: null, channelId, raw: null,
+      error: String(error.message || error), stderr: null,
+    };
+  }
+}
 
 /**
  * Post a message to a Slack channel via the openclaw CLI.
@@ -39,6 +96,7 @@ const DEFAULT_ACCOUNT = process.env.OPENCLAW_SLACK_ACCOUNT || '';
 function postToChannel(channelId, message, opts = {}) {
   const {
     threadTs = null, account = DEFAULT_ACCOUNT, dryRun = false, presentation = null,
+    slackBlocks = null,
   } = opts;
   if (!channelId || !account) {
     return Promise.resolve({
@@ -49,6 +107,10 @@ function postToChannel(channelId, message, opts = {}) {
       error: 'Slack integration is not configured',
       stderr: null,
     });
+  }
+
+  if (slackBlocks && !dryRun) {
+    return postSlackBlocks(channelId, message, { ...opts, threadTs, account, slackBlocks });
   }
 
   const args = [
@@ -106,4 +168,9 @@ function postToChannel(channelId, message, opts = {}) {
   });
 }
 
-module.exports = { postToChannel, OPENCLAW, DEFAULT_ACCOUNT };
+module.exports = {
+  postSlackBlocks,
+  postToChannel,
+  OPENCLAW,
+  DEFAULT_ACCOUNT,
+};

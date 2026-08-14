@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import {
   createAccountingStatementHandler,
   createControlledChannelToolGuard,
@@ -37,6 +38,9 @@ import {
   parseTaskListRequest,
   pluginConfig,
 } from './index.js';
+
+const require = createRequire(import.meta.url);
+const { buildReceiptPaymentSourcePrompt } = require('../../crm/workflows/local-records.js');
 
 const COMPLETED = {
   run: {
@@ -570,6 +574,38 @@ test('receipt payment-source button invokes the command-only workflow with trust
   assert.equal(edits.length, 1);
   assert.deepEqual(edits[0].blocks, []);
   assert.match(edits[0].text, /Pagado con Kapital/);
+});
+
+test('native receipt Block Kit action routes through the receiptsource namespace', async () => {
+  const receiptId = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  const prompt = buildReceiptPaymentSourcePrompt(receiptId);
+  const kapital = prompt.slackBlocks[1].elements[1];
+  const routedData = `${kapital.action_id}:${kapital.value}`;
+  const [namespace, ...payloadParts] = routedData.split(':');
+  assert.equal(namespace, 'receiptsource');
+
+  const calls = [];
+  const result = await createReceiptPaymentSourceInteractionHandler({
+    config: pluginConfig({
+      receiptChannelIds: ['C123RECEIPT'], shadowMode: true,
+      liveWorkflowNames: ['receipt.payment_source.select'],
+    }),
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'source-run', status: 'completed', output: { status: 'queued' } } };
+    },
+  })({
+    conversationId: 'C123RECEIPT', senderId: 'U123SERGIO',
+    interaction: { payload: payloadParts.join(':'), messageTs: '1786660382.599739' },
+    respond: { acknowledge: async () => {}, editMessage: async () => {} },
+  });
+
+  assert.deepEqual(result, { handled: true });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].input, {
+    receiptId,
+    paymentSource: 'kapital_business_paid',
+  });
 });
 
 test('accounting CSV hook stages trusted Slack uploads for the fixed inbox workflow', async () => {

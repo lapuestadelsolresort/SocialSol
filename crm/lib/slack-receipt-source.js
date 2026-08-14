@@ -23,9 +23,10 @@ function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
-function resolveSlackAccount(config) {
+function resolveSlackAccount(config, requestedAccountId = '') {
   const accounts = config.channels?.slack?.accounts || {};
-  const requested = process.env.OPENCLAW_SLACK_ACCOUNT
+  const requested = requestedAccountId
+    || process.env.OPENCLAW_SLACK_ACCOUNT
     || config.plugins?.entries?.['resort-workflows']?.config?.slackAccountId
     || '';
   if (requested && accounts[requested]) return { id: requested, account: accounts[requested] };
@@ -34,10 +35,10 @@ function resolveSlackAccount(config) {
   throw new Error('OPENCLAW_SLACK_ACCOUNT is required to retrieve receipt files');
 }
 
-function loadSlackCredential() {
+function loadSlackCredential(options = {}) {
   const configPath = path.resolve(process.env.OPENCLAW_CONFIG_PATH || DEFAULT_OPENCLAW_CONFIG_PATH);
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  const { id, account } = resolveSlackAccount(config);
+  const { id, account } = resolveSlackAccount(config, options.accountId);
   if (typeof account.botToken !== 'string' || !account.botToken.startsWith('xoxb-')) {
     throw new Error(`Slack bot token is unavailable for account ${id}`);
   }

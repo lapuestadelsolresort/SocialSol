@@ -90,17 +90,33 @@ function buildReceiptPaymentSourcePrompt(receiptId) {
   ].join('\n');
   return {
     message,
-    presentation: {
-      tone: 'info',
-      blocks: [{
-        type: 'buttons',
-        buttons: [
-          { label: 'Reembolso personal', value: `receiptsource:personal:${receiptId}`, style: 'primary' },
-          { label: 'Pagado con Kapital', value: `receiptsource:kapital:${receiptId}` },
-          { label: 'Ya reembolsado', value: `receiptsource:reimbursed:${receiptId}` },
+    slackBlocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: message },
+      },
+      {
+        type: 'actions',
+        block_id: `receipt_payment_source_${receiptId}`,
+        elements: [
+          {
+            type: 'button', action_id: 'receiptsource:personal',
+            text: { type: 'plain_text', text: 'Reembolso personal', emoji: true },
+            value: receiptId, style: 'primary',
+          },
+          {
+            type: 'button', action_id: 'receiptsource:kapital',
+            text: { type: 'plain_text', text: 'Pagado con Kapital', emoji: true },
+            value: receiptId,
+          },
+          {
+            type: 'button', action_id: 'receiptsource:reimbursed',
+            text: { type: 'plain_text', text: 'Ya reembolsado', emoji: true },
+            value: receiptId,
+          },
         ],
-      }],
-    },
+      },
+    ],
   };
 }
 
@@ -322,12 +338,12 @@ const receiptIngest = {
         const outbox = await store.enqueueOutbox(db, {
           runId: run.id,
           topic: 'slack.notification',
-          idempotencyKey: `receipt:${receipt.id}:payment-source-prompt:v1`,
+          idempotencyKey: `receipt:${receipt.id}:payment-source-prompt:v2`,
           payload: {
             channelId: receipt.slack_channel_id,
             threadTs: receipt.slack_thread_ts || receipt.slack_message_id,
             message: prompt.message,
-            presentation: prompt.presentation,
+            slackBlocks: prompt.slackBlocks,
           },
         });
         return { outboxId: outbox.id, status: outbox.status };
