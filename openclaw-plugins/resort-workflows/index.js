@@ -1608,10 +1608,15 @@ export function createAccountingStatementHandler({
       logger?.info?.('resort-workflows shadow: accounting CSV intake is disabled until the full statement workflow is live');
       return;
     }
-    const fileRefs = extractFileRefs(event.metadata || {});
-    const hasCsv = fileRefs.some(file => String(file.name || '').toLowerCase().endsWith('.csv')
-      || /^(?:text|application)\/csv(?:$|;)/i.test(String(file.mimetype || '')));
-    if (!hasCsv) return;
+    const metadata = event.metadata || {};
+    const attachmentMetadataProvided = Array.isArray(metadata.files)
+      || Array.isArray(metadata.attachments);
+    if (attachmentMetadataProvided) {
+      const fileRefs = extractFileRefs(metadata);
+      const hasCsv = fileRefs.some(file => String(file.name || '').toLowerCase().endsWith('.csv')
+        || /^(?:text|application)\/csv(?:$|;)/i.test(String(file.mimetype || '')));
+      if (!hasCsv) return;
+    }
 
     const messageId = String(ctx.messageId || event.messageId || '');
     if (!messageId) {
@@ -1627,6 +1632,10 @@ export function createAccountingStatementHandler({
       const staged = result.files?.filter(file => file.staged).length || 0;
       logger?.info?.(`resort-workflows accounting CSV intake: staged ${staged} of ${result.files?.length || 0} file(s) from ${messageId}`);
     } catch (error) {
+      if (error.code === 'accounting_csv_missing' && !attachmentMetadataProvided) {
+        logger?.info?.(`resort-workflows accounting CSV intake: no CSV found by Slack readback for ${messageId}`);
+        return;
+      }
       logger?.error?.(`resort-workflows accounting CSV intake failed: ${error.code || error.message}`);
     }
   };

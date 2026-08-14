@@ -599,6 +599,63 @@ test('accounting CSV hook stages trusted Slack uploads for the fixed inbox workf
   }]);
 });
 
+test('accounting CSV hook refetches the trusted message when OpenClaw omits attachment metadata', async () => {
+  const config = pluginConfig({
+    accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts', shadowMode: true,
+    liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
+  });
+  const calls = [];
+  await createAccountingStatementHandler({
+    config,
+    stage: async request => {
+      calls.push(request);
+      return { files: [{ name: 'statement.csv', staged: true }] };
+    },
+  })({
+    content: '<@U-SOL> reconcile this Kapital statement',
+    messageId: '1786640000.251',
+    senderId: 'U-JASON',
+    metadata: { originatingTo: 'channel:CACCOUNTING' },
+  }, {
+    channelId: 'slack', accountId: 'ig-drafts', conversationId: 'CACCOUNTING',
+    messageId: '1786640000.251', senderId: 'U-JASON',
+  });
+  assert.deepEqual(calls, [{
+    channelId: 'CACCOUNTING', messageId: '1786640000.251', threadTs: null,
+  }]);
+});
+
+test('accounting CSV hook quietly ignores a provider-verified message without a CSV', async () => {
+  const config = pluginConfig({
+    accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts', shadowMode: true,
+    liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
+  });
+  const info = [];
+  const errors = [];
+  await createAccountingStatementHandler({
+    config,
+    stage: async () => {
+      const error = new Error('Slack accounting message contains no CSV attachment');
+      error.code = 'accounting_csv_missing';
+      throw error;
+    },
+    logger: {
+      info: message => info.push(message),
+      error: message => errors.push(message),
+    },
+  })({
+    content: 'What was the latest reconciliation status?',
+    messageId: '1786640000.252',
+    metadata: { originatingTo: 'channel:CACCOUNTING' },
+  }, {
+    channelId: 'slack', accountId: 'ig-drafts', conversationId: 'CACCOUNTING',
+    messageId: '1786640000.252',
+  });
+  assert.equal(info.length, 1);
+  assert.match(info[0], /no CSV found by Slack readback/);
+  assert.deepEqual(errors, []);
+});
+
 test('accounting CSV hook ignores non-CSV uploads and other channels', async () => {
   const config = pluginConfig({
     accountingChannelIds: ['CACCOUNTING'], shadowMode: true,
