@@ -77,6 +77,7 @@ class QBOIntegrityTests(unittest.TestCase):
             'maintenance': '10', 'cleaning_services': '11',
         }.get(key)
         client._resolve_vendor_id = lambda _key: '20'
+        client._resolve_bank_account_id = lambda _key: '115'
         seen = []
         client._api_call = lambda method, endpoint, body, request_id=None: (
             seen.append((method, endpoint, body, request_id)) or {'Purchase': {'Id': '42'}}
@@ -345,6 +346,8 @@ class QBOIntegrityTests(unittest.TestCase):
     def test_new_spei_fee_memo_is_bound_to_exact_parent_reference(self):
         client = self.client()
         client._resolve_account_id = lambda _key: '1150040012'
+        client._resolve_vendor_id = lambda _key: '16'
+        client._resolve_bank_account_id = lambda _key: '115'
         seen = []
         client._api_call = lambda method, endpoint, body, request_id=None: (
             seen.append(body) or {'Purchase': {'Id': '42'}}
