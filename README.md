@@ -237,7 +237,10 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   `#receipts-temo`, `#receipt-daniel`, `#petty-cash-receipts`,
   `#receipts-maintenance`, `#receipts-laundry`, `#receipts-pettycash`,
   `#receipts-otis`, and `#receipts-resort-purchases`. The separate
-  `#receipt-jorge` channel uses the guarded owner-liability workflow.
+  `#receipt-jorge` channel uses the guarded owner-liability workflow; channel
+  membership establishes that every top-level expense was paid personally by
+  George, even when the post has no caption or the attachment shows a Kapital
+  transfer.
   Sol cross-references these with bank statement transactions for
   classification context. Every new bundle first receives three Spanish,
   receipt-bound payment-source buttons: personal reimbursement, paid with

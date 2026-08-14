@@ -47,7 +47,7 @@ function receiptPrompt(name) {
 }
 
 function ownerExpensePrompt(name) {
-  return `This is the scoped ${name} owner-ledger channel. The normal case is an owner-paid business expense that increases the configured liability. Rare business-paid reimbursements or payments on the owner's behalf reduce that liability and always require the exact !receipt confirm repayment command emitted in-thread. Uploads are captured automatically and posted only through the fixed workflow after extraction or explicit confirmation. Do not invoke a generic QBO write or infer that an entry posted without a workflow and QBO readback id.`;
+  return `This is the scoped ${name} owner-ledger channel. Channel membership is conclusive provenance: every top-level expense post was paid personally by the configured owner and increases the configured liability. An empty caption, payment-confirmation image, or bank/app source label does not make the payer or owner-ledger direction ambiguous. Uploads are captured automatically and posted only through the fixed workflow after document extraction and expense classification or explicit correction. Do not invoke a generic QBO write or infer that an entry posted without a workflow and QBO readback id.`;
 }
 
 function noAuthorityPrompt(name) {

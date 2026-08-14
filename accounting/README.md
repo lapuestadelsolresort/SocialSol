@@ -141,14 +141,20 @@ npm run configure:owner-expense-channel -- \
   --confirm-production
 ```
 
-Uploads are acknowledged in their Slack thread. High-confidence owner-paid
-business expenses become a balanced QBO JournalEntry: debit the selected
-expense account and credit the configured Other Current Liability account.
-Ambiguous or contradictory documents are saved as `needs_review` and emit an
-exact `!receipt confirm ...` command; they are never posted speculatively.
-Rare owner repayments are also review-gated. Their exact confirmation creates
-a QBO Purchase that debits the owner liability and credits the configured bank,
-with an exact-date/amount/bank duplicate preflight before the write.
+Uploads are acknowledged in their Slack thread. Membership in an owner-expense
+channel is conclusive provenance: every top-level post is a business expense
+paid personally by that channel's configured owner, including attachment-only
+payment confirmations whose bank or app name could otherwise be ambiguous.
+High-confidence owner-paid business expenses become a balanced QBO
+JournalEntry: debit the selected expense account and credit the configured
+Other Current Liability account. Missing or genuinely ambiguous document facts
+are saved as `needs_review` and emit an exact `!receipt confirm ...` command;
+they are never posted speculatively. An exceptional accounting reclassification
+as an owner repayment remains possible only through an explicit repayment
+confirmation. It creates a QBO Purchase that debits the owner liability and
+credits the configured bank, with an exact-date/amount/bank duplicate preflight
+before the write; automatic extraction never infers a repayment from a post in
+the owner-expense channel.
 
 If a QBO owner-ledger entity was created outside the durable workflow, reconcile
 it instead of confirming the pending receipt (which could create a duplicate).

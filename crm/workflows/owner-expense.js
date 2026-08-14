@@ -143,28 +143,29 @@ function qboArguments(receipt, profile, account, {
 
 function reviewReasons(result, profile) {
   if (!result?.ok) return [result?.reviewReason || 'receipt extraction was unavailable'];
-  const value = result.extracted || {};
+  const value = ownerPaidExtraction(result);
   const reasons = [];
   if (!value.vendor) reasons.push('vendor is missing');
   if (!validIsoDate(value.transaction_date)) reasons.push('transaction date is missing or invalid');
   if (!['MXN', 'USD'].includes(value.currency)) reasons.push('currency is missing');
   if (!Number.isFinite(Number(value.amount)) || Number(value.amount) <= 0) reasons.push('amount is missing');
   if (!value.description) reasons.push('description is missing');
-  if (value.transaction_kind === OWNER_PAID_EXPENSE) {
-    if (!value.category_key) reasons.push('expense category is ambiguous');
-    if (value.is_business_expense !== true) reasons.push('the document does not clearly establish a business expense');
-    if (value.paid_by_owner !== true) reasons.push(`the document does not clearly establish that ${profile.owner_name} paid personally`);
-  } else if (value.transaction_kind === OWNER_REPAYMENT) {
-    if (value.category_key !== null) reasons.push('an owner repayment must not select an expense category');
-    reasons.push('owner repayments reduce the liability and require explicit confirmation');
-  } else {
-    reasons.push('the owner-ledger direction is unclear');
-  }
+  if (!value.category_key) reasons.push('expense category is ambiguous');
   if (Number(value.confidence) < profile.auto_post_min_confidence) {
     reasons.push(`extraction confidence ${Number(value.confidence || 0).toFixed(2)} is below ${profile.auto_post_min_confidence.toFixed(2)}`);
   }
   if (value.review_reason) reasons.push(String(value.review_reason));
   return [...new Set(reasons)];
+}
+
+function ownerPaidExtraction(result) {
+  if (!result?.ok) return {};
+  return {
+    ...(result.extracted || {}),
+    transaction_kind: OWNER_PAID_EXPENSE,
+    is_business_expense: true,
+    paid_by_owner: true,
+  };
 }
 
 function confirmationCommand(receipt) {
@@ -182,7 +183,7 @@ function confirmationCommand(receipt) {
 
 const processDefinition = {
   name: 'receipt.owner_expense.process',
-  version: 2,
+  version: 3,
   capability: 'qbo.owner_expense.write',
   mutates: true,
   allowedTriggers: ['workflow'],
@@ -253,7 +254,7 @@ const processDefinition = {
           shouldPost = true;
         } else {
           const result = state.extract;
-          const value = result?.ok ? result.extracted : {};
+          const value = ownerPaidExtraction(result);
           reasons = reviewReasons(result, state.load_receipt.profile);
           shouldPost = reasons.length === 0;
           const category = value.transaction_kind === OWNER_PAID_EXPENSE && value.category_key
@@ -269,6 +270,11 @@ const processDefinition = {
               source: 'openai_responses', responseId: result?.responseId || null,
               model: result?.model || null, requestHash: result?.requestHash || null,
               extracted: result?.ok ? value : null, reviewReason: result?.reviewReason || null,
+              channelProvenance: result?.ok ? {
+                transactionKind: OWNER_PAID_EXPENSE,
+                paidByOwner: true,
+                isBusinessExpense: true,
+              } : null,
             })}, status=${shouldPost ? 'ready_to_post' : 'needs_review'},
             workflow_run_id=${run.id}, updated_at=datetime('now') WHERE id=${current.id}`);
         }
@@ -518,7 +524,7 @@ const processDefinition = {
 
 const ingestDefinition = {
   name: 'receipt.owner_expense.ingest',
-  version: 2,
+  version: 3,
   capability: 'qbo.owner_expense.write',
   mutates: true,
   allowedTriggers: ['slack_receipt_hook'],
@@ -598,7 +604,7 @@ const ingestDefinition = {
           payload: {
             channelId: run.channel_id,
             threadTs: input.threadTs || input.slackMessageId,
-            message: `🧾 Receipt received for ${profileForRun(run).owner_name}'s owner ledger. I saved the original and queued direction/extraction review; I will reply here after QuickBooks readback or if confirmation is needed. Receipt: ${state.persist_receipt.receiptId} · Workflow: ${run.id}`,
+            message: `🧾 Receipt received for ${profileForRun(run).owner_name}'s owner ledger. The channel establishes that the owner paid personally; I saved the original and queued document extraction and expense classification. I will reply here after QuickBooks readback or if a document field needs confirmation. Receipt: ${state.persist_receipt.receiptId} · Workflow: ${run.id}`,
           },
         });
         return { outboxId: outbox.id };
@@ -611,7 +617,7 @@ const ingestDefinition = {
         const policy = loadPolicy({ fresh: true });
         const created = await store.createRun(db, {
           definition: processDefinition,
-          idempotencyKey: `receipt:${state.persist_receipt.receiptId}:owner-expense:process:v2`,
+          idempotencyKey: `receipt:${state.persist_receipt.receiptId}:owner-expense:process:v3`,
           triggerType: 'workflow',
           triggerRef: run.id,
           channelId: run.channel_id,
@@ -635,7 +641,7 @@ const ingestDefinition = {
 
 const confirmDefinition = {
   name: 'receipt.owner_expense.confirm',
-  version: 2,
+  version: 3,
   capability: 'qbo.owner_expense.write',
   mutates: true,
   allowedTriggers: ['slack_receipt_confirm_command'],

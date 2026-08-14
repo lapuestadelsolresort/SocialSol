@@ -80,8 +80,7 @@ function extraction(overrides = {}) {
     extracted: {
       document_type: 'receipt', vendor: 'AC Ignacio Rubio', transaction_date: '2026-08-06',
       currency: 'MXN', amount: 4700, description: 'Compressor work', category_key: 'maintenance',
-      transaction_kind: 'owner_paid_expense', is_business_expense: true,
-      paid_by_owner: true, confidence: 0.98, review_reason: null,
+      confidence: 0.98, review_reason: null,
       ...overrides,
     },
   };
@@ -99,6 +98,9 @@ async function ingest(db, services, suffix = 'base') {
 test('registry exposes only the guarded owner-expense workflow family', () => {
   const definitions = new Map(listDefinitions().map(item => [item.name, item]));
   assert.equal(definitions.get('receipt.owner_expense.ingest').capability, 'qbo.owner_expense.write');
+  assert.equal(definitions.get('receipt.owner_expense.ingest').version, 3);
+  assert.equal(definitions.get('receipt.owner_expense.process').version, 3);
+  assert.equal(definitions.get('receipt.owner_expense.confirm').version, 3);
   assert.deepEqual(definitions.get('receipt.owner_expense.process').allowed_triggers, ['workflow']);
   assert.deepEqual(definitions.get('receipt.owner_expense.confirm').allowed_triggers, ['slack_receipt_confirm_command']);
   assert.deepEqual(definitions.get('receipt.owner_expense.reconcile').allowed_triggers, ['admin_reconciliation']);
@@ -153,26 +155,47 @@ test('high-confidence owner-paid receipt debits expense and credits owner liabil
   });
 });
 
-test('contradictory payment provenance requires review and never calls QBO', async () => {
+test('attachment-only post uses channel provenance and posts without a payment-direction review', async () => {
   await withOwnerDb(async db => {
-    let commandCalls = 0;
+    const commands = [];
     const services = {
-      fetchSlackReceipt: async () => source({ messageText: 'The business paid this expense for the owner: 4,700 MXN' }),
-      extractOwnerExpense: async () => extraction({ paid_by_owner: false, review_reason: 'Business paid for owner' }),
-      runCommand: async () => { commandCalls += 1; throw new Error('QBO must not be called'); },
+      fetchSlackReceipt: async () => source({
+        messageText: '',
+        files: [{ id: 'F1', name: 'payment.png', mimetype: 'image/png', size: 10,
+          sha256: 'a'.repeat(64), localPath: '/runtime/payment.png' }],
+      }),
+      extractOwnerExpense: async () => extraction({
+        vendor: 'RPDS Fidencio Lopez', transaction_date: '2026-08-14', amount: 3300,
+        description: 'Bank transfer for V2 repair', category_key: 'maintenance',
+        transaction_kind: 'unclear', paid_by_owner: null, is_business_expense: null,
+      }),
+      runCommand: async command => {
+        commands.push(command);
+        const status = command.args.includes('--verify-only') ? 'VERIFIED' : 'PUSHED';
+        return { exitCode: 0, stderr: '', stdout: JSON.stringify({
+          status, verified_by_readback: true, qbo_id: 'JE-OWNER-ONLY',
+          qbo_entity_type: 'JournalEntry', request_id: 'ss-owner-only',
+          amount_usd: 177.42, fx_rate: 18.6,
+        }) };
+      },
     };
-    const ingestRun = await ingest(db, services, 'contradiction');
+    const ingestRun = await ingest(db, services, 'attachment-only');
     const processRun = await executeGraph(db, getDefinition('receipt.owner_expense.process'), ingestRun.output.processRunId, services);
     assert.equal(processRun.status, 'completed', processRun.error_message);
-    assert.equal(processRun.output.status, 'needs_review');
-    assert.equal(commandCalls, 0);
+    assert.equal(processRun.output.status, 'posted');
+    assert.equal(commands.length, 2);
     const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${ingestRun.output.receiptId}`);
-    assert.equal(receipt.status, 'needs_review');
-    assert.match(receipt.review_reason, /does not clearly establish that Test Owner paid personally/);
-    const rows = await db.query(sql`SELECT payload_json FROM workflow_outbox`);
-    const message = rows.map(row => JSON.parse(row.payload_json).message).find(value => value.includes('!receipt confirm'));
-    assert.match(message, new RegExp(`!receipt confirm expense ${receipt.id}`));
-    assert.match(message, /nothing was posted to QuickBooks/i);
+    assert.equal(receipt.status, 'posted');
+    assert.equal(receipt.transaction_kind, 'owner_paid_expense');
+    assert.equal(receipt.category_key, 'maintenance');
+    const storedExtraction = JSON.parse(receipt.extraction_json);
+    assert.deepEqual(storedExtraction.channelProvenance, {
+      transactionKind: 'owner_paid_expense', paidByOwner: true, isBusinessExpense: true,
+    });
+    const messages = (await db.query(sql`SELECT payload_json FROM workflow_outbox`))
+      .map(row => JSON.parse(row.payload_json).message).join('\n');
+    assert.match(messages, /channel establishes that the owner paid personally/i);
+    assert.doesNotMatch(messages, /direction.*unclear/i);
   });
 });
 
@@ -285,16 +308,15 @@ test('admin reconciliation adopts one verified existing QBO journal without crea
   });
 });
 
-test('owner repayment requires confirmation then debits liability and credits the configured bank', async () => {
+test('explicit repayment override remains confirmation-gated and uses the configured bank', async () => {
   await withOwnerDb(async db => {
     const reviewServices = {
       fetchSlackReceipt: async () => source({
         messageText: 'The business paid 4,700 MXN to Mr. Rubio for the owner; apply it against the owner liability.',
       }),
       extractOwnerExpense: async () => extraction({
-        transaction_kind: 'owner_repayment', category_key: null,
-        paid_by_owner: false, is_business_expense: null,
-        review_reason: 'Business paid a third party on the owner’s behalf.',
+        category_key: null, confidence: 0.7,
+        review_reason: 'Expense category is unclear.',
       }),
       runCommand: async () => { throw new Error('repayment must not post before confirmation'); },
     };
@@ -304,11 +326,11 @@ test('owner repayment requires confirmation then debits liability and credits th
     );
     assert.equal(reviewed.output.status, 'needs_review');
     const [candidate] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${ingestRun.output.receiptId}`);
-    assert.equal(candidate.transaction_kind, 'owner_repayment');
+    assert.equal(candidate.transaction_kind, 'owner_paid_expense');
     assert.equal(candidate.category_key, null);
     const messages = (await db.query(sql`SELECT payload_json FROM workflow_outbox`))
       .map(row => JSON.parse(row.payload_json).message).join('\n');
-    assert.match(messages, new RegExp(`!receipt confirm repayment ${candidate.id}`));
+    assert.match(messages, new RegExp(`!receipt confirm expense ${candidate.id}`));
 
     const confirmRun = await startGraph(db, getDefinition('receipt.owner_expense.confirm'), {
       idempotencyKey: 'slack:confirm:repayment', triggerType: 'slack_receipt_confirm_command',
@@ -405,6 +427,12 @@ test('Responses extraction sends PDFs as file inputs with a strict accounting sc
     assert.equal(request.store, false);
     assert.equal(request.text.format.type, 'json_schema');
     assert.equal(request.text.format.strict, true);
+    assert.deepEqual(request.text.format.schema.properties.transaction_kind, undefined);
+    assert.deepEqual(request.text.format.schema.properties.paid_by_owner, undefined);
+    assert.match(request.text.format.schema.properties.confidence.description, /document facts and expense category only/);
+    assert.match(request.text.format.schema.properties.review_reason.description, /Never request proof of who paid/);
+    assert.match(request.input[0].content[0].text, /Channel membership is conclusive provenance/);
+    assert.match(request.input[0].content[0].text, /Do not re-evaluate who paid/);
     assert.equal(request.input[0].content[1].type, 'input_file');
     assert.match(request.input[0].content[1].file_data, /^data:application\/pdf;base64,/);
   } finally {
