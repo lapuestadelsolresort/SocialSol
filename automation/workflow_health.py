@@ -215,8 +215,16 @@ def inspect(con):
     }
     resolved_review_filter = """AND NOT EXISTS (SELECT 1 FROM workflow_manual_reviews mr
         WHERE mr.run_id=r.id AND mr.status='resolved')""" if reviews_available else ""
+    email_command_rejection = """r.workflow_name='email.reply.propose'
+        AND r.trigger_type='slack_email_reply_command'
+        AND r.error_message='no recorded inbound message exists for this Slack thread'
+        AND NOT EXISTS (SELECT 1 FROM workflow_effects we WHERE we.run_id=r.id)"""
+    metrics["email_command_rejections_24h"] = scalar(con, f"""SELECT COUNT(*) FROM workflow_runs r
+        WHERE r.status='failed' AND julianday(r.updated_at)>=julianday('now','-24 hours')
+        AND ({email_command_rejection})""")
     metrics["failed_24h"] = scalar(con, f"""SELECT COUNT(*) FROM workflow_runs r
         WHERE r.status='failed' AND julianday(r.updated_at)>=julianday('now','-24 hours')
+        AND NOT ({email_command_rejection})
         {resolved_review_filter}""")
     effect_review_filter = """AND NOT EXISTS (SELECT 1 FROM workflow_manual_reviews mr
         WHERE mr.effect_id=workflow_effects.id AND mr.status='resolved')""" if reviews_available else ""
