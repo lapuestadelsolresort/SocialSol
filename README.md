@@ -36,7 +36,7 @@ business at sale.
 | **Sarah Email Console** | Guest comms | Complete Gmail + OwnerRez Airbnb/Vrbo message ledger with guarded thread replies | `#sarah-email` |
 | **Paloma** 🕊️ | Operations | Monitors maintenance/housekeeping channels, logs tasks, bilingual follow-ups and weekly digests | `#paloma-tracker` |
 | **Corporate Intelligence** | Finance/legal | Analysis of Mexican corporate docs, tax filings, and property trusts (see "Not in this repo") | `#corporate` |
-| **QuickBooks Integration** | Finance | Automated expense tracking via Slack receipt channels (every configured member's top-level post is reimbursement intent; every attached document becomes an item, including quotations) → Kapital reference/CSV reconciliation → QBO pipeline, plus guarded owner-paid expense journals and review-gated repayments against configured liability accounts. Full read/write API. | `#accounting` |
+| **QuickBooks Integration** | Finance | Automated expense tracking via Slack receipt channels (every configured member's top-level post is an expense bundle; a receipt-bound button records personal reimbursement, Kapital business-paid, or already reimbursed provenance before payment/reconciliation) → Kapital CSV reconciliation → QBO pipeline, plus guarded owner-paid expense journals and review-gated repayments against configured liability accounts. Full read/write API. | `#accounting` |
 
 ### Supporting automations
 
@@ -239,11 +239,17 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   `#receipts-otis`, and `#receipts-resort-purchases`. The separate
   `#receipt-jorge` channel uses the guarded owner-liability workflow.
   Sol cross-references these with bank statement transactions for
-  classification context. Annotated reimbursements receive an itemized Slack
-  thread reply with a stable, alphanumeric-only Kapital payment concept; exact
-  reference + amount + currency reconciliation then preserves receipt-level
-  category splits in QBO. A post with multiple attachments remains one
-  reimbursement bundle with one classified item per file; staff are never told
+  classification context. Every new bundle first receives three Spanish,
+  receipt-bound payment-source buttons: personal reimbursement, paid with
+  Kapital business funds, or already reimbursed. No payment instruction or
+  `LPDSR` concept is created before that durable selection. Personal
+  reimbursements receive an itemized Slack thread reply with a stable,
+  alphanumeric-only Kapital payment concept; exact reference + amount +
+  currency reconciliation then preserves receipt-level category splits in
+  QBO. Business-paid and already-reimbursed expenses generate no new payment
+  or retroactive reference and reconcile through the original Kapital debit.
+  A post with multiple attachments remains one expense bundle with one
+  classified item per file; staff are never told
   to split or repost those files. Mayela-facing validation and payment replies
   are in Spanish. Receipt annotation and code generation never require
   a CLABE, bank-account number, or other banking details. If payment proof is

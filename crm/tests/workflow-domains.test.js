@@ -88,7 +88,8 @@ async function seedWorkflowRun(db, {
 test('registry exposes fixed domain graphs instead of arbitrary command execution', () => {
   const definitions = new Map(listDefinitions().map(item => [item.name, item]));
   for (const expected of [
-    'whatsapp.reply', 'whatsapp.inbound.process', 'meta.dm.reply', 'receipt.ingest', 'receipt.process', 'receipt.annotate', 'receipt.reconcile',
+    'whatsapp.reply', 'whatsapp.inbound.process', 'meta.dm.reply', 'receipt.ingest', 'receipt.process',
+    'receipt.payment_source.select', 'receipt.annotate', 'receipt.reconcile',
     'social.content.upsert', 'social.content.publish', 'social.publish_routine',
     'paulina.daily', 'paulina.prepare_daily', 'paulina.performance.read', 'regina.daily', 'regina.campaign',
     'guest.reply.draft', 'crm.sync', 'crm.pipeline.read', 'crm.contacts.read',
@@ -479,6 +480,7 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
         transactionDate: '2026-08-10', vendor: 'Hardware',
         categoryKey: 'maintenance', categoryName: 'Maintenance',
         description: 'Replacement hardware for villa doors',
+        paymentSource: 'personal_reimbursement',
         items: [
           {
             fileRefId: 'F1', amount: 1000, currency: 'MXN', transactionDate: '2026-08-10',

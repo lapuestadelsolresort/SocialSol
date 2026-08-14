@@ -30,14 +30,17 @@ test('multiple messages discovered together share one Slack root deterministical
         return { ok: true, ts: posts.length === 1 ? '100.1' : '100.2' };
       },
     };
+    const presentation = { blocks: [{ type: 'buttons', buttons: [{ label: 'Choose', value: 'test:value' }] }] };
     const payload = id => ({
       channelId: 'CEMAIL', message: `event ${id}`, emailThreadId: id,
       emailConversation: { provider: 'gmail', providerThreadId: 't1' },
+      presentation,
     });
     await deliverSlackNotification(db, {}, payload(events[0].id), services);
     await deliverSlackNotification(db, {}, payload(events[1].id), services);
     assert.equal(posts[0].threadTs, null);
     assert.equal(posts[1].threadTs, '100.1');
+    assert.deepEqual(posts[0].presentation, presentation);
     const rows = await db.query(sql`SELECT slack_thread_ts, slack_message_ts
       FROM email_threads ORDER BY id`);
     assert.equal(rows[0].slack_thread_ts, '100.1');

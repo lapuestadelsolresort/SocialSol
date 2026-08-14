@@ -16,6 +16,7 @@ import {
   createReservationReplyDispatchHandler,
   createReservationToolGuard,
   createReceiptHandler,
+  createReceiptPaymentSourceInteractionHandler,
   createWorkflowTool,
   formatOwnerRezOccupancyReply,
   formatWorkflowReply,
@@ -26,6 +27,7 @@ import {
   parseManualReviewCommand,
   parseOwnerRezConfirmCommand,
   parseReceiptConfirmCommand,
+  parseReceiptPaymentSourceAction,
   parseReservationReadRequest,
   pluginConfig,
 } from './index.js';
@@ -510,6 +512,60 @@ test('receipt hook treats thread replies as discussion, not new reimbursements',
   assert.equal(calls.length, 0);
 });
 
+test('receipt payment-source actions bind one exact receipt and only accept known choices', () => {
+  const id = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  assert.deepEqual(parseReceiptPaymentSourceAction(`personal:${id}`), {
+    receiptId: id, paymentSource: 'personal_reimbursement',
+  });
+  assert.deepEqual(parseReceiptPaymentSourceAction(`kapital:${id}`), {
+    receiptId: id, paymentSource: 'kapital_business_paid',
+  });
+  assert.deepEqual(parseReceiptPaymentSourceAction(`reimbursed:${id}`), {
+    receiptId: id, paymentSource: 'already_reimbursed',
+  });
+  assert.equal(parseReceiptPaymentSourceAction(`personal:not-a-receipt`), null);
+  assert.equal(parseReceiptPaymentSourceAction(`other:${id}`), null);
+});
+
+test('receipt payment-source button invokes the command-only workflow with trusted Slack identity and removes buttons', async () => {
+  const receiptId = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  const config = pluginConfig({
+    receiptChannelIds: ['C123RECEIPT'], shadowMode: true,
+    liveWorkflowNames: ['receipt.payment_source.select'],
+  });
+  const calls = [];
+  const edits = [];
+  const result = await createReceiptPaymentSourceInteractionHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'source-run', status: 'completed', output: {
+        paymentSource: 'kapital_business_paid', status: 'queued',
+      } } };
+    },
+  })({
+    conversationId: 'C123RECEIPT', senderId: 'U123SERGIO', interactionId: 'interaction-1',
+    interaction: { payload: `kapital:${receiptId}`, messageTs: '1786660382.599739' },
+    respond: {
+      acknowledge: async () => {},
+      editMessage: async update => { edits.push(update); },
+      reply: async () => { throw new Error('success must not emit an error reply'); },
+    },
+  });
+  assert.deepEqual(result, { handled: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workflow, 'receipt.payment_source.select');
+  assert.deepEqual(calls[0].input, { receiptId, paymentSource: 'kapital_business_paid' });
+  assert.deepEqual(calls[0].context, {
+    channelId: 'C123RECEIPT', actorUserId: 'U123SERGIO',
+    messageId: '1786660382.599739', entrypoint: 'slack_receipt_source_action',
+  });
+  assert.equal(calls[0].idempotencyKey, `receipt:${receiptId}:payment-source:kapital_business_paid`);
+  assert.equal(edits.length, 1);
+  assert.deepEqual(edits[0].blocks, []);
+  assert.match(edits[0].text, /Pagado con Kapital/);
+});
+
 test('accounting CSV hook stages trusted Slack uploads for the fixed inbox workflow', async () => {
   const config = pluginConfig({
     accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts', shadowMode: true,
@@ -967,6 +1023,9 @@ test('model-facing tool cannot invoke command-only WhatsApp sends', async () => 
   }), error => error.code === 'workflow_command_required');
   await assert.rejects(() => tool.execute('tool-call-5', {
     workflow: 'receipt.ingest', input: { slackMessageId: 'model-guessed' },
+  }), error => error.code === 'workflow_command_required');
+  await assert.rejects(() => tool.execute('tool-call-6', {
+    workflow: 'receipt.payment_source.select', input: {},
   }), error => error.code === 'workflow_command_required');
   delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
 });

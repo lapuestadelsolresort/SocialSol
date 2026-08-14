@@ -11,6 +11,36 @@ const PAYMENT_REFERENCE_RE = /\b(?:LPDSR|LPDS-R-)[A-F0-9]{16}\b/g;
 const KAPITAL_SAFE_PAYMENT_REFERENCE_RE = /^LPDSR[A-F0-9]{16}$/;
 const LEGACY_PAYMENT_REFERENCE_RE = /^LPDS-R-[A-F0-9]{16}$/;
 const RESORT_TIME_ZONE = 'America/Bahia_Banderas';
+const RECEIPT_PAYMENT_SOURCES = new Set([
+  'personal_reimbursement',
+  'kapital_business_paid',
+  'already_reimbursed',
+]);
+
+function receiptPaymentSource(receipt) {
+  const value = String(receipt?.payment_source || '').trim();
+  if (RECEIPT_PAYMENT_SOURCES.has(value)) return value;
+  // Rows created before payment-source selection existed have NULL here and
+  // retain the historical reimbursement behavior. Every new ingest writes the
+  // explicit sentinel below, so it cannot accidentally take this legacy path.
+  if (!value) return 'personal_reimbursement';
+  if (value === 'unselected') return null;
+  throw new Error(`unsupported receipt payment source: ${value}`);
+}
+
+function receiptChannelIntent(paymentSource) {
+  if (paymentSource === 'personal_reimbursement') return 'submitter_reimbursement';
+  if (paymentSource === 'kapital_business_paid') return 'kapital_business_paid';
+  if (paymentSource === 'already_reimbursed') return 'already_reimbursed';
+  return 'awaiting_payment_source';
+}
+
+function receiptPaymentSourceLabel(paymentSource) {
+  if (paymentSource === 'personal_reimbursement') return 'Reembolso personal';
+  if (paymentSource === 'kapital_business_paid') return 'Pagado con Kapital';
+  if (paymentSource === 'already_reimbursed') return 'Ya reembolsado';
+  return 'Sin seleccionar';
+}
 
 function receiptPaymentReference(receiptId) {
   const digest = crypto.createHash('sha256').update(String(receiptId)).digest('hex').slice(0, 16).toUpperCase();
@@ -42,18 +72,44 @@ function formatReceiptMoney(amount, currency) {
   })}`;
 }
 
-function buildReceiptPaymentInstruction({
-  receipt, items, approverUserIds, paymentReferenceMigrated = false,
-}) {
+function receiptClassificationLines(receipt, items) {
   const currency = String(receipt.currency).toUpperCase();
-  const approvers = approverUserIds.map(userId => `<@${userId}>`).join(' ');
-  const lines = items.length
+  return items.length
     ? items.map(item => {
       const category = item.category_name || item.category_key || 'Unclassified';
       const vendor = item.vendor ? ` · ${item.vendor}` : '';
       return `${item.item_index}. ${formatReceiptMoney(item.amount, item.currency)} · ${category}${vendor}`;
     })
     : [`1. ${formatReceiptMoney(receipt.amount, currency)} · ${receipt.category_name || receipt.category_key || 'Unclassified'}`];
+}
+
+function buildReceiptPaymentSourcePrompt(receiptId) {
+  const message = [
+    '🧾 *Antes de generar el código o conciliar este gasto, indica cómo se pagó:*',
+    'Selecciona una opción para este mensaje. La selección queda vinculada solamente a estos comprobantes.',
+  ].join('\n');
+  return {
+    message,
+    presentation: {
+      tone: 'info',
+      blocks: [{
+        type: 'buttons',
+        buttons: [
+          { label: 'Reembolso personal', value: `receiptsource:personal:${receiptId}`, style: 'primary' },
+          { label: 'Pagado con Kapital', value: `receiptsource:kapital:${receiptId}` },
+          { label: 'Ya reembolsado', value: `receiptsource:reimbursed:${receiptId}` },
+        ],
+      }],
+    },
+  };
+}
+
+function buildReceiptPaymentInstruction({
+  receipt, items, approverUserIds, paymentReferenceMigrated = false,
+}) {
+  const currency = String(receipt.currency).toUpperCase();
+  const approvers = approverUserIds.map(userId => `<@${userId}>`).join(' ');
+  const lines = receiptClassificationLines(receipt, items);
   return [
     paymentReferenceMigrated
       ? '⚠️ *Instrucción corregida para el reembolso en Kapital*'
@@ -76,13 +132,7 @@ function buildReceiptPaidDocumentation({ receipt, items, approverUserIds, paymen
   const currency = String(receipt.currency).toUpperCase();
   const amountTolerance = currency === 'MXN' ? 'MXN $1' : 'USD $0.01';
   const approvers = approverUserIds.map(userId => `<@${userId}>`).join(' ');
-  const lines = items.length
-    ? items.map(item => {
-      const category = item.category_name || item.category_key || 'Unclassified';
-      const vendor = item.vendor ? ` · ${item.vendor}` : '';
-      return `${item.item_index}. ${formatReceiptMoney(item.amount, item.currency)} · ${category}${vendor}`;
-    })
-    : [`1. ${formatReceiptMoney(receipt.amount, currency)} · ${receipt.category_name || receipt.category_key || 'Unclassified'}`];
+  const lines = receiptClassificationLines(receipt, items);
   return [
     '✅ *Pago realizado y comprobantes documentados*',
     `${approvers} no es necesario hacer otra transferencia.`,
@@ -95,6 +145,34 @@ function buildReceiptPaidDocumentation({ receipt, items, approverUserIds, paymen
     `• Folio del pago: \`${payment.confirmationReference}\``,
     `• Conciliación: moneda + monto dentro de la tolerancia de ${amountTolerance} + fecha dentro de ±3 días, porque el pago se realizó antes de recibir un código del flujo.`,
     'Este flujo no necesita ni guarda CLABE, número de cuenta u otros datos bancarios.',
+  ].join('\n');
+}
+
+function buildReceiptBusinessPaidDocumentation({ receipt, items, approverUserIds }) {
+  const currency = String(receipt.currency).toUpperCase();
+  const approvers = approverUserIds.map(userId => `<@${userId}>`).join(' ');
+  return [
+    '✅ *Gasto pagado con fondos de Kapital y clasificado*',
+    ...receiptClassificationLines(receipt, items),
+    `*Total: ${formatReceiptMoney(receipt.amount, currency)}*`,
+    '',
+    `${approvers} por favor confirma que el gasto y la clasificación son válidos.`,
+    'No se requiere reembolso, transferencia ni código LPDSR.',
+    'La conciliación usará moneda, monto y fecha contra el cargo original de Kapital; si hay más de una coincidencia, pasará a revisión manual.',
+  ].join('\n');
+}
+
+function buildReceiptAlreadyReimbursedDocumentation({ receipt, items, approverUserIds }) {
+  const currency = String(receipt.currency).toUpperCase();
+  const approvers = approverUserIds.map(userId => `<@${userId}>`).join(' ');
+  return [
+    '✅ *Gasto clasificado como ya reembolsado*',
+    ...receiptClassificationLines(receipt, items),
+    `*Total: ${formatReceiptMoney(receipt.amount, currency)}*`,
+    '',
+    `${approvers} no hagas otra transferencia.`,
+    'No se generó código LPDSR. Comparte en este mismo hilo el comprobante del pago con el folio, la descripción usada en Kapital y el monto transferido para completar la documentación.',
+    'No se necesita CLABE, número de cuenta ni otros datos bancarios.',
   ].join('\n');
 }
 
@@ -130,7 +208,7 @@ function validateReceipt(input) {
 
 const receiptIngest = {
   name: 'receipt.ingest',
-  version: 2,
+  version: 3,
   capability: 'receipts.submit',
   mutates: true,
   allowedTriggers: ['slack_receipt_hook'],
@@ -174,23 +252,26 @@ const receiptIngest = {
         const id = crypto.randomUUID();
         await db.query(sql`INSERT OR IGNORE INTO accounting_receipts (
             id, slack_channel_id, slack_message_id, slack_thread_ts, submitted_by,
-            submitted_at, message_text, file_refs_json, source_hash, status,
+            submitted_at, message_text, file_refs_json, source_hash, status, payment_source,
             workflow_run_id
           ) VALUES (
             ${id}, ${run.channel_id}, ${input.slackMessageId}, ${input.threadTs || input.slackMessageId},
             ${run.actor_user_id}, ${source.submittedAt || input.submittedAt || new Date().toISOString()},
-            ${messageText}, ${JSON.stringify(files)}, ${sourceHash}, 'received', ${run.id}
+            ${messageText}, ${JSON.stringify(files)}, ${sourceHash}, 'awaiting_payment_source',
+            'unselected', ${run.id}
           )`);
         let [row] = await db.query(sql`SELECT * FROM accounting_receipts
           WHERE slack_channel_id=${run.channel_id} AND slack_message_id=${input.slackMessageId}`);
-        if (row && row.source_hash !== sourceHash && row.status === 'received' && !row.qbo_entity_id) {
+        if (row && row.source_hash !== sourceHash
+            && ['received', 'awaiting_payment_source'].includes(row.status) && !row.qbo_entity_id) {
           await db.query(sql`UPDATE accounting_receipts SET
             slack_thread_ts=${input.threadTs || input.slackMessageId}, submitted_by=${run.actor_user_id},
             submitted_at=${source.submittedAt || input.submittedAt || row.submitted_at},
             message_text=${messageText}, file_refs_json=${JSON.stringify(files)},
             source_hash=${sourceHash}, review_reason=NULL, extraction_json=NULL,
             workflow_run_id=${run.id}, updated_at=datetime('now')
-            WHERE id=${row.id} AND status='received' AND qbo_entity_id IS NULL`);
+            WHERE id=${row.id} AND status IN ('received','awaiting_payment_source')
+              AND qbo_entity_id IS NULL`);
           [row] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${row.id}`);
         }
         if (!row || row.source_hash !== sourceHash) {
@@ -229,6 +310,29 @@ const receiptIngest = {
         return { processRunId: created.run.id, queued: created.created, status: 'queued' };
       },
     },
+    {
+      key: 'queue_payment_source_prompt', effectClass: 'internal_notification', maxAttempts: 2,
+      async run({ db, run, state, store }) {
+        if (state.persist_receipt.ignored) return { skipped: true };
+        const [receipt] = await db.query(sql`SELECT id, slack_channel_id, slack_message_id,
+          slack_thread_ts, payment_source FROM accounting_receipts
+          WHERE id=${state.persist_receipt.receiptId}`);
+        if (!receipt || receipt.payment_source !== 'unselected') return { skipped: true };
+        const prompt = buildReceiptPaymentSourcePrompt(receipt.id);
+        const outbox = await store.enqueueOutbox(db, {
+          runId: run.id,
+          topic: 'slack.notification',
+          idempotencyKey: `receipt:${receipt.id}:payment-source-prompt:v1`,
+          payload: {
+            channelId: receipt.slack_channel_id,
+            threadTs: receipt.slack_thread_ts || receipt.slack_message_id,
+            message: prompt.message,
+            presentation: prompt.presentation,
+          },
+        });
+        return { outboxId: outbox.id, status: outbox.status };
+      },
+    },
   ],
   output({ state }) {
     return {
@@ -236,6 +340,7 @@ const receiptIngest = {
       receiptId: state.persist_receipt.receiptId || null,
       evidenceId: state.persist_receipt.evidenceId || null,
       processRunId: state.queue_processing.processRunId || null,
+      paymentSourcePromptOutboxId: state.queue_payment_source_prompt.outboxId || null,
     };
   },
 };
@@ -388,6 +493,10 @@ function validateReceiptAnnotation(input) {
   if (input.paymentAlreadyCompleted !== undefined && typeof input.paymentAlreadyCompleted !== 'boolean') {
     throw new Error('paymentAlreadyCompleted must be a boolean');
   }
+  if (input.paymentSource !== undefined
+      && !RECEIPT_PAYMENT_SOURCES.has(String(input.paymentSource || ''))) {
+    throw new Error('paymentSource must be personal_reimbursement, kapital_business_paid, or already_reimbursed');
+  }
   const duplicateOfReceiptId = String(input.duplicateOfReceiptId || '').trim();
   if (duplicateOfReceiptId && !/^[0-9a-f-]{36}$/i.test(duplicateOfReceiptId)) {
     throw new Error('duplicateOfReceiptId must be a valid receipt id');
@@ -479,7 +588,7 @@ function normalizeReceiptItems(input) {
 
 const receiptAnnotate = {
   name: 'receipt.annotate',
-  version: 7,
+  version: 8,
   capability: 'receipts.write',
   mutates: true,
   validate: validateReceiptAnnotation,
@@ -500,6 +609,20 @@ const receiptAnnotate = {
         error.code = 'receipt_scope_violation';
         throw error;
       }
+      const storedPaymentSource = receiptPaymentSource(receipt);
+      const requestedPaymentSource = String(input.paymentSource || '').trim() || null;
+      if (storedPaymentSource && requestedPaymentSource && storedPaymentSource !== requestedPaymentSource) {
+        const error = new Error('receipt payment source cannot be changed through annotation');
+        error.code = 'receipt_payment_source_conflict';
+        throw error;
+      }
+      let paymentSource = requestedPaymentSource || storedPaymentSource;
+      if (input.paymentAlreadyCompleted === true) {
+        if (paymentSource === 'kapital_business_paid') {
+          throw new Error('a Kapital business-paid expense cannot also be an employee reimbursement');
+        }
+        paymentSource = 'already_reimbursed';
+      }
       const request = {
         receiptId: input.receiptId,
         vendor: String(input.vendor || '').trim().slice(0, 300) || null,
@@ -509,7 +632,8 @@ const receiptAnnotate = {
         description: String(input.description || '').trim() || null,
         categoryKey: String(input.categoryKey || '').trim() || null,
         categoryName: String(input.categoryName || '').trim() || null,
-        reimbursementRecipientUserId: String(
+        paymentSource,
+        reimbursementRecipientUserId: paymentSource === 'kapital_business_paid' ? null : String(
           input.reimbursementRecipientUserId || receipt.submitted_by || '',
         ).trim() || null,
         paymentAlreadyCompleted: input.paymentAlreadyCompleted === true,
@@ -520,8 +644,14 @@ const receiptAnnotate = {
         duplicateOfReceiptId: String(input.duplicateOfReceiptId || '').trim() || null,
         items: normalizeReceiptItems(input),
       };
-      if (!request.reimbursementRecipientUserId
-          || !/^U[A-Z0-9]+$/.test(request.reimbursementRecipientUserId)) {
+      if (!request.duplicateOfReceiptId && !request.paymentSource) {
+        const error = new Error('select the receipt payment source before annotation');
+        error.code = 'receipt_payment_source_required';
+        throw error;
+      }
+      if (request.paymentSource !== 'kapital_business_paid'
+          && (!request.reimbursementRecipientUserId
+            || !/^U[A-Z0-9]+$/.test(request.reimbursementRecipientUserId))) {
         throw new Error('receipt submitter cannot be resolved as the reimbursement recipient');
       }
       if (request.paymentAlreadyCompleted) {
@@ -588,6 +718,7 @@ const receiptAnnotate = {
       }
       const previousPaymentReference = receipt.payment_reference || null;
       const normalizedReference = request.paymentAlreadyCompleted
+        || request.paymentSource !== 'personal_reimbursement'
         ? { paymentReference: null, migrated: false }
         : kapitalSafePaymentReference(previousPaymentReference, receipt.id);
       const paymentReference = normalizedReference.paymentReference;
@@ -605,17 +736,21 @@ const receiptAnnotate = {
       const extractionRecord = run.trigger_type === 'workflow'
         ? {
           ...priorExtraction,
+          channelIntent: receiptChannelIntent(request.paymentSource),
           annotation: {
             source: 'automatic_receipt_process', processRunId: run.trigger_ref,
             actorUserId: run.actor_user_id, itemCount: request.items.length,
+            paymentSource: request.paymentSource,
             payment: paymentRecord,
           },
         }
         : {
           ...priorExtraction,
+          channelIntent: receiptChannelIntent(request.paymentSource),
           annotation: {
             source: 'channel_member', actorUserId: run.actor_user_id,
             itemCount: input.items === undefined ? null : request.items.length,
+            paymentSource: request.paymentSource,
             payment: paymentRecord,
           },
         };
@@ -637,8 +772,11 @@ const receiptAnnotate = {
           transaction_date=${request.transactionDate}, currency=${request.currency}, amount=${request.amount},
           description=${request.description}, category_key=${request.categoryKey}, category_name=${request.categoryName},
           payment_reference=${paymentReference},
-          payment_instruction_hash=${request.paymentAlreadyCompleted ? null : receipt.payment_instruction_hash},
-          payment_instruction_queued_at=${request.paymentAlreadyCompleted ? null : receipt.payment_instruction_queued_at},
+          payment_source=${request.paymentSource},
+          payment_instruction_hash=${request.paymentSource === 'personal_reimbursement'
+            && !request.paymentAlreadyCompleted ? receipt.payment_instruction_hash : null},
+          payment_instruction_queued_at=${request.paymentSource === 'personal_reimbursement'
+            && !request.paymentAlreadyCompleted ? receipt.payment_instruction_queued_at : null},
           reimbursement_recipient_user_id=${request.reimbursementRecipientUserId},
           extraction_json=${JSON.stringify(extractionRecord)},
           review_reason=NULL, status='extracted', workflow_run_id=${run.id}, updated_at=datetime('now')
@@ -659,12 +797,13 @@ const receiptAnnotate = {
       });
       const [readback] = await db.query(sql`SELECT id, vendor, transaction_date, currency, amount,
         description, category_key, category_name, status, payment_reference,
-        reimbursement_recipient_user_id, slack_channel_id, slack_message_id, slack_thread_ts
+        payment_source, reimbursement_recipient_user_id, slack_channel_id, slack_message_id, slack_thread_ts
         FROM accounting_receipts WHERE id=${input.receiptId}`);
       if (!readback || Number(readback.amount) !== request.amount || readback.currency !== request.currency
         || readback.description !== request.description || readback.category_key !== request.categoryKey
         || readback.category_name !== request.categoryName
         || readback.payment_reference !== paymentReference
+        || readback.payment_source !== request.paymentSource
         || readback.reimbursement_recipient_user_id !== request.reimbursementRecipientUserId) {
         throw new Error('receipt annotation readback mismatch');
       }
@@ -692,6 +831,7 @@ const receiptAnnotate = {
         paymentReference: readback.payment_reference,
         previousPaymentReference,
         paymentReferenceMigrated: normalizedReference.migrated,
+        paymentSource: readback.payment_source,
         paymentAlreadyCompleted: request.paymentAlreadyCompleted,
         paymentConfirmationReference: request.paymentConfirmationReference,
         actualPaymentDescription: request.actualPaymentDescription,
@@ -730,15 +870,20 @@ const receiptAnnotate = {
             actualPaymentAmount: state.write_annotation.actualPaymentAmount,
           },
         })
-        : buildReceiptPaymentInstruction({
+        : state.write_annotation.paymentSource === 'kapital_business_paid'
+          ? buildReceiptBusinessPaidDocumentation({ receipt, items, approverUserIds })
+          : state.write_annotation.paymentSource === 'already_reimbursed'
+            ? buildReceiptAlreadyReimbursedDocumentation({ receipt, items, approverUserIds })
+            : buildReceiptPaymentInstruction({
           receipt,
           items,
           approverUserIds,
           paymentReferenceMigrated: state.write_annotation.paymentReferenceMigrated,
-        });
+            });
       const instructionHash = store.sha256({
         receiptId: receipt.id,
         paymentReference: receipt.payment_reference,
+        paymentSource: state.write_annotation.paymentSource,
         paymentAlreadyCompleted: state.write_annotation.paymentAlreadyCompleted,
         duplicateResolved: state.write_annotation.duplicateResolved === true,
         canonicalReceiptId: state.write_annotation.canonicalReceiptId || null,
@@ -756,14 +901,17 @@ const receiptAnnotate = {
           ? `receipt:${receipt.id}:duplicate-resolution:${instructionHash}`
           : state.write_annotation.paymentAlreadyCompleted
             ? `receipt:${receipt.id}:paid-documentation:${instructionHash}`
-            : `receipt:${receipt.id}:payment-instruction:${instructionHash}`,
+            : state.write_annotation.paymentSource === 'personal_reimbursement'
+              ? `receipt:${receipt.id}:payment-instruction:${instructionHash}`
+              : `receipt:${receipt.id}:${state.write_annotation.paymentSource}-documentation:${instructionHash}`,
         payload: {
           channelId: receipt.slack_channel_id,
           threadTs: receipt.slack_thread_ts || receipt.slack_message_id,
           message,
         },
       });
-      if (!state.write_annotation.paymentAlreadyCompleted && !state.write_annotation.duplicateResolved) {
+      if (!state.write_annotation.paymentAlreadyCompleted && !state.write_annotation.duplicateResolved
+          && state.write_annotation.paymentSource === 'personal_reimbursement') {
         await db.query(sql`UPDATE accounting_receipts SET
           payment_instruction_hash=${instructionHash},
           payment_instruction_queued_at=datetime('now'),
@@ -772,10 +920,13 @@ const receiptAnnotate = {
       return {
         outboxId: outbox.id,
         instructionStatus: state.write_annotation.paymentAlreadyCompleted
-          || state.write_annotation.duplicateResolved ? null : outbox.status,
+          || state.write_annotation.duplicateResolved
+          || state.write_annotation.paymentSource !== 'personal_reimbursement' ? null : outbox.status,
         documentationStatus: state.write_annotation.paymentAlreadyCompleted
-          || state.write_annotation.duplicateResolved ? outbox.status : null,
+          || state.write_annotation.duplicateResolved
+          || state.write_annotation.paymentSource !== 'personal_reimbursement' ? outbox.status : null,
         paymentReference: receipt.payment_reference,
+        paymentSource: state.write_annotation.paymentSource,
       };
     },
   }],
@@ -906,9 +1057,39 @@ function automaticAnnotationInput(receipt, result) {
   };
 }
 
+function annotationInputForPaymentSource(annotationInput, paymentSource) {
+  if (!annotationInput || !RECEIPT_PAYMENT_SOURCES.has(paymentSource)) return null;
+  return {
+    ...annotationInput,
+    paymentSource,
+    reimbursementRecipientUserId: paymentSource === 'kapital_business_paid'
+      ? null : annotationInput.reimbursementRecipientUserId,
+  };
+}
+
+async function queueAutomaticReceiptAnnotation({
+  db, run, store, annotationInput, paymentSource,
+}) {
+  const sourcedInput = annotationInputForPaymentSource(annotationInput, paymentSource);
+  if (!sourcedInput) return { skipped: true };
+  const digest = store.sha256(sourcedInput).slice(0, 24);
+  const policy = loadPolicy({ fresh: true });
+  const created = await store.createRun(db, {
+    definition: receiptAnnotate,
+    idempotencyKey: `receipt:${sourcedInput.receiptId}:automatic-annotation:${digest}`,
+    triggerType: 'workflow',
+    triggerRef: run.id,
+    channelId: run.channel_id,
+    actorUserId: run.actor_user_id,
+    input: sourcedInput,
+    policySnapshot: policySnapshot(policy, receiptAnnotate),
+  });
+  return { annotationRunId: created.run.id, queued: created.created };
+}
+
 const receiptProcess = {
   name: 'receipt.process',
-  version: 2,
+  version: 3,
   capability: 'receipts.write',
   mutates: true,
   allowedTriggers: ['workflow'],
@@ -973,20 +1154,32 @@ const receiptProcess = {
         const reasons = reimbursementReviewReasons(result);
         const annotationInput = reasons.length === 0 ? automaticAnnotationInput(receipt, result) : null;
         const reviewReason = reasons.join('; ').slice(0, 1000) || null;
-        await db.query(sql`UPDATE accounting_receipts SET
-          extraction_confidence=${Number(result?.extracted?.confidence || result?.confidence || 0)},
-          review_reason=${reviewReason},
-          extraction_json=${JSON.stringify({
-            source: 'openai_responses', responseId: result?.responseId || null,
-            model: result?.model || null, requestHash: result?.requestHash || null,
-            verificationResponseId: result?.verificationResponseId || null,
-            verificationAttempted: result?.verificationAttempted === true,
-            extracted: result?.ok ? result.extracted : null,
-            reviewReason: result?.reviewReason || null,
-            channelIntent: 'submitter_reimbursement',
-          })},
-          status=${reasons.length ? 'needs_review' : 'received'},
-          workflow_run_id=${run.id}, updated_at=datetime('now') WHERE id=${receipt.id}`);
+        let paymentSource;
+        // Serialize provenance readback with extraction persistence. A click
+        // before this transaction is observed here; a click after it sees the
+        // persisted annotation input and queues the same deterministic child.
+        await db.tx(async tx => {
+          const [currentReceipt] = await tx.query(sql`SELECT payment_source
+            FROM accounting_receipts WHERE id=${receipt.id}`);
+          paymentSource = receiptPaymentSource(currentReceipt || receipt);
+          await tx.query(sql`UPDATE accounting_receipts SET
+            extraction_confidence=${Number(result?.extracted?.confidence || result?.confidence || 0)},
+            review_reason=${reviewReason},
+            extraction_json=${JSON.stringify({
+              source: 'openai_responses', responseId: result?.responseId || null,
+              model: result?.model || null, requestHash: result?.requestHash || null,
+              verificationResponseId: result?.verificationResponseId || null,
+              verificationAttempted: result?.verificationAttempted === true,
+              extracted: result?.ok ? result.extracted : null,
+              reviewReason: result?.reviewReason || null,
+              automaticAnnotationInput: annotationInput,
+              channelIntent: receiptChannelIntent(paymentSource),
+            })},
+            status=${reasons.length ? 'needs_review'
+              : paymentSource ? 'received' : 'awaiting_payment_source'},
+            workflow_run_id=${run.id}, updated_at=datetime('now') WHERE id=${receipt.id}`);
+        });
+        const shouldAnnotate = reasons.length === 0 && Boolean(paymentSource);
         const evidence = await store.createEvidence(db, {
           runId: run.id,
           stepKey,
@@ -996,14 +1189,17 @@ const receiptProcess = {
           payload: {
             receiptId: receipt.id,
             itemCount: result?.extracted?.items?.length || 0,
-            shouldAnnotate: reasons.length === 0,
+            shouldAnnotate,
+            paymentSource,
             reasons,
           },
         });
         return {
           receiptId: receipt.id,
           skipped: false,
-          shouldAnnotate: reasons.length === 0,
+          shouldAnnotate,
+          awaitingPaymentSource: reasons.length === 0 && !paymentSource,
+          paymentSource,
           reasons,
           annotationInput,
           evidenceId: evidence.id,
@@ -1014,34 +1210,29 @@ const receiptProcess = {
       key: 'queue_annotation', effectClass: 'local_write', maxAttempts: 2,
       async run({ db, run, state, store }) {
         if (!state.persist_extraction.shouldAnnotate) return { skipped: true };
-        const annotationInput = state.persist_extraction.annotationInput;
-        const digest = store.sha256(annotationInput).slice(0, 24);
-        const policy = loadPolicy({ fresh: true });
-        const created = await store.createRun(db, {
-          definition: receiptAnnotate,
-          idempotencyKey: `receipt:${annotationInput.receiptId}:automatic-annotation:${digest}`,
-          triggerType: 'workflow',
-          triggerRef: run.id,
-          channelId: run.channel_id,
-          actorUserId: run.actor_user_id,
-          input: annotationInput,
-          policySnapshot: policySnapshot(policy, receiptAnnotate),
+        return queueAutomaticReceiptAnnotation({
+          db, run, store,
+          annotationInput: state.persist_extraction.annotationInput,
+          paymentSource: state.persist_extraction.paymentSource,
         });
-        return { annotationRunId: created.run.id, queued: created.created };
       },
     },
     {
       key: 'notify_review', effectClass: 'internal_notification', maxAttempts: 2,
       async run({ db, run, state, store }) {
-        if (state.persist_extraction.skipped || state.persist_extraction.shouldAnnotate) return { skipped: true };
+        if (state.persist_extraction.skipped || state.persist_extraction.reasons.length === 0) {
+          return { skipped: true };
+        }
         const receipt = state.load_receipt.receipt;
+        const source = state.persist_extraction.paymentSource;
         const message = [
-          '🧾 Registré este mensaje como un reembolso, pero la clasificación automática necesita revisión antes de emitir la instrucción de pago.',
+          '🧾 Registré este mensaje como un gasto, pero la clasificación automática necesita revisión.',
           `Revisión necesaria: ${state.persist_extraction.reasons.map(receiptReviewReasonInSpanish).join('; ')}`,
           `Comprobante: ${receipt.id} · Flujo: ${run.id}`,
-          'Revisa el mensaje original y usa receipt.annotate con ese identificador; el flujo generará el código de Kapital.',
-          'No vuelvas a publicar ni separes los comprobantes: un mensaje con varios archivos es un solo reembolso con varios conceptos.',
-          'No pidas ni incluyas CLABE, número de cuenta u otros datos bancarios; nunca son necesarios para clasificar o generar el código.',
+          `Fuente de pago: ${receiptPaymentSourceLabel(source)}.`,
+          'Revisa el mensaje original y usa receipt.annotate con ese identificador y la fuente de pago ya seleccionada.',
+          'No vuelvas a publicar ni separes los comprobantes: un mensaje con varios archivos es un solo gasto con varios conceptos.',
+          'No pidas ni incluyas CLABE, número de cuenta u otros datos bancarios; nunca son necesarios para clasificar o conciliar.',
         ].join('\n');
         const outbox = await store.enqueueOutbox(db, {
           runId: run.id,
@@ -1062,6 +1253,12 @@ const receiptProcess = {
       return { status: 'already_processed', receiptId: state.persist_extraction.receiptId };
     }
     if (!state.persist_extraction.shouldAnnotate) {
+      if (state.persist_extraction.awaitingPaymentSource) {
+        return {
+          status: 'awaiting_payment_source', receiptId: state.persist_extraction.receiptId,
+          evidenceId: state.persist_extraction.evidenceId,
+        };
+      }
       return {
         status: 'needs_review', receiptId: state.persist_extraction.receiptId,
         evidenceId: state.persist_extraction.evidenceId,
@@ -1072,6 +1269,126 @@ const receiptProcess = {
       status: 'queued', receiptId: state.persist_extraction.receiptId,
       evidenceId: state.persist_extraction.evidenceId,
       annotationRunId: state.queue_annotation.annotationRunId,
+    };
+  },
+};
+
+function validateReceiptPaymentSourceSelection(input) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(input?.receiptId || ''))) {
+    throw new Error('valid receiptId is required');
+  }
+  if (!RECEIPT_PAYMENT_SOURCES.has(String(input?.paymentSource || ''))) {
+    throw new Error('valid paymentSource is required');
+  }
+}
+
+const receiptPaymentSourceSelect = {
+  name: 'receipt.payment_source.select',
+  version: 1,
+  capability: 'receipts.write',
+  mutates: true,
+  allowedTriggers: ['slack_receipt_source_action'],
+  validate: validateReceiptPaymentSourceSelection,
+  steps: [{
+    key: 'select_source', effectClass: 'local_write', maxAttempts: 2,
+    async run({ db, run, input, store, stepKey }) {
+      const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE id=${input.receiptId}`);
+      if (!receipt) throw new Error('receipt was not found');
+      if (receipt.slack_channel_id !== run.channel_id) {
+        const error = new Error('receipt belongs to another channel');
+        error.code = 'receipt_scope_violation';
+        throw error;
+      }
+      const accounting = loadAccountingConfig({ fresh: true });
+      const authorized = new Set([
+        receipt.submitted_by,
+        ...(accounting.receipt_payment?.approver_user_ids || []),
+      ].filter(Boolean));
+      if (!authorized.has(run.actor_user_id)) {
+        const error = new Error('only the receipt submitter or configured payment approver may select the payment source');
+        error.code = 'receipt_payment_source_actor_forbidden';
+        error.status = 403;
+        throw error;
+      }
+      if (['ignored', 'matched', 'posted'].includes(receipt.status)) {
+        const error = new Error('the payment source is locked after a receipt is closed or reconciled');
+        error.code = 'receipt_payment_source_locked';
+        throw error;
+      }
+      const current = receiptPaymentSource(receipt);
+      if (current) {
+        if (current !== input.paymentSource) {
+          const error = new Error('the payment source was already selected; changing it requires manual accounting review');
+          error.code = 'receipt_payment_source_locked';
+          throw error;
+        }
+        return {
+          receiptId: receipt.id, paymentSource: current, unchanged: true,
+          extractionJson: receipt.extraction_json || null,
+        };
+      }
+      if (receipt.payment_reference || receipt.payment_instruction_queued_at) {
+        const error = new Error('a reimbursement instruction already exists; changing provenance requires manual accounting review');
+        error.code = 'receipt_payment_source_locked';
+        throw error;
+      }
+      const effect = await store.createEffect(db, {
+        runId: run.id, stepKey, effectType: 'local_record_write', provider: 'sqlite',
+        operation: 'accounting_receipt.select_payment_source',
+        idempotencyKey: `${run.id}:sqlite:accounting_receipt.select_payment_source`,
+        request: { receiptId: receipt.id, paymentSource: input.paymentSource },
+        target: { receiptId: receipt.id },
+      });
+      await db.query(sql`UPDATE accounting_receipts SET
+        payment_source=${input.paymentSource}, payment_source_selected_by=${run.actor_user_id},
+        payment_source_selected_at=datetime('now'), payment_source_workflow_run_id=${run.id},
+        status=CASE WHEN status='awaiting_payment_source' THEN 'received' ELSE status END,
+        updated_at=datetime('now') WHERE id=${receipt.id} AND payment_source='unselected'`);
+      const [readback] = await db.query(sql`SELECT id, payment_source, payment_source_selected_by,
+        payment_source_selected_at, status, extraction_json FROM accounting_receipts WHERE id=${receipt.id}`);
+      if (!readback || readback.payment_source !== input.paymentSource
+          || readback.payment_source_selected_by !== run.actor_user_id
+          || !readback.payment_source_selected_at) {
+        throw new Error('receipt payment-source selection readback mismatch');
+      }
+      const evidence = await store.createEvidence(db, {
+        runId: run.id, stepKey, source: 'sqlite.accounting_receipts', sourceRef: receipt.id,
+        payload: readback,
+      });
+      await store.transitionEffect(db, {
+        effectId: effect.id, providerRef: receipt.id, status: 'verified_by_readback',
+        providerStatus: 'payment_source_readback_verified', response: { evidenceId: evidence.id },
+      });
+      return {
+        receiptId: receipt.id, paymentSource: readback.payment_source,
+        selectedBy: readback.payment_source_selected_by, selectedAt: readback.payment_source_selected_at,
+        extractionJson: readback.extraction_json || null,
+        effectId: effect.id, evidenceId: evidence.id, unchanged: false,
+      };
+    },
+  }, {
+    key: 'queue_annotation', effectClass: 'local_write', maxAttempts: 2,
+    async run({ db, run, state, store }) {
+      let extraction = {};
+      try { extraction = JSON.parse(state.select_source.extractionJson || '{}'); } catch { extraction = {}; }
+      if (!extraction.automaticAnnotationInput) return { skipped: true, waitingForExtraction: true };
+      return queueAutomaticReceiptAnnotation({
+        db, run, store,
+        annotationInput: extraction.automaticAnnotationInput,
+        paymentSource: state.select_source.paymentSource,
+      });
+    },
+  }],
+  output({ state }) {
+    return {
+      status: state.queue_annotation.waitingForExtraction ? 'waiting_for_extraction' : 'queued',
+      receiptId: state.select_source.receiptId,
+      paymentSource: state.select_source.paymentSource,
+      selectedBy: state.select_source.selectedBy || null,
+      selectedAt: state.select_source.selectedAt || null,
+      annotationRunId: state.queue_annotation.annotationRunId || null,
+      effectId: state.select_source.effectId || null,
+      evidenceId: state.select_source.evidenceId || null,
     };
   },
 };
@@ -1181,15 +1498,19 @@ const receiptReconcile = {
 };
 
 module.exports = {
+  buildReceiptAlreadyReimbursedDocumentation,
+  buildReceiptBusinessPaidDocumentation,
   buildReceiptDuplicateDocumentation,
   buildReceiptPaidDocumentation,
   buildReceiptPaymentInstruction,
+  buildReceiptPaymentSourcePrompt,
   guestReplyDraft,
   kapitalSafePaymentReference,
   paymentReferencesIn,
   receiptAnnotate,
   receiptIngest,
   receiptPaymentReference,
+  receiptPaymentSourceSelect,
   receiptProcess,
   receiptReconcile,
   socialContentUpsert,

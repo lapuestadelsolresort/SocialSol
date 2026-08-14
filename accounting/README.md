@@ -49,11 +49,17 @@ Edit `config.json` → `receipt_channels`. Add a new entry:
 The classifier references channels in `needs_channel_check` so Sol knows
 where to look for context on ambiguous transactions.
 
-Normal reimbursement posts are annotated as a single bundle with one child
-item per attached receipt. Annotation replies in the original Slack thread
-with the itemized total and a stable, alphanumeric-only `LPDSR…` Kapital
-concept for the
-configured payment approver to copy exactly. Multi-attachment posts are never
+Every standard receipt post is captured as a single bundle with one child item
+per attached receipt. Before classification can issue a payment instruction,
+the submitter or configured payment approver must choose one receipt-bound
+Slack button: `Reembolso personal`, `Pagado con Kapital`, or `Ya reembolsado`.
+The selection is durable and immutable without manual accounting review.
+Personal reimbursements then receive an itemized reply in the original Slack
+thread with a stable, alphanumeric-only `LPDSR…` Kapital concept for the
+configured payment approver to copy exactly. Business-paid expenses create no
+reimbursement or code and reconcile against the original Kapital debit.
+Already-reimbursed expenses create no second payment or retroactive code and
+request payment proof in the original thread. Multi-attachment posts are never
 split or reposted, and Mayela-facing validation/payment instructions are in
 Spanish. New referenced reimbursements
 reconcile on that exact concept plus amount and currency; the legacy ±3-day

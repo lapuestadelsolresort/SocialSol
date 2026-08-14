@@ -90,6 +90,7 @@ async function deliverSlackNotification(db, row, payload, services = {}) {
   const result = await post(payload.channelId, payload.message, {
     threadTs,
     account: payload.account || process.env.OPENCLAW_SLACK_ACCOUNT || '',
+    presentation: payload.presentation || null,
   });
   if (!result.ok) throw new Error(result.error || 'Slack notification failed');
   if (payload.metaMessageId && result.ts) {

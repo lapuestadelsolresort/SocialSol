@@ -40,7 +40,9 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.receiptChannelIds, ['CRECEIPT1', 'COWNER1']);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.ownerExpenseChannelIds, ['COWNER1']);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.accountingChannelIds, ['CACCT1']);
-  assert.match(account.channels.CRECEIPT1.systemPrompt, /Every top-level expense post.*reimbursement/);
+  assert.match(account.channels.CRECEIPT1.systemPrompt, /Every top-level expense post.*must be documented/);
+  assert.match(account.channels.CRECEIPT1.systemPrompt, /Reembolso personal, Pagado con Kapital, or Ya reembolsado/);
+  assert.match(account.channels.CRECEIPT1.systemPrompt, /No Kapital-safe LPDSR reference.*before that selection/);
   assert.match(account.channels.CRECEIPT1.systemPrompt, /including a receipt, invoice, quotation/);
   assert.match(account.channels.CRECEIPT1.systemPrompt, /Do not call receipt\.ingest/);
   assert.match(account.channels.CRECEIPT1.systemPrompt, /use receipt\.annotate with the exact receipt id/);

@@ -509,7 +509,8 @@ async function collectReceipts({ db, input, run }, forceScoped = false) {
     status, vendor, transaction_date, currency, amount, transaction_kind, description,
     category_key, category_name, extraction_confidence, review_reason,
     amount_usd, fx_rate, qbo_entity_type, qbo_entity_id, posted_at,
-    payment_reference, reimbursement_recipient_user_id,
+    payment_reference, reimbursement_recipient_user_id, payment_source,
+    payment_source_selected_by, payment_source_selected_at,
     payment_instruction_queued_at
     FROM accounting_receipts
     WHERE (${channelFilter} IS NULL OR slack_channel_id=${channelFilter})

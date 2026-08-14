@@ -31,12 +31,15 @@ const DEFAULT_ACCOUNT = process.env.OPENCLAW_SLACK_ACCOUNT || '';
  * @param {string} [opts.threadTs]  If set, posts as a threaded reply to this ts.
  * @param {string} [opts.account]   Slack account id; defaults to 'ig-drafts'.
  * @param {boolean} [opts.dryRun]   If true, --dry-run (no actual post).
+ * @param {object} [opts.presentation] Portable message presentation (buttons, context, dividers).
  * @returns {Promise<{ok: boolean, ts: string|null, channelId: string,
  *                    raw: object|null, error: string|null,
  *                    stderr: string|null}>}
  */
 function postToChannel(channelId, message, opts = {}) {
-  const { threadTs = null, account = DEFAULT_ACCOUNT, dryRun = false } = opts;
+  const {
+    threadTs = null, account = DEFAULT_ACCOUNT, dryRun = false, presentation = null,
+  } = opts;
   if (!channelId || !account) {
     return Promise.resolve({
       ok: false,
@@ -57,6 +60,7 @@ function postToChannel(channelId, message, opts = {}) {
     '--json',
   ];
   if (threadTs) args.push('--reply-to', String(threadTs));
+  if (presentation) args.push('--presentation', JSON.stringify(presentation));
   if (dryRun) args.push('--dry-run');
 
   return new Promise((resolve) => {
