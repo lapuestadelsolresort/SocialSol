@@ -872,6 +872,33 @@ test('task-list parser handles self, named, completed, and all-staff requests wi
   assert.deepEqual(parseTaskListRequest('What does Sergio need to do?', {
     senderId: 'U-ASKER', users,
   }), { status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest('What is <@U-SERGIO> jobs that need to be done?', {
+    senderId: 'U-ASKER', mentionedUserIds: ['U-SERGIO'], users,
+  }), { status: 'active', userId: 'U-SERGIO' });
+  assert.deepEqual(parseTaskListRequest('What work needs to be completed for Sergio?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest('¿Qué trabajos necesita hacer Sergio?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest('Cuál es mi trabajo de hoy', {
+    senderId: 'U-ASKER', senderName: 'Ana', users,
+  }), { status: 'active', userId: 'U-ASKER', selectorLabel: 'Ana' });
+  assert.deepEqual(parseTaskListRequest('What has Sergio done?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'completed', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest('Which jobs has Sergio completed?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'completed', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest('What tasks are left for Sergio?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest("Which jobs aren't finished for Sergio?", {
+    senderId: 'U-ASKER', users,
+  }), { status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest('¿Qué trabajos no están terminados de Sergio?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' });
   assert.equal(parseTaskListRequest('Tarea para Sergio: pegar etiquetas en el intercomunicador.', {
     senderId: 'U-ASKER', users,
   }), null);
@@ -897,7 +924,7 @@ test('Paloma task claim is scoped to its configured agent, account, and joined c
     assert.equal(await claim({
       channel: 'slack', agentId: 'resort', accountId: 'paloma-resort',
       conversationId: 'C-MAINT', senderId: 'U-MAYELA',
-      bodyForAgent: '¿Cuáles son las tareas de Sergio?',
+      bodyForAgent: 'What is Sergio jobs that need to be done?',
     }), undefined);
     assert.equal(await claim({
       channel: 'slack', agentId: 'paloma', accountId: 'other',
@@ -907,7 +934,7 @@ test('Paloma task claim is scoped to its configured agent, account, and joined c
     const result = await claim({
       channel: 'slack', agentId: 'paloma', accountId: 'paloma-resort',
       conversationId: 'C-MAINT', senderId: 'U-MAYELA',
-      bodyForAgent: '¿Cuáles son las tareas de Sergio?',
+      bodyForAgent: 'What is Sergio jobs that need to be done?',
     });
     assert.equal(result.handled, true);
     assert.equal(result.reply.text, 'REPORTE BILINGÜE EXACTO');
