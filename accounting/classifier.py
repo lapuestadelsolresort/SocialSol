@@ -336,6 +336,17 @@ class KapitalClassifier:
                 result['reason'] = 'Pool maintenance (Blue Pools)'
                 return result
 
+            # THE TEQUILA EXPERIENCE (Kapital export sometimes drops the Q)
+            if 'TEQUILA EXPERIENCE' in payee or 'TE UILA EXPERIENCE' in payee:
+                result['category'] = 'group_activities'
+                result['category_name'] = 'Group Activities'
+                result['vendor_key'] = 'tequila_experience'
+                result['vendor_name'] = 'The Tequila Experience'
+                result['confidence'] = 'auto'
+                result['reason'] = 'Guest/group experience vendor deposit'
+                result['note'] = concept
+                return result
+
         # --- Non-SPEI auto-debits ---
 
         # TELMEX (various patterns)
@@ -393,6 +404,26 @@ class KapitalClassifier:
             result['confidence'] = 'guess'
             result['reason'] = 'MercadoLibre purchase — check receipt channels for context'
             result['needs_channel_check'] = self._channel_ids('general', 'property')
+            return result
+
+        # Resort hardware and maintenance-material purchases.
+        if 'HOME DEP' in desc_upper or 'HOMEDEPOT' in desc_upper:
+            result['category'] = 'maintenance'
+            result['category_name'] = 'Maintenance'
+            result['vendor_key'] = 'home_depot'
+            result['vendor_name'] = 'Home Depot'
+            result['confidence'] = 'auto'
+            result['reason'] = 'Home Depot property maintenance materials'
+            return result
+
+        # Institucionales Bahia supplies resort consumables.
+        if 'INSTITUCIONALES BAHIA' in desc_upper:
+            result['category'] = 'supplies'
+            result['category_name'] = 'Supplies'
+            result['vendor_key'] = 'institucionales_bahia'
+            result['vendor_name'] = 'Institucionales Bahia'
+            result['confidence'] = 'auto'
+            result['reason'] = 'Institucionales Bahia resort supplies'
             return result
 
         # Kapital bank fee

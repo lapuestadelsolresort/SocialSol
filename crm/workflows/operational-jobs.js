@@ -469,30 +469,85 @@ async function projectReceiptQboWrites(db, runId, receiptWrites) {
   return true;
 }
 
+async function projectBankTransactionQboWrites(db, runId, summary) {
+  const sourceFileHash = String(summary.source_file_hash || '');
+  const rows = [
+    ...(Array.isArray(summary.dedup_details) ? summary.dedup_details : []),
+    ...(Array.isArray(summary.details) ? summary.details : []),
+  ].filter(row => ['EXISTING', 'PUSHED'].includes(row.status));
+  if (!sourceFileHash || !rows.length) return rows.length === 0;
+
+  for (const row of rows) {
+    const status = row.requires_review ? 'posted_review'
+      : row.status === 'EXISTING' ? 'already_recorded' : 'posted';
+    const qboEntityType = row.qbo_entity_type
+      || (row.record_type === 'deposit' ? 'Deposit'
+        : row.record_type === 'transfer' ? 'Transfer' : 'Purchase');
+    const reference = row.reference || null;
+    const candidates = reference
+      ? await db.query(sql`SELECT id FROM accounting_bank_transactions
+          WHERE source_file_hash=${sourceFileHash} AND transaction_date=${String(row.date || '')}
+            AND amount=${Number(row.amount || 0)} AND reference=${reference}`)
+      : await db.query(sql`SELECT id FROM accounting_bank_transactions
+          WHERE source_file_hash=${sourceFileHash} AND transaction_date=${String(row.date || '')}
+            AND amount=${Number(row.amount || 0)} AND reference IS NULL`);
+    if (candidates.length !== 1) return false;
+    await db.query(sql`UPDATE accounting_bank_transactions SET
+      qbo_workflow_run_id=${runId}, qbo_entity_type=${qboEntityType},
+      qbo_entity_id=${row.qbo_id || null}, qbo_request_id=${row.request_id || null},
+      qbo_category_key=${row.category_key || null}, qbo_category_name=${row.category || null},
+      qbo_recorded_at=datetime('now'), review_required=${row.requires_review ? 1 : 0},
+      status=${status}, updated_at=datetime('now') WHERE id=${candidates[0].id}`);
+    const [readback] = await db.query(sql`SELECT status, qbo_workflow_run_id,
+      qbo_entity_type, qbo_entity_id, qbo_category_key, review_required
+      FROM accounting_bank_transactions WHERE id=${candidates[0].id}`);
+    if (readback?.status !== status || readback.qbo_workflow_run_id !== runId
+        || readback.qbo_entity_type !== qboEntityType
+        || String(readback.qbo_entity_id || '') !== String(row.qbo_id || '')
+        || String(readback.qbo_category_key || '') !== String(row.category_key || '')
+        || Number(readback.review_required || 0) !== (row.requires_review ? 1 : 0)) return false;
+  }
+  return true;
+}
+
 function buildQboNotificationMessage({ run, state }) {
   const summary = state.verify_readback?.summary || {};
   const reviewDetails = Array.isArray(summary.reviewDetails) ? summary.reviewDetails : [];
-  const groupedTransactions = Number(summary.principalWritten || 0)
-    + Number(summary.dedupSkipped || 0)
-    + Number(summary.reviewRequired || 0);
+  const heldDetails = Array.isArray(summary.heldDetails) ? summary.heldDetails : [];
+  const principalRecorded = Number(summary.principalRecorded || 0);
+  const principalTotal = Number(summary.principalTotal || 0);
+  const feeRecordsRecorded = Number(summary.feeRecordsRecorded || 0);
+  const feeRecordsExpected = Number(summary.feeRecordsExpected || 0);
   const lines = [
-    `Kapital statement workflow completed and verified in QBO. Workflow ${run.id}.`,
-    `• Grouped statement transactions evaluated: ${groupedTransactions}`,
+    `${summary.complete ? '✅' : '⚠️'} Kapital statement reconciliation completed with QBO provider readback. Workflow ${run.id}.`,
+    `• Principal transactions recorded: ${principalRecorded}/${principalTotal}`,
     `• Principal transactions written in this run: ${summary.principalWritten || 0}`,
-    `• SPEI fee records written: ${summary.feeRecordsWritten || 0}`,
-    `• Existing transactions skipped in this run: ${summary.dedupSkipped || 0}`,
-    `• Held for review: ${summary.reviewRequired || 0}`,
+    `• Principal transactions already present: ${summary.dedupSkipped || 0}`,
+    `• SPEI fee lines recorded: ${feeRecordsRecorded}/${feeRecordsExpected} (${summary.feeRecordsWritten || 0} written now)`,
+    `• Recorded to Uncategorized Expense for categorization review: ${summary.reviewRequired || 0}`,
+    `• Not recorded: ${summary.held || 0}`,
   ];
   if (reviewDetails.length) {
-    lines.push('Held transactions:');
+    lines.push('Recorded, category review required:');
     for (const detail of reviewDetails.slice(0, 10)) {
       const amount = Number(detail.amount || 0).toLocaleString('en-US', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
-      lines.push(`• ${detail.date || 'unknown date'} ${detail.currency || 'MXN'} ${amount} — ${detail.reason}`);
+      lines.push(`• ${detail.date || 'unknown date'} ${detail.currency || 'MXN'} ${amount} — QBO ${detail.qbo_id || 'pending'} — ${detail.review_reason || 'category review required'}`);
     }
-    if (reviewDetails.length > 10) lines.push(`• ${reviewDetails.length - 10} additional held transaction(s)`);
+    if (reviewDetails.length > 10) lines.push(`• ${reviewDetails.length - 10} additional categorization review(s)`);
+  }
+  if (heldDetails.length) {
+    lines.push('Not recorded:');
+    for (const detail of heldDetails.slice(0, 10)) {
+      const amount = Number(detail.amount || 0).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      lines.push(`• ${detail.date || 'unknown date'} ${detail.currency || 'MXN'} ${amount} — ${detail.review_reason || 'posting review required'}`);
+    }
+    if (heldDetails.length > 10) lines.push(`• ${heldDetails.length - 10} additional unrecorded transaction(s)`);
   }
   return lines.join('\n');
 }
@@ -510,7 +565,7 @@ const qboWrite = makeDurableJob({
   requestSummary: input => ({ csv: path.basename(safeAccountingCsv(input)), classificationTier: 'auto_only' }),
   buildCommand: ({ input, shadowMode }) => pythonCommand(
     'accounting/qbo_push.py',
-    [safeAccountingCsv(input), '--receipt-db', DB_PATH, ...(shadowMode ? [] : ['--live']), '--json'],
+    [safeAccountingCsv(input), '--receipt-db', DB_PATH, '--record-unresolved', ...(shadowMode ? [] : ['--live']), '--json'],
     { timeoutMs: 30 * 60_000 },
   ),
   async verify({ db, run, state }) {
@@ -528,6 +583,9 @@ const qboWrite = makeDurableJob({
     if (!await projectReceiptQboWrites(db, run.id, receiptWrites)) {
       return { verified: false, reason: 'receipt QBO projection failed readback', retryable: true };
     }
+    if (!await projectBankTransactionQboWrites(db, run.id, summary)) {
+      return { verified: false, reason: 'bank-transaction QBO projection failed readback', retryable: true };
+    }
     return {
       verified: true,
       source: 'quickbooks.entity_readback',
@@ -535,13 +593,26 @@ const qboWrite = makeDurableJob({
       evidence: summary,
       summary: {
         written,
-        principalWritten,
-        feeRecordsWritten: Math.max(0, written - principalWritten),
+        principalWritten: summary.principal_written ?? principalWritten,
+        principalRecorded: summary.principal_recorded || 0,
+        principalTotal: summary.statement?.principal_count || 0,
+        feeRecordsWritten: summary.fee_records_pushed || 0,
+        feeRecordsExisting: summary.fee_records_existing || 0,
+        feeRecordsRecorded: summary.fee_records_recorded || 0,
+        feeRecordsExpected: summary.fee_records_expected || 0,
+        feeDedupSkipped: summary.fee_dedup_skipped || 0,
         dedupSkipped: summary.dedup_skipped || 0,
         skipped: summary.skipped || 0,
         receiptsPosted: receiptWrites.length,
         reviewRequired: summary.review_required || 0,
         reviewDetails: summary.review_details || [],
+        held: summary.held || 0,
+        heldDetails: summary.held_details || [],
+        categoryTotals: summary.category_totals || [],
+        principalDetails: summary.principal_details || [],
+        statement: summary.statement || {},
+        sourceFileHash: summary.source_file_hash || null,
+        complete: summary.complete === true,
       },
     };
   },
@@ -555,6 +626,7 @@ module.exports = {
   ownerrezCrmSync,
   paulinaDaily,
   projectReceiptQboWrites,
+  projectBankTransactionQboWrites,
   qboWrite,
   reginaCampaign,
   reginaDaily,

@@ -159,37 +159,49 @@ test('Slack accounting intake recognizes a previously processed content hash bef
   }
 });
 
-test('QBO completion notification exposes every held accounting exception', () => {
+test('QBO completion notification distinguishes recorded reviews from held transactions', () => {
   const message = buildQboNotificationMessage({
     run: { id: 'workflow-1' },
     state: {
       verify_readback: {
         summary: {
           principalWritten: 5,
-          feeRecordsWritten: 10,
+          principalRecorded: 11,
+          principalTotal: 13,
+          feeRecordsWritten: 4,
+          feeRecordsRecorded: 18,
+          feeRecordsExpected: 20,
           dedupSkipped: 6,
           reviewRequired: 2,
+          held: 2,
+          complete: false,
           reviewDetails: [
             {
               date: '2026-08-06', currency: 'MXN', amount: 2105,
-              reason: 'duplicate reimbursement requires review',
+              qbo_id: '2601', review_reason: 'category requires review',
             },
             {
               date: '2026-08-10', currency: 'MXN', amount: 2499,
-              reason: 'manual classification required',
+              qbo_id: '2602', review_reason: 'category requires review',
             },
+          ],
+          heldDetails: [
+            { date: '2026-08-11', currency: 'MXN', amount: 100, review_reason: 'missing FX rate' },
+            { date: '2026-08-12', currency: 'MXN', amount: 200, review_reason: 'income account review' },
           ],
         },
       },
     },
   });
-  assert.match(message, /Grouped statement transactions evaluated: 13/);
+  assert.match(message, /Principal transactions recorded: 11\/13/);
   assert.match(message, /Principal transactions written in this run: 5/);
-  assert.match(message, /SPEI fee records written: 10/);
-  assert.match(message, /Existing transactions skipped in this run: 6/);
-  assert.match(message, /Held for review: 2/);
+  assert.match(message, /Principal transactions already present: 6/);
+  assert.match(message, /SPEI fee lines recorded: 18\/20 \(4 written now\)/);
+  assert.match(message, /Recorded to Uncategorized Expense for categorization review: 2/);
+  assert.match(message, /Not recorded: 2/);
   assert.match(message, /2026-08-06 MXN 2,105\.00/);
   assert.match(message, /2026-08-10 MXN 2,499\.00/);
+  assert.match(message, /2026-08-11 MXN 100\.00/);
 });
 
 test('QBO completion notification does not mention global write reviewers', async () => {

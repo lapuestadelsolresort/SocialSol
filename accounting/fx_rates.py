@@ -15,7 +15,7 @@ import urllib.request
 import urllib.error
 
 
-CACHE_DIR = Path(__file__).parent / 'fx_cache'
+CACHE_DIR = Path(os.environ.get('SOCIALSOL_FX_CACHE_DIR', Path(__file__).parent / 'fx_cache'))
 
 
 def get_usd_rate(txn_date: date) -> float:
@@ -109,7 +109,15 @@ def _fetch_banxico(d: date) -> Optional[float]:
 
 
 def _fetch_exchangerate_api(d: date) -> Optional[float]:
-    """Fallback: free exchangerate-api."""
+    """Fallback for today's spot rate only.
+
+    This endpoint does not accept a historical date. Using it for an older
+    transaction silently rewrites that day's accounting FX rate to today's
+    spot rate, so historical lookups must fail closed when Banxico and cache
+    data are unavailable.
+    """
+    if d != date.today():
+        return None
     try:
         url = f"https://api.exchangerate-api.com/v4/latest/USD"
         with urllib.request.urlopen(url, timeout=10) as resp:

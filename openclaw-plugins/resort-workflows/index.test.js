@@ -6,6 +6,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import {
   accountingCsvSignalFromFinalizedContext,
+  createAccountingReconciliationClaimHandler,
+  createAccountingReconciliationReplyDispatchHandler,
   createAccountingStatementClaimHandler,
   createAccountingStatementReplyDispatchHandler,
   createControlledChannelToolGuard,
@@ -27,6 +29,7 @@ import {
   createReceiptPaymentSourceInteractionHandler,
   createWorkflowTool,
   formatOwnerRezOccupancyReply,
+  formatAccountingReconciliationReply,
   formatWorkflowReply,
   parseWhatsAppCommand,
   parseEmailCommand,
@@ -37,6 +40,7 @@ import {
   parseReceiptConfirmCommand,
   parseReceiptPaymentSourceAction,
   parseReservationReadRequest,
+  parseAccountingReconciliationRequest,
   parseTaskListRequest,
   pluginConfig,
 } from './index.js';
@@ -622,6 +626,105 @@ test('accounting CSV dispatch detects finalized media without relying on command
   assert.equal(accountingCsvSignalFromFinalizedContext({
     BodyForCommands: 'What was the latest reconciliation status?',
   }), false);
+});
+
+test('parses authoritative accounting reconciliation reads without claiming CSV uploads', () => {
+  assert.deepEqual(parseAccountingReconciliationRequest(
+    'Please give me a breakdown of the most recent reconciliation',
+  ), { detail: true });
+  assert.deepEqual(parseAccountingReconciliationRequest(
+    'Are there any transactions that have not been recorded in QBO?',
+  ), { detail: true });
+  assert.equal(parseAccountingReconciliationRequest('Please process this CSV'), null);
+  assert.equal(parseAccountingReconciliationRequest('How much cash is in Kapital?'), null);
+});
+
+test('formats a complete QBO reconciliation with recorded category review separated from missing entries', () => {
+  const text = formatAccountingReconciliationReply({ run: {
+    id: 'read-run', workflow_name: 'accounting.reconciliation.read', status: 'completed',
+    output: {
+      latest: {
+        workflowRunId: 'qbo-run', evidenceId: 'qbo-evidence',
+        summary: {
+          complete: true, principalRecorded: 23, principalTotal: 23,
+          principalWritten: 4, dedupSkipped: 19,
+          feeRecordsRecorded: 40, feeRecordsExpected: 40,
+          feeRecordsWritten: 6, feeRecordsExisting: 34,
+          held: 0, reviewRequired: 1,
+          statement: {
+            date_start: '2026-08-03', date_end: '2026-08-14',
+            total_outflows_mxn: 69765.89, spei_fees_mxn: 92.8,
+          },
+          categoryTotals: [
+            { category: 'Maintenance', amount_mxn: 32644.16, transactions: 9 },
+            { category: 'Uncategorized Expense', amount_mxn: 2105, transactions: 1 },
+          ],
+          reviewDetails: [{
+            date: '2026-08-06', amount: 2105, qbo_id: '2601',
+            review_reason: 'receipt payment reference required',
+          }],
+          heldDetails: [],
+        },
+      },
+      _evidence: { id: 'read-evidence' },
+    },
+  } });
+  assert.match(text, /Every statement principal and SPEI fee line is recorded in QBO/);
+  assert.match(text, /Principal transactions recorded: 23\/23/);
+  assert.match(text, /SPEI fee lines recorded: 40\/40/);
+  assert.match(text, /Total statement outflows: MXN 69,765\.89/);
+  assert.match(text, /Not recorded: 0/);
+  assert.match(text, /Uncategorized Expense; category review required/);
+  assert.match(text, /QBO 2601/);
+  assert.match(text, /QBO reconciliation: qbo-run · QBO evidence: qbo-evidence/);
+  assert.match(text, /Authoritative read: read-run · Evidence: read-evidence/);
+});
+
+test('accounting reconciliation dispatch claims latest-status questions before the model runs', async () => {
+  const config = pluginConfig({
+    accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts', shadowMode: true,
+    liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
+  });
+  const calls = [];
+  const sent = [];
+  let finalized;
+  const handler = createAccountingReconciliationReplyDispatchHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: {
+        id: 'read-run', workflow_name: 'accounting.reconciliation.read', status: 'completed',
+        output: { latest: { workflowRunId: 'qbo-run', summary: {
+          complete: true, principalRecorded: 23, principalTotal: 23,
+          feeRecordsRecorded: 40, feeRecordsExpected: 40, held: 0,
+          statement: { date_start: '2026-08-03', date_end: '2026-08-14', total_outflows_mxn: 69765.89 },
+        } } },
+      } };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:CACCOUNTING', MessageSidFull: '1786740877.710399',
+      SenderId: 'U-JASON', BodyForCommands: 'please give me breakdown of the most recent reconciliation',
+    },
+    sendPolicy: 'allow',
+  }, {
+    dispatcher: {
+      sendFinalReply(payload) { sent.push(payload); return true; },
+      getQueuedCounts() { return { final: sent.length }; },
+    },
+    recordProcessed(outcome, details) { finalized = { outcome, details }; },
+    markIdle() {},
+  });
+  assert.equal(result.handled, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workflow, 'accounting.reconciliation.read');
+  assert.equal(calls[0].context.entrypoint, 'slack_accounting_reconciliation_read');
+  assert.match(sent[0].text, /Principal transactions recorded: 23\/23/);
+  assert.deepEqual(finalized, {
+    outcome: 'completed', details: { reason: 'accounting_reconciliation_reply_dispatch' },
+  });
 });
 
 test('accounting CSV reply dispatch stages trusted Slack uploads and stops model execution', async () => {

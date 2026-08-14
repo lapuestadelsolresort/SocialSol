@@ -34,6 +34,8 @@ class QboDedupTests(unittest.TestCase):
         self.assertEqual(new, [])
         self.assertEqual(duplicates, [transaction])
         self.assertIn('Clave', transaction['_dedup_reason'])
+        self.assertEqual(transaction['_dedup_qbo_id'], '2470')
+        self.assertEqual(transaction['_dedup_entity_type'], 'Purchase')
 
     def test_query_failure_aborts_instead_of_assuming_qbo_is_empty(self):
         def unavailable(_sql):
@@ -57,6 +59,7 @@ class QboDedupTests(unittest.TestCase):
         self.assertEqual(new, [])
         self.assertEqual(duplicates, [transaction])
         self.assertIn('Date+MXN fingerprint', transaction['_dedup_reason'])
+        self.assertEqual(transaction['_dedup_qbo_id'], '2470')
 
     def test_malformed_query_response_aborts(self):
         with self.assertRaisesRegex(RuntimeError, 'no QueryResponse'):

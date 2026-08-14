@@ -7,7 +7,7 @@ when overlapping CSVs are uploaded.
 """
 
 import re
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Tuple
 
 
 def check_for_duplicates(
@@ -47,7 +47,7 @@ def check_for_duplicates(
         f"AND TxnDate <= '{max_date.isoformat()}' "
         f"MAXRESULTS 500"
     )
-    existing = _qbo_query(query_qbo, sql)
+    existing = [dict(row, _entity_type='Purchase') for row in _qbo_query(query_qbo, sql)]
 
     # Also check deposits and transfers
     for entity_type in ('Deposit', 'Transfer'):
@@ -59,19 +59,19 @@ def check_for_duplicates(
             f"AND TxnDate <= '{max_date.isoformat()}' "
             f"MAXRESULTS 200"
         )
-        existing.extend(_qbo_query(query_qbo, sql2))
+        existing.extend(dict(row, _entity_type=entity_type) for row in _qbo_query(query_qbo, sql2))
 
     # Build set of existing Kapital references (Clave)
-    existing_refs: Set[str] = set()
-    existing_mxn_fingerprints: Set[str] = set()
-    existing_fingerprints: Set[str] = set()
+    existing_refs: Dict[str, Dict] = {}
+    existing_mxn_fingerprints: Dict[str, Dict] = {}
+    existing_fingerprints: Dict[str, Dict] = {}
 
     for e in existing:
         note = e.get('PrivateNote', '')
         # Extract Kapital Clave reference
         ref_match = re.search(r'Clave:\s*(136-[\d/\-]+)', note)
         if ref_match:
-            existing_refs.add(ref_match.group(1))
+            existing_refs.setdefault(ref_match.group(1), e)
 
         # Prefer the original MXN amount embedded by SocialSol. This remains
         # stable even if an old QBO entity used a different cached FX rate.
@@ -82,12 +82,14 @@ def check_for_duplicates(
         )
         if original_mxn_match:
             original_mxn = float(original_mxn_match.group(1).replace(',', ''))
-            existing_mxn_fingerprints.add(f"{e.get('TxnDate', '')}|{original_mxn:.2f}")
+            existing_mxn_fingerprints.setdefault(
+                f"{e.get('TxnDate', '')}|{original_mxn:.2f}", e
+            )
 
         # Also build date+amount fingerprint as fallback
         txn_date = e.get('TxnDate', '')
         amount = e.get('TotalAmt') or e.get('Amount', 0)
-        existing_fingerprints.add(f"{txn_date}|{float(amount):.2f}")
+        existing_fingerprints.setdefault(f"{txn_date}|{float(amount):.2f}", e)
 
     # Check each incoming transaction
     new_txns = []
@@ -100,7 +102,10 @@ def check_for_duplicates(
         clave = clave_match.group(1) if clave_match else None
 
         if clave and clave in existing_refs:
+            matched = existing_refs[clave]
             txn['_dedup_reason'] = f'Clave {clave} already in QBO'
+            txn['_dedup_qbo_id'] = str(matched.get('Id') or '') or None
+            txn['_dedup_entity_type'] = matched.get('_entity_type')
             dupes.append(txn)
             continue
 
@@ -110,14 +115,20 @@ def check_for_duplicates(
         if txn.get('date') and txn.get('amount'):
             mxn_fp = f"{txn['date'].isoformat()}|{float(txn['amount']):.2f}"
             if mxn_fp in existing_mxn_fingerprints:
+                matched = existing_mxn_fingerprints[mxn_fp]
                 txn['_dedup_reason'] = f'Date+MXN fingerprint already in QBO: {mxn_fp}'
+                txn['_dedup_qbo_id'] = str(matched.get('Id') or '') or None
+                txn['_dedup_entity_type'] = matched.get('_entity_type')
                 dupes.append(txn)
                 continue
 
         if txn.get('date') and txn.get('amount_usd'):
             fp = f"{txn['date'].isoformat()}|{txn['amount_usd']:.2f}"
             if fp in existing_fingerprints:
+                matched = existing_fingerprints[fp]
                 txn['_dedup_reason'] = f'Date+amount fingerprint already in QBO: {fp}'
+                txn['_dedup_qbo_id'] = str(matched.get('Id') or '') or None
+                txn['_dedup_entity_type'] = matched.get('_entity_type')
                 dupes.append(txn)
                 continue
 

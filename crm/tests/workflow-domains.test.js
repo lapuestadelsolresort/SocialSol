@@ -96,14 +96,54 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
     'ownerrez.occupancy.read', 'squarespace.summary.read',
     'ownerrez.mutation.propose', 'ownerrez.mutation.confirm',
     'email.activity.read', 'email.message.observe', 'email.reply.propose', 'email.reply.confirm', 'email.message.classify',
-    'qbo.write', 'qbo.bank_balances.read', 'qbo.report.read', 'business.snapshot.read', 'whatsapp.status.read',
+    'qbo.write', 'qbo.bank_balances.read', 'qbo.report.read', 'accounting.reconciliation.read',
+    'business.snapshot.read', 'whatsapp.status.read',
   ]) assert.equal(definitions.has(expected), true, expected);
   assert.equal(definitions.get('business.snapshot.read').mutates, false);
   assert.equal(definitions.get('email.activity.read').capability, 'email.read');
   assert.equal(definitions.get('crm.contacts.read').capability, 'crm.read');
   assert.equal(definitions.get('whatsapp.status.read').version, 3);
   assert.equal(definitions.get('qbo.write').autonomous, true);
+  assert.equal(definitions.get('accounting.reconciliation.read').mutates, false);
   assert.equal(definitions.has('shell.exec'), false);
+});
+
+test('accounting reconciliation read returns the latest verified QBO run and projected bank rows', async () => {
+  await withDb(async db => {
+    const qboRunId = 'qbo-read-source';
+    await db.query(sql`INSERT INTO workflow_runs (
+      id, workflow_name, workflow_version, idempotency_key, status,
+      trigger_type, input_json, output_json, state_json, created_at, completed_at
+    ) VALUES (
+      ${qboRunId}, 'qbo.write', 2, 'seed:qbo-read-source', 'completed',
+      'system', ${JSON.stringify({ csvPath: 'accounting/inbox/processed/latest.csv' })},
+      ${JSON.stringify({ status: 'verified_by_readback', evidenceId: 'qbo-evidence', qbo: {
+        complete: true, principalRecorded: 1, principalTotal: 1,
+        feeRecordsRecorded: 0, feeRecordsExpected: 0, held: 0,
+      } })}, '{}', datetime('now','-1 minute'), datetime('now'))`);
+    await db.query(sql`INSERT INTO accounting_bank_transactions (
+      id, source_key, transaction_date, description, reference, direction,
+      currency, amount, amount_usd, category_key, category_name,
+      classification_tier, source_file_hash, workflow_run_id,
+      qbo_workflow_run_id, qbo_entity_type, qbo_entity_id,
+      qbo_category_key, qbo_category_name, qbo_recorded_at, status
+    ) VALUES (
+      'bank-1', 'bank-source-1', '2026-08-14', 'INSTITUCIONALES BAHIA', 'card-ref', 'debit',
+      'MXN', 513.93, 30.16, 'supplies', 'Supplies',
+      'auto', 'file-hash', ${qboRunId}, ${qboRunId}, 'Purchase', '2601',
+      'supplies', 'Supplies', datetime('now'), 'posted'
+    )`);
+    const read = await startGraph(db, getDefinition('accounting.reconciliation.read'), {
+      idempotencyKey: 'accounting-read:test', triggerType: 'model_tool',
+      triggerRef: 'slack-1', channelId: 'C-ACCOUNTING', actorUserId: 'U-JASON', input: { detail: true },
+    });
+    assert.equal(read.status, 'completed', read.error_message);
+    assert.equal(read.output.latest.workflowRunId, qboRunId);
+    assert.equal(read.output.latest.evidenceId, 'qbo-evidence');
+    assert.equal(read.output.latest.summary.complete, true);
+    assert.equal(read.output.latest.transactions[0].qbo_entity_id, '2601');
+    assert.equal(read.output.latest.sourceCsv, 'latest.csv');
+  });
 });
 
 test('email activity reads live Gmail and reports durable ledger coverage separately', async () => {
