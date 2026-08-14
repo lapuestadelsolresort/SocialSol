@@ -79,7 +79,7 @@ test('narrow live workflow cutovers remove the shadow-only prompt for their owni
   }
 });
 
-test('email console rendering exposes only thread-bound commands to both authorized channels', () => {
+test('email console rendering keeps proposals threaded and confirmations channel-bound', () => {
   const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
   process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';
   try {
@@ -96,12 +96,12 @@ test('email console rendering exposes only thread-bound commands to both authori
     });
     assert.deepEqual(patch.plugins.entries['resort-workflows'].config.emailChannelIds, ['CPAULINA', 'CEMAIL']);
     const channel = patch.channels.slack.accounts['test-account'].channels.CPAULINA;
-    assert.match(channel.systemPrompt, /same thread sends through Gmail/);
-    assert.match(channel.systemPrompt, /top-level email commands never send/);
+    assert.match(channel.systemPrompt, /pasted anywhere in this channel, sends through Gmail/);
+    assert.match(channel.systemPrompt, /Plain Slack replies never send/);
     assert.deepEqual(channel.tools.allow, ['resort_workflow']);
     const sarah = patch.channels.slack.accounts['test-account'].channels.CEMAIL;
     assert.match(sarah.systemPrompt, /Gmail and OwnerRez/);
-    assert.match(sarah.systemPrompt, /same user in that same thread/);
+    assert.match(sarah.systemPrompt, /same user, pasted anywhere in this channel/);
     assert.match(sarah.systemPrompt, /call email\.activity\.read against Sarah Gmail live/);
     assert.deepEqual(sarah.tools.allow, ['resort_workflow']);
   } finally {

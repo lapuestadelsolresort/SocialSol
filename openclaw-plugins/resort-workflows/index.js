@@ -285,7 +285,7 @@ export function formatWorkflowReply(payload) {
       `Immutable request: ${output.requestHash || 'unknown'}`,
       '',
       `> ${String(output.bodyText || '').split('\n').join('\n> ')}`,
-      'This proposal does not expire. After reviewing the exact message above, copy and paste the full next line as a new Slack message:',
+      'This proposal does not expire. After reviewing the exact message above, copy and paste the full next line anywhere in this channel:',
       output.confirmationCommand || 'confirmation command unavailable',
       `Workflow: ${run.id}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
     ].join('\n');
@@ -508,12 +508,12 @@ export function parseEmailCommand(text, { hasThread = false } = {}) {
   let body = String(text || '').trim();
   if (body.startsWith('`') && body.endsWith('`')) body = body.slice(1, -1).trim();
   if (!/^!email(?:\s|$)/i.test(body)) return null;
-  if (!hasThread) return { error: 'original_thread_required' };
   if (/^!email\s+(?:confirm|classify)(?:\s|$)/i.test(body)) body = body.replaceAll('`', '');
   const confirm = body.match(/^!email\s+confirm\s+([0-9a-f-]{36})\s+([0-9a-f]{12})\s*$/i);
   if (confirm) return {
     action: 'confirm', proposalId: confirm[1].toLowerCase(), acceptanceHash: confirm[2].toLowerCase(),
   };
+  if (!hasThread) return { error: 'original_thread_required' };
   const classify = body.match(/^!email\s+classify\s+(\d+)\s+(hot|not_interested|ambiguous)\s*$/i);
   if (classify) return { action: 'classify', eventId: Number(classify[1]), quality: classify[2].toLowerCase() };
   const reply = body.match(/^!email\s+reply\s+([\s\S]+)$/i);
@@ -972,7 +972,7 @@ export function createEmailClaimHandler({ config, execute = callControlPlane, lo
     if (command.error) {
       return {
         handled: true,
-        reply: { text: 'Not sent. Use `!email reply <message>` in the original message thread. Confirm there with the exact emitted `!email confirm ...` command.' },
+        reply: { text: 'Not sent. Use `!email reply <message>` in the original message thread. An exact emitted `!email confirm ...` command can be pasted anywhere in this channel.' },
       };
     }
     const workflow = command.action === 'confirm' ? 'email.reply.confirm'

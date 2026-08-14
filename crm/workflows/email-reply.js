@@ -53,7 +53,6 @@ function validateConfirmation(input) {
   if (!/^[0-9a-f]{12}$/i.test(String(input?.acceptanceHash || ''))) {
     throw new Error('valid email reply acceptanceHash is required');
   }
-  if (!String(input?.threadTs || '').trim()) throw new Error('email confirmation must be in the original Slack thread');
 }
 
 function validateClassification(input) {
@@ -458,7 +457,6 @@ const confirmDefinition = {
           throw error;
         }
         if (proposal.slack_channel_id !== run.channel_id) throw new Error('email confirmation came from the wrong Slack channel');
-        if (proposal.slack_thread_ts !== String(input.threadTs || '')) throw new Error('email confirmation came from the wrong Slack thread');
         if (proposal.acceptance_hash !== String(input.acceptanceHash).toLowerCase()) throw new Error('email acceptance hash does not match');
         const deliveryBody = emailBodyFromSlack(proposal.body_text);
         await db.query(sql`UPDATE email_reply_proposals SET status='confirmed', confirmed_by=${run.actor_user_id},

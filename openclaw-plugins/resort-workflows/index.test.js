@@ -80,7 +80,7 @@ test('parses only explicit Meta DM mutations', () => {
   assert.deepEqual(parseMetaDmCommand('!dm Welcome'), { error: 'invalid_meta_dm_command' });
 });
 
-test('parses email replies, confirmations, and classifications only in the original thread', () => {
+test('parses replies and classifications in-thread while allowing confirmations anywhere in-channel', () => {
   const id = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
   assert.equal(parseEmailCommand('hello', { hasThread: true }), null);
   assert.deepEqual(parseEmailCommand('!email reply Thanks—here are the rates.', { hasThread: true }), {
@@ -93,6 +93,9 @@ test('parses email replies, confirmations, and classifications only in the origi
     action: 'confirm', proposalId: id, acceptanceHash: 'abcdef123456',
   });
   assert.deepEqual(parseEmailCommand(`!email confirm \`${id} abcdef123456\``, { hasThread: true }), {
+    action: 'confirm', proposalId: id, acceptanceHash: 'abcdef123456',
+  });
+  assert.deepEqual(parseEmailCommand(`!email confirm ${id} abcdef123456`, { hasThread: false }), {
     action: 'confirm', proposalId: id, acceptanceHash: 'abcdef123456',
   });
   assert.deepEqual(parseEmailCommand('!email classify 17 hot', { hasThread: true }), {
@@ -113,12 +116,13 @@ test('email proposal reply exposes a plain copyable command and no deadline', ()
     },
   } });
   assert.match(text, /does not expire/);
+  assert.match(text, /anywhere in this channel/);
   assert.match(text, new RegExp(`\\n${command.replaceAll('-', '\\-')}\\n`));
   assert.doesNotMatch(text, /Expires:/);
   assert.doesNotMatch(text, new RegExp(`\`${command.replaceAll('-', '\\-')}\``));
 });
 
-test('email reply commands bind the trusted Slack user, message, channel, and thread', async () => {
+test('email reply commands bind trusted Slack context while top-level confirmation stays copyable', async () => {
   const config = pluginConfig({
     emailChannelIds: ['CPAULINA'], shadowMode: true,
     liveWorkflowNames: ['email.reply.propose', 'email.reply.confirm', 'email.message.classify'],
@@ -152,6 +156,21 @@ test('email reply commands bind the trusted Slack user, message, channel, and th
   }, {});
   assert.equal(topLevel.handled, true);
   assert.match(topLevel.reply.text, /original message thread/);
+
+  const confirmed = await createEmailClaimHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'email-confirm-run', workflow_name: request.workflow, status: 'completed',
+        output: { status: 'verified_by_readback' } } };
+    },
+  })({
+    channel: 'slack', conversationId: 'CPAULINA', messageId: '200.3', senderId: 'U-SARAH',
+    bodyForAgent: '!email confirm 4df5fc31-c9f8-4b30-8dcc-0a13482beedd abcdef123456',
+  }, {});
+  assert.equal(confirmed.handled, true);
+  assert.equal(calls.at(-1).workflow, 'email.reply.confirm');
+  assert.equal(calls.at(-1).input.threadTs, undefined);
 });
 
 test('email reply dispatch claims ordinary Slack commands before the model runs', async () => {
