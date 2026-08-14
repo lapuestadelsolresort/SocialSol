@@ -893,11 +893,18 @@ export function parseTaskListRequest(bodyValue, {
   const body = normalizedTaskText(rawBody);
   if (!body) return null;
 
-  const hasTaskTerm = /\b(?:tasks?|task list|to-?dos?|assignments?|tareas?|pendientes?|asignaciones?)\b/.test(body);
+  const hasTaskTerm = /\b(?:tasks?|task list|to-?dos?|assignments?|jobs?|work|work items?|open items?|tareas?|pendientes?|asignaciones?|trabajos?)\b/.test(body);
   const hasCompletionTerm = /\b(?:completed?|done|finished|completad[ao]s?|terminad[ao]s?|hech[ao]s?)\b/.test(body);
-  const hasImplicitTaskQuestion = /\b(?:what (?:do|does) .{0,60}(?:need to|have to|supposed to) do|what should .{0,60} do|what (?:am i|is .{1,60}) assigned|que (?:tengo|tiene|debo|debe|necesito|necesita) (?:que )?hacer|que (?:me|le) toca)\b/.test(body);
+  const describesRequiredWork = [
+    /\b(?:need(?:s|ed)?|remain(?:s|ing)?|left|still|yet|required)\b.{0,60}\b(?:to (?:be )?)?(?:done|completed|finished)\b/,
+    /\b(?:to be done|left to do|what(?:'s| is) left)\b/,
+    /\b(?:not|isn'?t|aren'?t)\s+(?:done|completed|finished)\b/,
+    /\b(?:necesita(?:n)?|falta(?:n)?|queda(?:n)?|pendiente(?:s)?|por)\b.{0,60}\b(?:hacer|completar|terminar|hech[ao]s?|completad[ao]s?|terminad[ao]s?)\b/,
+    /\bno\s+(?:esta(?:n)?\s+)?(?:hech[ao]s?|completad[ao]s?|terminad[ao]s?)\b/,
+  ].some(pattern => pattern.test(body));
+  const hasImplicitTaskQuestion = /\b(?:what (?:do|does) .{0,60}(?:need to|have to|supposed to) do|what should .{0,60} do|what (?:am i|is .{1,60}) assigned|what(?:'s| is) left(?: to do)?|que (?:tengo|tiene|debo|debe|necesito|necesita) (?:que )?hacer|que (?:me|le) toca|que falta(?: por hacer)?)\b/.test(body);
   const hasQueryIntent = rawBody.includes('?')
-    || /\b(?:what|which|show|list|tell|give|how many|my|mine|have|has|assigned|que|cual(?:es)?|muestra|lista|dime|cuant[ao]s?|mis|mias|tengo|tiene|hay)\b/.test(body);
+    || /\b(?:what|which|show|list|tell|give|how many|my|mine|have|has|assigned|remain(?:s|ing)?|left|que|cual(?:es)?|muestra|lista|dime|cuant[ao]s?|mis|mias|tengo|tiene|hay|falta(?:n)?|queda(?:n)?)\b/.test(body);
   const aliases = Object.entries(users || {}).filter(([, userId]) => String(userId || '').trim());
   const configuredUserIds = new Set(aliases.map(([, userId]) => String(userId)));
   const bodyMentions = [...rawBody.matchAll(/<@([A-Z][A-Z0-9]{2,63})>/gi)].map(match => match[1]);
@@ -913,7 +920,7 @@ export function parseTaskListRequest(bodyValue, {
   let status = 'active';
   if (/\b(?:task history|full history|historial(?: de)? tareas|incluyendo completad[ao]s?|including completed|active and completed|pendientes y completad[ao]s?)\b/.test(body)) {
     status = 'all';
-  } else if (hasCompletionTerm) {
+  } else if (hasCompletionTerm && !describesRequiredWork) {
     status = 'completed';
   } else if (/\b(?:cancelled|canceled|cancelad[ao]s?)\b/.test(body)) {
     status = 'cancelled';
