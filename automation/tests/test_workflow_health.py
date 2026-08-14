@@ -19,7 +19,8 @@ from workflow_health import (
 
 SCHEMA = """
 CREATE TABLE workflow_runs (
-  id TEXT PRIMARY KEY, workflow_name TEXT, status TEXT, created_at TEXT, updated_at TEXT
+  id TEXT PRIMARY KEY, workflow_name TEXT, status TEXT, trigger_type TEXT,
+  error_message TEXT, created_at TEXT, updated_at TEXT
 );
 CREATE TABLE workflow_steps (
   run_id TEXT, status TEXT, available_at TEXT, lease_expires_at TEXT
@@ -28,7 +29,7 @@ CREATE TABLE workflow_outbox (
   status TEXT, lease_expires_at TEXT, created_at TEXT
 );
 CREATE TABLE workflow_effects (
-  id TEXT, provider TEXT, status TEXT, requested_at TEXT,
+  id TEXT, run_id TEXT, provider TEXT, status TEXT, requested_at TEXT,
   verification_mode TEXT DEFAULT 'readback_required', verification_deadline_at TEXT
 );
 CREATE TABLE workflow_manual_reviews (status TEXT, effect_id TEXT, run_id TEXT);
@@ -52,6 +53,35 @@ class WorkflowHealthTests(unittest.TestCase):
         con = self.database()
         metrics = inspect(con)
         self.assertEqual(hard_failure_count(metrics), 0)
+
+    def test_pre_effect_email_thread_rejection_is_reported_without_failing_health(self):
+        con = self.database()
+        con.execute("""INSERT INTO workflow_runs
+            (id, workflow_name, status, trigger_type, error_message, created_at, updated_at)
+            VALUES ('rejected-email', 'email.reply.propose', 'failed',
+                    'slack_email_reply_command',
+                    'no recorded inbound message exists for this Slack thread',
+                    datetime('now'), datetime('now'))""")
+        metrics = inspect(con)
+        self.assertEqual(metrics["email_command_rejections_24h"], 1)
+        self.assertEqual(metrics["failed_24h"], 0)
+        self.assertEqual(hard_failure_count(metrics), 0)
+
+    def test_email_thread_failure_after_an_effect_remains_a_hard_failure(self):
+        con = self.database()
+        con.execute("""INSERT INTO workflow_runs
+            (id, workflow_name, status, trigger_type, error_message, created_at, updated_at)
+            VALUES ('effect-email', 'email.reply.propose', 'failed',
+                    'slack_email_reply_command',
+                    'no recorded inbound message exists for this Slack thread',
+                    datetime('now'), datetime('now'))""")
+        con.execute("""INSERT INTO workflow_effects
+            (id, run_id, provider, status, requested_at, verification_mode)
+            VALUES ('effect-1', 'effect-email', 'gmail', 'failed', datetime('now'), 'readback_required')""")
+        metrics = inspect(con)
+        self.assertEqual(metrics["email_command_rejections_24h"], 0)
+        self.assertEqual(metrics["failed_24h"], 1)
+        self.assertGreater(hard_failure_count(metrics), 0)
 
     def test_missing_alert_configuration_fails_closed(self):
         con = self.database()
