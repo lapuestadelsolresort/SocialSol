@@ -389,6 +389,17 @@ function mxnAmount(value) {
   });
 }
 
+function accountingTransactionLabel(value) {
+  const raw = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return 'No description';
+  const speiPayee = raw.match(/\bEnvio SPEI\b[^|]*\|\s*([^|]+)/i)?.[1]
+    ?.replace(/\bDato no verificado por esta institucion\b[\s\S]*$/i, '').trim();
+  if (speiPayee) return safeInline(speiPayee, 'Payee unavailable', 100);
+  const merchant = raw.match(/^(.{2,100}?)(?=\s+\d{6}\b)/)?.[1]?.trim();
+  const label = merchant || raw;
+  return safeInline(label.replace(/\d{7,}/g, digits => `••••${digits.slice(-4)}`), 'No description', 100);
+}
+
 export function formatAccountingReconciliationReply(payload) {
   const run = payload?.run;
   if (!run || run.status !== 'completed') {
@@ -429,7 +440,7 @@ export function formatAccountingReconciliationReply(payload) {
         ? `QBO ${item.qbo_entity_type || 'record'} ${item.qbo_entity_id}`
         : 'not recorded in QBO';
       const review = Number(item.review_required || 0) === 1 ? ' · category review required' : '';
-      lines.push(`• ${item.transaction_date || 'unknown date'} — ${item.currency || 'MXN'} ${mxnAmount(item.amount)} — ${safeInline(item.description, 'No description', 140)} — ${safeInline(item.qbo_category_name || item.category_name, 'Unclassified', 80)} — ${qbo}${review}`);
+      lines.push(`• ${item.transaction_date || 'unknown date'} — ${item.currency || 'MXN'} ${mxnAmount(item.amount)} — ${accountingTransactionLabel(item.description)} — ${safeInline(item.qbo_category_name || item.category_name, 'Unclassified', 80)} — ${qbo}${review}`);
     }
     if (feeExpected > 0) {
       lines.push(`• Plus ${feeRecorded}/${feeExpected} separately recorded SPEI fee lines totaling MXN ${mxnAmount(statement.spei_fees_mxn)}`);

@@ -746,7 +746,7 @@ test('formats the full reconciled transaction list from durable QBO projections'
         },
         transactions: [
           { transaction_date: '2026-08-14', amount: 3300, currency: 'MXN', description: 'FIDENCIO LOPEZ', qbo_category_name: 'Contract Labor', qbo_entity_type: 'JournalEntry', qbo_entity_id: '2602' },
-          { transaction_date: '2026-08-13', amount: 1088, currency: 'MXN', description: 'SUSY', qbo_category_name: 'Cleaning Services', qbo_entity_type: 'Purchase', qbo_entity_id: '2601' },
+          { transaction_date: '2026-08-13', amount: 1088, currency: 'MXN', description: 'Envio SPEI AZTECA | SUSY Dato no verificado por esta institucion | 127564013982211433 | 1704637622', qbo_category_name: 'Cleaning Services', qbo_entity_type: 'Purchase', qbo_entity_id: '2601' },
         ],
       },
       _evidence: { id: 'read-evidence' },
@@ -754,6 +754,8 @@ test('formats the full reconciled transaction list from durable QBO projections'
   } });
   assert.match(text, /Reconciled principal transactions \(2\), most recent first/);
   assert.match(text, /2026-08-14 — MXN 3,300\.00 — FIDENCIO LOPEZ — Contract Labor — QBO JournalEntry 2602/);
+  assert.match(text, /2026-08-13 — MXN 1,088\.00 — SUSY — Cleaning Services — QBO Purchase 2601/);
+  assert.doesNotMatch(text, /127564013982211433|Dato no verificado/);
   assert.match(text, /Plus 2\/2 separately recorded SPEI fee lines/);
 });
 
