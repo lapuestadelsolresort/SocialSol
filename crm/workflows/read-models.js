@@ -501,9 +501,55 @@ const whatsappStatusRead = evidenceReadDefinition({
   },
 });
 
+function validateReceiptsReadInput(input) {
+  validateLimit(input);
+  const supported = new Set([
+    'amount', 'currency', 'date', 'detail', 'end', 'limit', 'order', 'query', 'scope', 'start', 'status',
+  ]);
+  const unsupported = Object.keys(input || {}).filter(key => !supported.has(key));
+  if (unsupported.length) throw new Error(`unsupported receipts read input: ${unsupported.join(', ')}`);
+  if (input.status !== undefined && ![
+    'received', 'awaiting_payment_source', 'extracted', 'matched', 'posted', 'needs_review', 'ignored',
+    'ready_to_post',
+  ].includes(String(input.status))) throw new Error('unsupported receipt status');
+  if (input.scope !== undefined && !['all', 'reconciled', 'pending'].includes(String(input.scope))) {
+    throw new Error('scope must be all, reconciled, or pending');
+  }
+  if (input.order !== undefined && !['asc', 'desc'].includes(String(input.order))) {
+    throw new Error('order must be asc or desc');
+  }
+  if (input.currency !== undefined && !['MXN', 'USD'].includes(String(input.currency).toUpperCase())) {
+    throw new Error('currency must be MXN or USD');
+  }
+  if (input.amount !== undefined && (!Number.isFinite(Number(input.amount)) || Number(input.amount) <= 0)) {
+    throw new Error('amount must be positive');
+  }
+  if (input.query !== undefined) {
+    const query = String(input.query).trim();
+    if (!query || query.length > 160) throw new Error('query must be 1 to 160 characters');
+  }
+  for (const key of ['date', 'start', 'end']) {
+    if (input[key] !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(input[key]))) {
+      throw new Error(`${key} must be YYYY-MM-DD`);
+    }
+  }
+  if (input.start && input.end && String(input.start) > String(input.end)) {
+    throw new Error('start must be on or before end');
+  }
+}
+
 async function collectReceipts({ db, input, run }, forceScoped = false) {
   const limit = Number(input.limit || 50);
   const channelFilter = forceScoped ? run.channel_id : null;
+  const status = input.status
+    || (input.scope === 'reconciled' ? 'posted' : null);
+  const pendingOnly = input.scope === 'pending';
+  const start = input.date || input.start || null;
+  const end = input.date || input.end || null;
+  const currency = input.currency ? String(input.currency).toUpperCase() : null;
+  const amount = input.amount === undefined ? null : Number(input.amount);
+  const query = input.query ? `%${String(input.query).trim()}%` : null;
+  const ascending = input.order === 'asc';
   const rows = await queryIfTable(db, 'accounting_receipts', sql`SELECT
     id, slack_channel_id, slack_message_id, submitted_by, submitted_at,
     status, vendor, transaction_date, currency, amount, transaction_kind, description,
@@ -514,27 +560,54 @@ async function collectReceipts({ db, input, run }, forceScoped = false) {
     payment_instruction_queued_at
     FROM accounting_receipts
     WHERE (${channelFilter} IS NULL OR slack_channel_id=${channelFilter})
-    ORDER BY submitted_at DESC LIMIT ${limit}`, []);
+      AND (${status} IS NULL OR status=${status})
+      AND (${pendingOnly ? 1 : 0}=0 OR status IN ('received','awaiting_payment_source','extracted','matched','needs_review','ready_to_post'))
+      AND (${start} IS NULL OR transaction_date>=${start})
+      AND (${end} IS NULL OR transaction_date<=${end})
+      AND (${currency} IS NULL OR currency=${currency})
+      AND (${amount} IS NULL OR ABS(amount-${amount})<0.005)
+      AND (${query} IS NULL OR vendor LIKE ${query} COLLATE NOCASE
+        OR description LIKE ${query} COLLATE NOCASE
+        OR payment_reference LIKE ${query} COLLATE NOCASE
+        OR message_text LIKE ${query} COLLATE NOCASE)
+    ORDER BY
+      CASE WHEN ${ascending ? 1 : 0}=1 THEN COALESCE(transaction_date, submitted_at) END ASC,
+      CASE WHEN ${ascending ? 1 : 0}=0 THEN COALESCE(transaction_date, submitted_at) END DESC,
+      submitted_at ${ascending ? sql`ASC` : sql`DESC`}
+    LIMIT ${limit}`, []);
   for (const receipt of rows) {
     receipt.items = await queryIfTable(db, 'accounting_receipt_items', sql`SELECT
       item_index, file_ref_id, vendor, transaction_date, currency, amount,
       description, category_key, category_name, extraction_confidence
       FROM accounting_receipt_items WHERE receipt_id=${receipt.id} ORDER BY item_index`, []);
   }
-  return { source: 'sqlite.accounting_receipts', sourceRef: channelFilter, payload: { receipts: rows, scopedToChannel: channelFilter } };
+  return {
+    source: 'sqlite.accounting_receipts',
+    sourceRef: channelFilter,
+    payload: {
+      authority: 'Durable receipt ledger populated only after workflow readback',
+      receipts: rows,
+      scopedToChannel: channelFilter,
+      filters: {
+        amount, currency, end, order: ascending ? 'asc' : 'desc',
+        query: input.query ? String(input.query).trim() : null,
+        scope: input.scope || 'all', start, status,
+      },
+    },
+  };
 }
 
 const receiptsRead = evidenceReadDefinition({
   name: 'receipts.status.read',
   capability: 'receipts.read',
-  validate: validateLimit,
+  validate: validateReceiptsReadInput,
   collect: context => collectReceipts(context, false),
 });
 
 const receiptsScopedRead = evidenceReadDefinition({
   name: 'receipts.scoped.read',
   capability: 'accounting.read_scoped',
-  validate: validateLimit,
+  validate: validateReceiptsReadInput,
   collect: context => collectReceipts(context, true),
 });
 
@@ -660,10 +733,16 @@ const accountingReconciliationRead = evidenceReadDefinition({
   name: 'accounting.reconciliation.read',
   capability: 'qbo.read',
   validate(input) {
-    const unsupported = Object.keys(input || {}).filter(key => key !== 'detail');
+    const unsupported = Object.keys(input || {}).filter(key => !['detail', 'order', 'view'].includes(key));
     if (unsupported.length) throw new Error(`unsupported accounting.reconciliation.read input: ${unsupported.join(', ')}`);
+    if (input.order !== undefined && !['asc', 'desc'].includes(String(input.order))) {
+      throw new Error('order must be asc or desc');
+    }
+    if (input.view !== undefined && !['summary', 'transactions'].includes(String(input.view))) {
+      throw new Error('view must be summary or transactions');
+    }
   },
-  async collect({ db }) {
+  async collect({ db, input: requestInput }) {
     const [latest] = await queryIfTable(db, 'workflow_runs', sql`SELECT
       id, input_json, output_json, completed_at, updated_at
       FROM workflow_runs
@@ -676,19 +755,23 @@ const accountingReconciliationRead = evidenceReadDefinition({
         payload: { authority: 'QBO provider-readback reconciliation ledger', latest: null },
       };
     }
-    let input = {};
+    let runInput = {};
     let output = {};
-    try { input = JSON.parse(latest.input_json || '{}'); } catch {}
+    try { runInput = JSON.parse(latest.input_json || '{}'); } catch {}
     try { output = JSON.parse(latest.output_json || '{}'); } catch {}
     const summary = output.qbo || {};
+    const ascending = requestInput.order === 'asc';
     const transactions = await queryIfTable(db, 'accounting_bank_transactions', sql`SELECT
-      transaction_date, amount, amount_usd, currency, category_key, category_name,
+      transaction_date, description, reference, amount, amount_usd, currency, category_key, category_name,
       classification_tier, classification_reason, status, qbo_entity_type,
       qbo_entity_id, qbo_category_key, qbo_category_name, review_required,
       qbo_recorded_at
       FROM accounting_bank_transactions
       WHERE qbo_workflow_run_id=${latest.id}
-      ORDER BY transaction_date, amount, id`, []);
+      ORDER BY
+        CASE WHEN ${ascending ? 1 : 0}=1 THEN transaction_date END ASC,
+        CASE WHEN ${ascending ? 1 : 0}=0 THEN transaction_date END DESC,
+        amount DESC, id`, []);
     return {
       source: 'sqlite.workflow_runs.qbo_write+accounting_bank_transactions',
       sourceRef: latest.id,
@@ -700,7 +783,9 @@ const accountingReconciliationRead = evidenceReadDefinition({
           completedAt: latest.completed_at || latest.updated_at,
           verifiedStatus: output.status || null,
           evidenceId: output.evidenceId || null,
-          sourceCsv: input.csvPath ? String(input.csvPath).split('/').pop() : null,
+          sourceCsv: runInput.csvPath ? String(runInput.csvPath).split('/').pop() : null,
+          view: requestInput.view || 'summary',
+          order: ascending ? 'asc' : 'desc',
           summary,
           transactions,
         },

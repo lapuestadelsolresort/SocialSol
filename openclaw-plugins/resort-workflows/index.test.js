@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import {
   accountingCsvSignalFromFinalizedContext,
+  createAccountingTransactionReplyDispatchHandler,
   createAccountingReconciliationClaimHandler,
   createAccountingReconciliationReplyDispatchHandler,
   createAccountingStatementClaimHandler,
@@ -30,6 +31,7 @@ import {
   createWorkflowTool,
   formatOwnerRezOccupancyReply,
   formatAccountingReconciliationReply,
+  formatAccountingTransactionReply,
   formatWorkflowReply,
   parseWhatsAppCommand,
   parseEmailCommand,
@@ -41,6 +43,7 @@ import {
   parseReceiptPaymentSourceAction,
   parseReservationReadRequest,
   parseAccountingReconciliationRequest,
+  parseAccountingTransactionRequest,
   parseTaskListRequest,
   pluginConfig,
 } from './index.js';
@@ -123,6 +126,32 @@ test('formats live Gmail activity with unread and ledger coverage facts', () => 
   assert.match(reply, /Wedding dates \[unread\]/);
   assert.match(reply, /1 captured · 1 missing/);
   assert.match(reply, /Evidence: evidence-1/);
+});
+
+test('model-facing accounting reads expose row data instead of evidence-only completions', () => {
+  const receipts = formatWorkflowReply({ run: {
+    id: 'receipt-read', workflow_name: 'receipts.status.read', status: 'completed',
+    output: {
+      receipts: [{ id: 'r1', status: 'posted', transaction_date: '2026-08-14', currency: 'MXN', amount: 3300, vendor: 'Fidencio Lopez', qbo_entity_type: 'JournalEntry', qbo_entity_id: '2602' }],
+      _evidence: { id: 'receipt-evidence' },
+    },
+  } });
+  assert.match(receipts, /Fidencio Lopez/);
+  assert.match(receipts, /QBO JournalEntry 2602/);
+  assert.doesNotMatch(receipts, /completed with verified run state/);
+
+  const report = formatWorkflowReply({ run: {
+    id: 'qbo-report', workflow_name: 'qbo.report.read', status: 'completed',
+    output: {
+      report: {
+        Header: { ReportName: 'BalanceSheet', StartPeriod: '2026-08-01', EndPeriod: '2026-08-14', ReportBasis: 'Accrual', Currency: 'USD' },
+        Rows: { Row: [{ ColData: [{ value: 'Due to George Starkey' }, { value: '451.84' }] }] },
+      },
+      _evidence: { id: 'qbo-evidence' },
+    },
+  } });
+  assert.match(report, /QuickBooks BalanceSheet/);
+  assert.match(report, /Due to George Starkey — 451\.84/);
 });
 
 test('WhatsApp status reads surface every persisted row in both WhatsApp and business-intel tool content', async () => {
@@ -631,12 +660,36 @@ test('accounting CSV dispatch detects finalized media without relying on command
 test('parses authoritative accounting reconciliation reads without claiming CSV uploads', () => {
   assert.deepEqual(parseAccountingReconciliationRequest(
     'Please give me a breakdown of the most recent reconciliation',
-  ), { detail: true });
+  ), { detail: true, view: 'summary', order: 'desc' });
   assert.deepEqual(parseAccountingReconciliationRequest(
     'Are there any transactions that have not been recorded in QBO?',
-  ), { detail: true });
+  ), { detail: true, view: 'summary', order: 'desc' });
+  assert.deepEqual(parseAccountingReconciliationRequest(
+    'please list the reconciled transactions in order starting with most recent',
+  ), { detail: true, view: 'transactions', order: 'desc' });
+  assert.deepEqual(parseAccountingReconciliationRequest(
+    'show the reconciled transactions starting with the oldest',
+  ), { detail: true, view: 'transactions', order: 'asc' });
   assert.equal(parseAccountingReconciliationRequest('Please process this CSV'), null);
   assert.equal(parseAccountingReconciliationRequest('How much cash is in Kapital?'), null);
+});
+
+test('parses a specific QBO transaction verification into narrow receipt-ledger filters', () => {
+  assert.deepEqual(parseAccountingTransactionRequest(`Please verify that this transaction was posted to QBO to his Other Liabilities account:
+• Amount: $3,300.00 MXN
+• Date: Aug 14, 2026
+• Payee: Fidencio Lopez (Bancoppel •6587)
+• Reference: 0674062090`), {
+    amount: 3300,
+    currency: 'MXN',
+    date: '2026-08-14',
+    detail: true,
+    limit: 10,
+    order: 'desc',
+    query: 'Fidencio Lopez',
+  });
+  assert.equal(parseAccountingTransactionRequest('What is the latest reconciliation summary?'), null);
+  assert.equal(parseAccountingTransactionRequest('Did we pay Fidencio?'), null);
 });
 
 test('formats a complete QBO reconciliation with recorded category review separated from missing entries', () => {
@@ -678,6 +731,82 @@ test('formats a complete QBO reconciliation with recorded category review separa
   assert.match(text, /QBO 2601/);
   assert.match(text, /QBO reconciliation: qbo-run · QBO evidence: qbo-evidence/);
   assert.match(text, /Authoritative read: read-run · Evidence: read-evidence/);
+});
+
+test('formats the full reconciled transaction list from durable QBO projections', () => {
+  const text = formatAccountingReconciliationReply({ run: {
+    id: 'read-list', workflow_name: 'accounting.reconciliation.read', status: 'completed',
+    output: {
+      latest: {
+        workflowRunId: 'qbo-run', view: 'transactions', order: 'desc',
+        summary: {
+          complete: true, principalRecorded: 2, principalTotal: 2,
+          feeRecordsRecorded: 2, feeRecordsExpected: 2, held: 0,
+          statement: { date_start: '2026-08-13', date_end: '2026-08-14', spei_fees_mxn: 4.64 },
+        },
+        transactions: [
+          { transaction_date: '2026-08-14', amount: 3300, currency: 'MXN', description: 'FIDENCIO LOPEZ', qbo_category_name: 'Contract Labor', qbo_entity_type: 'JournalEntry', qbo_entity_id: '2602' },
+          { transaction_date: '2026-08-13', amount: 1088, currency: 'MXN', description: 'SUSY', qbo_category_name: 'Cleaning Services', qbo_entity_type: 'Purchase', qbo_entity_id: '2601' },
+        ],
+      },
+      _evidence: { id: 'read-evidence' },
+    },
+  } });
+  assert.match(text, /Reconciled principal transactions \(2\), most recent first/);
+  assert.match(text, /2026-08-14 — MXN 3,300\.00 — FIDENCIO LOPEZ — Contract Labor — QBO JournalEntry 2602/);
+  assert.match(text, /Plus 2\/2 separately recorded SPEI fee lines/);
+});
+
+test('specific accounting lookup reports one posting and ignored duplicate captures', () => {
+  const text = formatAccountingTransactionReply({ run: {
+    id: 'receipt-read', workflow_name: 'receipts.status.read', status: 'completed',
+    output: {
+      receipts: [
+        { id: 'canonical', status: 'posted', transaction_date: '2026-08-14', currency: 'MXN', amount: 3300, vendor: 'Fidencio Lopez', category_name: 'Contract Labor', qbo_entity_type: 'JournalEntry', qbo_entity_id: '2602' },
+        { id: 'duplicate', status: 'ignored', transaction_date: '2026-08-14', currency: 'MXN', amount: 3300, vendor: 'Fidencio Lopez' },
+      ],
+      _evidence: { id: 'receipt-evidence' },
+    },
+  } });
+  assert.match(text, /Recorded exactly once in QBO: JournalEntry 2602/);
+  assert.match(text, /Duplicate receipt captures ignored: 1/);
+  assert.match(text, /Evidence: receipt-evidence/);
+});
+
+test('accounting transaction dispatch claims a specific verification before the model runs', async () => {
+  const config = pluginConfig({ accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts' });
+  const calls = [];
+  const sent = [];
+  let finalized;
+  const handler = createAccountingTransactionReplyDispatchHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'receipt-read', workflow_name: 'receipts.status.read', status: 'completed', output: {
+        receipts: [{ id: 'receipt-1', status: 'needs_review', transaction_date: '2026-08-14', currency: 'MXN', amount: 3300, vendor: 'Fidencio Lopez', review_reason: 'classification review required' }],
+      } } };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:CACCOUNTING', MessageSidFull: '1786741927.364459', SenderId: 'U-JASON',
+      BodyForCommands: 'verify this was posted to QBO\n• Amount: $3,300 MXN\n• Date: Aug 14, 2026\n• Payee: Fidencio Lopez',
+    },
+    sendPolicy: 'allow',
+  }, {
+    dispatcher: {
+      sendFinalReply(payload) { sent.push(payload); return true; },
+      getQueuedCounts() { return { final: sent.length }; },
+    },
+    recordProcessed(outcome, details) { finalized = { outcome, details }; },
+    markIdle() {},
+  });
+  assert.equal(result.handled, true);
+  assert.equal(calls[0].workflow, 'receipts.status.read');
+  assert.equal(calls[0].input.query, 'Fidencio Lopez');
+  assert.match(sent[0].text, /not recorded in QBO/);
+  assert.deepEqual(finalized, { outcome: 'completed', details: { reason: 'accounting_transaction_reply_dispatch' } });
 });
 
 test('accounting reconciliation dispatch claims latest-status questions before the model runs', async () => {

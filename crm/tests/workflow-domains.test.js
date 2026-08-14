@@ -147,6 +147,53 @@ test('accounting reconciliation read returns the latest verified QBO run and pro
   });
 });
 
+test('receipt status reads apply narrow transaction filters and reconciled scope', async () => {
+  await withDb(async db => {
+    for (const receipt of [
+      {
+        id: 'receipt-posted', message: 'Fidencio Lopez ref 0674062090', status: 'posted',
+        vendor: 'Fidencio Lopez', date: '2026-08-14', amount: 3300, qboId: '2602', submitted: '2026-08-14T21:10:00Z',
+      },
+      {
+        id: 'receipt-review', message: 'Fidencio Lopez duplicate', status: 'needs_review',
+        vendor: 'Fidencio Lopez', date: '2026-08-14', amount: 3300, qboId: null, submitted: '2026-08-14T21:00:00Z',
+      },
+      {
+        id: 'receipt-other', message: 'Other vendor', status: 'posted',
+        vendor: 'Other Vendor', date: '2026-08-13', amount: 100, qboId: '2601', submitted: '2026-08-13T21:00:00Z',
+      },
+    ]) {
+      await db.query(sql`INSERT INTO accounting_receipts (
+        id, slack_channel_id, slack_message_id, submitted_by, submitted_at,
+        message_text, source_hash, status, vendor, transaction_date, currency,
+        amount, qbo_entity_type, qbo_entity_id, posted_at
+      ) VALUES (
+        ${receipt.id}, 'RECEIPT-A', ${receipt.id}, 'U-JASON', ${receipt.submitted},
+        ${receipt.message}, ${`hash-${receipt.id}`}, ${receipt.status}, ${receipt.vendor},
+        ${receipt.date}, 'MXN', ${receipt.amount},
+        ${receipt.qboId ? 'JournalEntry' : null}, ${receipt.qboId},
+        ${receipt.qboId ? receipt.submitted : null}
+      )`);
+    }
+    const lookup = await startGraph(db, getDefinition('receipts.status.read'), {
+      idempotencyKey: 'receipt-read:lookup', triggerType: 'model_tool',
+      channelId: 'C-ACCOUNTING', actorUserId: 'U-JASON',
+      input: { query: 'Fidencio Lopez', date: '2026-08-14', currency: 'MXN', amount: 3300, order: 'desc' },
+    });
+    assert.equal(lookup.status, 'completed', lookup.error_message);
+    assert.deepEqual(lookup.output.receipts.map(receipt => receipt.id), ['receipt-posted', 'receipt-review']);
+    assert.equal(lookup.output.filters.query, 'Fidencio Lopez');
+
+    const reconciled = await startGraph(db, getDefinition('receipts.status.read'), {
+      idempotencyKey: 'receipt-read:reconciled', triggerType: 'model_tool',
+      channelId: 'C-ACCOUNTING', actorUserId: 'U-JASON',
+      input: { scope: 'reconciled', order: 'desc' },
+    });
+    assert.equal(reconciled.status, 'completed', reconciled.error_message);
+    assert.deepEqual(reconciled.output.receipts.map(receipt => receipt.id), ['receipt-posted', 'receipt-other']);
+  });
+});
+
 test('QBO projection resolves exact transactions retained from overlapping Kapital source files', async () => {
   await withDb(async db => {
     const qboRunId = 'qbo-overlap-projection';

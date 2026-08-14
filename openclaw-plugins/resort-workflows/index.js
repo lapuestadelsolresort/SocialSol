@@ -50,11 +50,11 @@ const WORKFLOW_SCHEMA = {
         'guest.reply.draft',
         'ownerrez.mutation.propose',
       ],
-      description: 'Versioned workflow to execute. Use crm.contacts.read for contact or POC lookups in #whatsapp; do not defer those requests to another channel.',
+      description: 'Versioned workflow to execute. Read results are returned in this tool content; never claim a controlled channel hides them or redirect the user to another channel. Use crm.contacts.read for contact or POC lookups in #whatsapp; do not defer those requests to another channel.',
     },
     input: {
       type: 'object',
-      description: 'Workflow input. For crm.contacts.read use query for one contact, queries for multiple names/numbers/emails, and optional limit (1-100); it returns authorized full CRM contact details. For whatsapp.status.read use direction (outbound by default, inbound, or all), optional limit (1-100), and optional messageSid; a trusted current Slack thread is applied automatically. WhatsApp sends are command-only and cannot be invoked through this tool.',
+      description: 'Workflow input. For receipts.status.read use query, date/start/end, amount, currency, status or scope (all/reconciled/pending), order, and limit to return actual receipt/QBO rows. For accounting.reconciliation.read use view=summary or transactions and order=asc or desc. For crm.contacts.read use query for one contact, queries for multiple names/numbers/emails, and optional limit (1-100); it returns authorized full CRM contact details. For whatsapp.status.read use direction (outbound by default, inbound, or all), optional limit (1-100), and optional messageSid; a trusted current Slack thread is applied automatically. WhatsApp sends are command-only and cannot be invoked through this tool.',
       additionalProperties: true,
     },
   },
@@ -421,8 +421,22 @@ export function formatAccountingReconciliationReply(payload) {
     `• Total statement outflows: MXN ${mxnAmount(statement.total_outflows_mxn)}`,
     `• Not recorded: ${held}`,
   ];
+  const transactions = Array.isArray(latest.transactions) ? latest.transactions : [];
+  if (latest.view === 'transactions') {
+    lines.push('', `*Reconciled principal transactions (${transactions.length}), ${latest.order === 'asc' ? 'oldest first' : 'most recent first'}:*`);
+    for (const item of transactions) {
+      const qbo = item.qbo_entity_id
+        ? `QBO ${item.qbo_entity_type || 'record'} ${item.qbo_entity_id}`
+        : 'not recorded in QBO';
+      const review = Number(item.review_required || 0) === 1 ? ' · category review required' : '';
+      lines.push(`• ${item.transaction_date || 'unknown date'} — ${item.currency || 'MXN'} ${mxnAmount(item.amount)} — ${safeInline(item.description, 'No description', 140)} — ${safeInline(item.qbo_category_name || item.category_name, 'Unclassified', 80)} — ${qbo}${review}`);
+    }
+    if (feeExpected > 0) {
+      lines.push(`• Plus ${feeRecorded}/${feeExpected} separately recorded SPEI fee lines totaling MXN ${mxnAmount(statement.spei_fees_mxn)}`);
+    }
+  }
   const categories = Array.isArray(summary.categoryTotals) ? summary.categoryTotals : [];
-  if (categories.length) {
+  if (categories.length && latest.view !== 'transactions') {
     lines.push('', '*Statement workflow grouping (receipt reimbursements can contain split QBO expense lines):*');
     for (const category of categories) {
       lines.push(`• ${safeInline(category.category, 'Unclassified', 80)} — MXN ${mxnAmount(category.amount_mxn)} (${Number(category.transactions || 0)} transaction${Number(category.transactions || 0) === 1 ? '' : 's'})`);
@@ -446,6 +460,109 @@ export function formatAccountingReconciliationReply(payload) {
     }
   }
   lines.push('', `QBO reconciliation: ${latest.workflowRunId}${latest.evidenceId ? ` · QBO evidence: ${latest.evidenceId}` : ''}`);
+  lines.push(`Authoritative read: ${run.id}${run.output?._evidence?.id ? ` · Evidence: ${run.output._evidence.id}` : ''}`);
+  return lines.join('\n');
+}
+
+export function formatReceiptsStatusReply(payload) {
+  const run = payload?.run;
+  if (!run || run.status !== 'completed') {
+    return `The receipt-ledger read is ${run?.status || 'unavailable'}; no accounting status was inferred.`;
+  }
+  const receipts = Array.isArray(run.output?.receipts) ? run.output.receipts : [];
+  const filters = run.output?.filters || {};
+  const lines = [
+    `Receipt ledger returned ${receipts.length} matching record${receipts.length === 1 ? '' : 's'}.`,
+  ];
+  if (!receipts.length) lines.push('No matching receipt or QBO projection was found for the supplied filters.');
+  for (const receipt of receipts.slice(0, 25)) {
+    const qbo = receipt.qbo_entity_id
+      ? `QBO ${receipt.qbo_entity_type || 'record'} ${receipt.qbo_entity_id}`
+      : 'not recorded in QBO';
+    const reason = receipt.review_reason ? ` · ${safeInline(receipt.review_reason, '', 180)}` : '';
+    lines.push(`• ${receipt.transaction_date || 'unknown date'} — ${receipt.currency || 'currency unknown'} ${mxnAmount(receipt.amount)} — ${safeInline(receipt.vendor, 'vendor unknown', 100)} — ${receipt.status || 'unknown status'} — ${qbo}${reason}`);
+  }
+  if (receipts.length > 25) lines.push(`${receipts.length - 25} additional matching records were omitted; narrow the filters.`);
+  const applied = [
+    filters.query ? `query=${safeInline(filters.query, '', 80)}` : null,
+    filters.start ? `start=${filters.start}` : null,
+    filters.end ? `end=${filters.end}` : null,
+    filters.amount ? `amount=${filters.amount}` : null,
+    filters.currency ? `currency=${filters.currency}` : null,
+    filters.status ? `status=${filters.status}` : null,
+    filters.scope && filters.scope !== 'all' ? `scope=${filters.scope}` : null,
+  ].filter(Boolean);
+  lines.push(`Workflow: ${run.id}${run.output?._evidence?.id ? ` · Evidence: ${run.output._evidence.id}` : ''}${applied.length ? ` · Filters: ${applied.join(', ')}` : ''}`);
+  return lines.join('\n');
+}
+
+function qboReportRows(rows, depth = 0, output = []) {
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const columns = row?.ColData || row?.Header?.ColData || row?.Summary?.ColData || [];
+    if (columns.length) {
+      const values = columns.map(column => String(column?.value || '').trim()).filter(Boolean);
+      if (values.length) output.push(`${'  '.repeat(depth)}• ${values.join(' — ')}`);
+    }
+    if (row?.Rows?.Row) qboReportRows(row.Rows.Row, depth + 1, output);
+    if (row?.Summary?.ColData && row?.Header?.ColData) {
+      const summary = row.Summary.ColData.map(column => String(column?.value || '').trim()).filter(Boolean);
+      if (summary.length) output.push(`${'  '.repeat(depth)}• ${summary.join(' — ')}`);
+    }
+  }
+  return output;
+}
+
+export function formatQboReportReply(payload) {
+  const run = payload?.run;
+  if (!run || run.status !== 'completed') return `The QuickBooks report read is ${run?.status || 'unavailable'}.`;
+  const report = run.output?.report || {};
+  const header = report.Header || {};
+  const rows = qboReportRows(report.Rows?.Row).slice(0, 100);
+  return [
+    `QuickBooks ${header.ReportName || 'report'} — ${header.StartPeriod || 'start unavailable'} through ${header.EndPeriod || 'end unavailable'} — ${header.ReportBasis || 'basis unavailable'} — ${header.Currency || 'currency unavailable'}`,
+    ...rows,
+    `Workflow: ${run.id}${run.output?._evidence?.id ? ` · Evidence: ${run.output._evidence.id}` : ''}`,
+  ].join('\n');
+}
+
+export function formatQboBankBalancesReply(payload) {
+  const run = payload?.run;
+  if (!run || run.status !== 'completed') return `The QuickBooks bank-account read is ${run?.status || 'unavailable'}.`;
+  const accounts = Array.isArray(run.output?.accounts) ? run.output.accounts : [];
+  return [
+    `${run.output?.authority || 'QuickBooks bank ledger'}:`,
+    ...accounts.map(account => `• ${safeInline(account.name, `Account ${account.id || 'unknown'}`, 120)} — ${account.currency || 'currency unknown'} ${mxnAmount(account.currentBalanceWithSubAccounts ?? account.currentBalance)}${account.active === false ? ' — inactive' : ''}`),
+    `Workflow: ${run.id}${run.output?._evidence?.id ? ` · Evidence: ${run.output._evidence.id}` : ''}`,
+  ].join('\n');
+}
+
+export function formatAccountingTransactionReply(payload) {
+  const run = payload?.run;
+  if (!run || run.status !== 'completed') {
+    return `The authoritative transaction lookup is ${run?.status || 'unavailable'}; no QBO posting claim was generated.`;
+  }
+  const receipts = Array.isArray(run.output?.receipts) ? run.output.receipts : [];
+  const posted = receipts.filter(receipt => receipt.status === 'posted' && receipt.qbo_entity_id);
+  const ignored = receipts.filter(receipt => receipt.status === 'ignored');
+  const pending = receipts.filter(receipt => receipt.status !== 'posted' && receipt.status !== 'ignored');
+  const lines = [];
+  if (posted.length === 1) {
+    const receipt = posted[0];
+    lines.push(`✅ Recorded exactly once in QBO: ${receipt.qbo_entity_type || 'record'} ${receipt.qbo_entity_id}.`);
+  } else if (posted.length > 1) {
+    lines.push(`⚠️ ${posted.length} matching QBO records were found; this may be a duplicate posting and requires review.`);
+  } else if (receipts.length) {
+    lines.push('⚠️ This transaction is not recorded in QBO.');
+  } else {
+    lines.push('⚠️ No matching transaction was found in the durable receipt ledger, so it cannot be claimed as recorded in QBO.');
+  }
+  for (const receipt of posted) {
+    lines.push(`• ${receipt.transaction_date || 'unknown date'} — ${receipt.currency || 'MXN'} ${mxnAmount(receipt.amount)} — ${safeInline(receipt.vendor, 'vendor unknown', 100)} — ${safeInline(receipt.category_name, 'category unavailable', 80)} — QBO ${receipt.qbo_entity_type || 'record'} ${receipt.qbo_entity_id}`);
+  }
+  for (const receipt of pending) {
+    lines.push(`• Not recorded: receipt ${receipt.id} is ${receipt.status || 'pending'}${receipt.review_reason ? ` — ${safeInline(receipt.review_reason, '', 180)}` : ''}`);
+  }
+  if (ignored.length) lines.push(`• Duplicate receipt captures ignored: ${ignored.length}`);
   lines.push(`Authoritative read: ${run.id}${run.output?._evidence?.id ? ` · Evidence: ${run.output._evidence.id}` : ''}`);
   return lines.join('\n');
 }
@@ -482,6 +599,11 @@ export function formatWorkflowReply(payload) {
   if (run.workflow_name === 'accounting.reconciliation.read') {
     return formatAccountingReconciliationReply(payload);
   }
+  if (['receipts.status.read', 'receipts.scoped.read'].includes(run.workflow_name)) {
+    return formatReceiptsStatusReply(payload);
+  }
+  if (run.workflow_name === 'qbo.report.read') return formatQboReportReply(payload);
+  if (run.workflow_name === 'qbo.bank_balances.read') return formatQboBankBalancesReply(payload);
   if (run.workflow_name === 'meta.dm.reply') {
     const output = run.output || {};
     return [
@@ -1759,8 +1881,136 @@ export function parseAccountingReconciliationRequest(value) {
     || /\b(?:reconciliation|statement)\b.{0,50}\b(?:latest|most recent|last|current|status|breakdown|summary)\b/.test(body);
   const completeness = /\b(?:transactions?|entries|fees?)\b.{0,50}\b(?:not recorded|missing|unrecorded|in qbo|written to qbo)\b/.test(body)
     || /\b(?:anything|what|which)\b.{0,30}\b(?:missing|not recorded|unrecorded)\b.{0,30}\bqbo\b/.test(body);
-  if (!explicitLatest && !completeness) return null;
-  return { detail: true };
+  const transactionList = /\b(?:list|show|display|give)\b.{0,80}\b(?:reconciled|recorded|posted)\b.{0,30}\btransactions?\b/.test(body)
+    || /\b(?:reconciled|recorded|posted)\s+transactions?\b.{0,80}\b(?:list|order|recent|newest|latest)\b/.test(body);
+  if (!explicitLatest && !completeness && !transactionList) return null;
+  if (transactionList) {
+    const ascending = /\b(?:oldest|earliest|ascending|asc)\b/.test(body)
+      && !/\b(?:most recent|newest|latest|descending|desc)\b/.test(body);
+    return { detail: true, view: 'transactions', order: ascending ? 'asc' : 'desc' };
+  }
+  return { detail: true, view: 'summary', order: 'desc' };
+}
+
+function accountingDateFromText(value) {
+  const match = String(value || '').match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(\d{4})\b/i);
+  if (!match) return null;
+  const month = {
+    jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+    jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  }[match[1].slice(0, 3).toLowerCase()];
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  if (!month || day < 1 || day > 31) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+export function parseAccountingTransactionRequest(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.startsWith('!')) return null;
+  const body = normalizedTaskText(raw);
+  if (/\b(?:list|breakdown|summary)\b.{0,60}\b(?:reconciliation|reconciled transactions?)\b/.test(body)) return null;
+  const intent = (/\b(?:verify|check|confirm)\b/.test(body)
+    && /\b(?:qbo|quickbooks|posted|recorded|other liabilit(?:y|ies))\b/.test(body))
+    || /\b(?:was|has|is)\b.{0,50}\b(?:posted|recorded)\b.{0,30}\b(?:qbo|quickbooks)\b/.test(body);
+  if (!intent) return null;
+  const amountAfter = raw.match(/\$?\s*([\d,]+(?:\.\d{1,2})?)\s*(MXN|USD)\b/i);
+  const amountBefore = raw.match(/\b(MXN|USD)\s*\$?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  const amount = Number(String(amountAfter?.[1] || amountBefore?.[2] || '').replaceAll(',', ''));
+  const currency = String(amountAfter?.[2] || amountBefore?.[1] || '').toUpperCase() || null;
+  const date = accountingDateFromText(raw) || raw.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] || null;
+  const payee = raw.match(/(?:^|\n)\s*[*_•-]*\s*(?:payee|vendor)\s*:\s*([^\n]+)/i)?.[1]
+    ?.replace(/[*_]/g, '').replace(/\s*\([^)]*\)\s*$/, '').trim().slice(0, 160) || null;
+  const reference = raw.match(/(?:^|\n)\s*[*_•-]*\s*(?:reference|ref(?:erencia)?|folio)\s*:\s*([^\s*_<>{}|]+)/i)?.[1]
+    ?.trim().slice(0, 160) || null;
+  if (!Number.isFinite(amount) || amount <= 0 || (!date && !payee && !reference)) return null;
+  return {
+    amount,
+    ...(currency ? { currency } : {}),
+    ...(date ? { date } : {}),
+    detail: true,
+    limit: 10,
+    order: 'desc',
+    ...(payee || reference ? { query: payee || reference } : {}),
+  };
+}
+
+export function createAccountingTransactionClaimHandler({
+  config,
+  execute = callControlPlane,
+  logger = null,
+} = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
+    if (!channelId || !config.accountingChannelIds.has(channelId) || event.hasCsvAttachment) return undefined;
+    const input = parseAccountingTransactionRequest(event.bodyForAgent || event.body || event.content || '');
+    if (!input) return undefined;
+    const messageId = trustedMessageId(event, ctx);
+    const actorUserId = String(event.senderId || ctx?.senderId || '');
+    if (!messageId || !actorUserId) {
+      return {
+        handled: true,
+        reply: { text: 'The authoritative transaction lookup was not run because trusted Slack message/user identity was unavailable. No QBO status was inferred.' },
+      };
+    }
+    try {
+      logger?.info?.(`resort-workflows claiming accounting transaction read ${messageId} in ${channelId}`);
+      const payload = await execute(config, {
+        workflow: 'receipts.status.read',
+        input,
+        context: {
+          channelId,
+          actorUserId,
+          messageId,
+          entrypoint: 'slack_accounting_transaction_read',
+        },
+        idempotencyKey: `slack:${channelId}:${messageId}:accounting.transaction.read`,
+      });
+      return { handled: true, reply: { text: formatAccountingTransactionReply(payload) } };
+    } catch (error) {
+      logger?.error?.(`resort-workflows accounting transaction read failed: ${error.message}`);
+      return {
+        handled: true,
+        reply: { text: `The authoritative transaction ledger is temporarily unavailable (${error.code || 'workflow_error'}). No QBO status was inferred; please retry or check #ops.` },
+      };
+    }
+  };
+}
+
+export function createAccountingTransactionReplyDispatchHandler(options = {}) {
+  const claim = createAccountingTransactionClaimHandler(options);
+  const logger = options.logger || null;
+  return async (event, ctx) => {
+    if (event?.isTailDispatch) return undefined;
+    const inboundEvent = {
+      ...reservationClaimEventFromFinalizedContext(event?.ctx),
+      hasCsvAttachment: accountingCsvSignalFromFinalizedContext(event?.ctx),
+    };
+    const result = await claim(inboundEvent, {
+      channelId: inboundEvent.channel,
+      accountId: inboundEvent.accountId,
+      conversationId: inboundEvent.conversationId,
+      messageId: inboundEvent.messageId,
+      senderId: inboundEvent.senderId,
+    });
+    if (!result?.handled) return undefined;
+    let queuedFinal = false;
+    if (!event.suppressUserDelivery && event.sendPolicy !== 'deny' && result.reply) {
+      try {
+        await ctx.onReplyStart?.();
+        queuedFinal = ctx.dispatcher.sendFinalReply(result.reply);
+      } catch (error) {
+        logger?.error?.(`resort-workflows deterministic accounting transaction reply delivery failed: ${error.message}`);
+      }
+    }
+    ctx.recordProcessed?.('completed', { reason: 'accounting_transaction_reply_dispatch' });
+    ctx.markIdle?.('message_completed');
+    return { handled: true, queuedFinal, counts: ctx.dispatcher.getQueuedCounts() };
+  };
 }
 
 export function createAccountingReconciliationClaimHandler({
@@ -1900,6 +2150,7 @@ const plugin = {
     });
     // OpenClaw 2026.5 invokes inbound_claim only for plugin-bound conversations.
     // reply_dispatch is the terminal pre-model hook for ordinary Slack channels.
+    api.on('reply_dispatch', createAccountingTransactionReplyDispatchHandler({ config, logger: api.logger }), { priority: 170, timeoutMs: 70_000 });
     api.on('reply_dispatch', createAccountingReconciliationReplyDispatchHandler({ config, logger: api.logger }), { priority: 175, timeoutMs: 70_000 });
     api.on('reply_dispatch', createAccountingStatementReplyDispatchHandler({ config, logger: api.logger }), { priority: 180, timeoutMs: 70_000 });
     api.on('reply_dispatch', createTaskListReplyDispatchHandler({ config, logger: api.logger }), { priority: 185, timeoutMs: 10_000 });
