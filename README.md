@@ -105,13 +105,13 @@ business at sale.
   are classified only after quoted history is removed. In that original thread,
   `!email reply <message>` creates an immutable proposal that remains pending
   until it is confirmed. Only the
-  same authorized Slack user pasting the emitted `!email confirm …` in the same
-  thread can send through Sarah's Gmail. The graph records Gmail acceptance,
+  same authorized Slack user pasting the emitted `!email confirm …` anywhere in
+  that email channel can send through Sarah's Gmail. The graph records Gmail acceptance,
   Sent-folder readback, the outbound CRM event, and its Slack-thread projection.
-  Plain replies and top-level `!email` commands never send.
+  Plain replies never send; only an exact emitted confirmation command can send.
 - New Sarah Gmail mail and OwnerRez Airbnb/Vrbo channel messages are recorded in
   dedicated `#sarah-email` threads. `!email reply` uses the provider recorded on
-  the inbound event but retains the same immutable proposal, same-user/thread
+  the inbound event but retains the same immutable proposal, same-user/channel
   confirmation, execute-once effect, provider-readback, CRM projection, and
   Slack documentation contract. Sarah's direct Gmail or OwnerRez replies are
   captured back into the same thread. The retired 15-minute Gmail scanner no

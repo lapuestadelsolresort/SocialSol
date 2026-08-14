@@ -213,7 +213,7 @@ test('re-observation corrects a stale reason in the original Slack thread', asyn
   });
 });
 
-test('Slack email replies require same-user, same-thread confirmation and Gmail Sent readback', async () => {
+test('Slack email replies require same-user, same-channel confirmation and Gmail Sent readback', async () => {
   await withDb(async db => {
     const proposalRun = await startGraph(db, proposeDefinition, {
       idempotencyKey: 'slack:CPAULINA:200.1:email.reply.propose',
@@ -233,18 +233,17 @@ test('Slack email replies require same-user, same-thread confirmation and Gmail 
       WHERE id=${proposalRun.output.proposalId}`);
     assert.equal(pendingProposal.expires_at, null);
 
-    const wrongThread = await startGraph(db, confirmDefinition, {
+    const wrongChannel = await startGraph(db, confirmDefinition, {
       idempotencyKey: 'slack:CPAULINA:200.2:email.reply.confirm',
       triggerType: 'slack_email_confirm_command', triggerRef: '200.2',
-      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      channelId: 'WRONG-CHANNEL', actorUserId: 'U-SARAH',
       input: {
         proposalId: proposalRun.output.proposalId,
         acceptanceHash: proposalRun.output.confirmationCommand.split(' ').at(-1),
-        threadTs: 'wrong-thread',
       },
     });
-    assert.equal(wrongThread.status, 'failed');
-    assert.match(wrongThread.error_message, /wrong Slack thread/);
+    assert.equal(wrongChannel.status, 'failed');
+    assert.match(wrongChannel.error_message, /wrong Slack channel/);
     const [stillPending] = await db.query(sql`SELECT status FROM email_reply_proposals
       WHERE id=${proposalRun.output.proposalId}`);
     assert.equal(stillPending.status, 'pending');
@@ -276,7 +275,6 @@ test('Slack email replies require same-user, same-thread confirmation and Gmail 
       input: {
         proposalId: proposalRun.output.proposalId,
         acceptanceHash: proposalRun.output.confirmationCommand.split(' ').at(-1),
-        threadTs: '1786549495.693669',
       },
     };
     const confirmed = await startGraph(db, confirmDefinition, confirmRequest, services);

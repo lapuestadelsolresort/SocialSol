@@ -63,7 +63,7 @@ async function main(args = process.argv.slice(2), deps = {}) {
   const welcome = command(OPENCLAW_BIN, [
     'message', 'send', '--channel', 'slack', '--account', socketAfter.accountId,
     '--target', `channel:${channelId}`, '--json', '--message',
-    '✅ *Sarah email console is live*\nNew Gmail messages and OwnerRez Airbnb/Vrbo messages are written to the durable CRM conversation ledger and projected here. Reply inside a message thread with `!email reply <message>`, then paste the exact emitted `!email confirm …` command in the same thread. Plain Slack replies never send.',
+    '✅ *Sarah email console is live*\nNew Gmail messages and OwnerRez Airbnb/Vrbo messages are written to the durable CRM conversation ledger and projected here. Reply inside a message thread with `!email reply <message>`, then paste the exact emitted `!email confirm …` command anywhere in this channel. Plain Slack replies never send.',
   ]);
   const welcomePayload = JSON.parse(String(welcome.stdout || '{}'));
   const welcomeTs = welcomePayload.payload?.result?.messageId || null;

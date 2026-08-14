@@ -17,20 +17,25 @@ mail.
 
 ## Reply commands
 
-Run these only inside the original message thread:
+Start replies and classifications inside the original message thread:
 
 ```text
 !email reply <message>
-!email confirm <proposal-id> <acceptance-hash>
 !email classify <email-event-id> hot|not_interested|ambiguous
 ```
 
+Confirm an emitted proposal anywhere in the same email channel:
+
+```text
+!email confirm <proposal-id> <acceptance-hash>
+```
+
 `!email reply` records an immutable, non-expiring proposal; it does not send. The
-same authorized Slack user must paste the exact emitted confirmation command in
-the same channel and thread. The graph chooses Gmail or OwnerRez from the
+same authorized Slack user may paste the exact emitted confirmation command
+anywhere in the same email channel. The graph chooses Gmail or OwnerRez from the
 recorded inbound event, creates one durable provider effect, and requires exact
-provider readback before documenting the send in Slack. Plain Slack replies and
-top-level commands never send.
+provider readback before documenting the send in Slack. Plain Slack replies
+never send.
 
 Sarah may continue replying directly in Gmail or OwnerRez. The Gmail poller and
 OwnerRez message webhooks capture those outbound messages idempotently and
