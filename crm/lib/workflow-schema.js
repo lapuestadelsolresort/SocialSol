@@ -249,6 +249,9 @@ const SCHEMA_STATEMENTS = [
     description TEXT,
     reference TEXT,
     direction TEXT,
+    source_time TEXT,
+    source_operation TEXT,
+    source_transaction_code TEXT,
     currency TEXT NOT NULL DEFAULT 'MXN',
     amount REAL NOT NULL,
     amount_usd REAL,
@@ -581,6 +584,9 @@ const ACCOUNTING_RECEIPT_COLUMNS = [
 ];
 
 const ACCOUNTING_BANK_TRANSACTION_COLUMNS = [
+  'source_time TEXT',
+  'source_operation TEXT',
+  'source_transaction_code TEXT',
   'qbo_workflow_run_id TEXT REFERENCES workflow_runs(id)',
   'qbo_entity_type TEXT',
   'qbo_entity_id TEXT',
@@ -666,6 +672,8 @@ function ensureSchemaBetterSqlite(db) {
   ensureColumnsBetterSqlite(db, 'workflow_outbox', WORKFLOW_OUTBOX_COLUMNS);
   ensureColumnsBetterSqlite(db, 'accounting_receipts', ACCOUNTING_RECEIPT_COLUMNS);
   ensureColumnsBetterSqlite(db, 'accounting_bank_transactions', ACCOUNTING_BANK_TRANSACTION_COLUMNS);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_accounting_bank_txn_identity
+    ON accounting_bank_transactions(source_operation, source_transaction_code, source_time)`);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_qbo_entity
     ON accounting_receipts(qbo_entity_type, qbo_entity_id) WHERE qbo_entity_id IS NOT NULL`);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_payment_reference
@@ -719,6 +727,8 @@ async function ensureSchemaAsync(db, sql) {
   await ensureColumnsAsync(db, sql, 'workflow_outbox', WORKFLOW_OUTBOX_COLUMNS);
   await ensureColumnsAsync(db, sql, 'accounting_receipts', ACCOUNTING_RECEIPT_COLUMNS);
   await ensureColumnsAsync(db, sql, 'accounting_bank_transactions', ACCOUNTING_BANK_TRANSACTION_COLUMNS);
+  await db.query(sql`CREATE INDEX IF NOT EXISTS idx_accounting_bank_txn_identity
+    ON accounting_bank_transactions(source_operation, source_transaction_code, source_time)`);
   await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_qbo_entity
     ON accounting_receipts(qbo_entity_type, qbo_entity_id) WHERE qbo_entity_id IS NOT NULL`);
   await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_receipts_payment_reference

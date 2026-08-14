@@ -57,6 +57,35 @@ class ReceiptReferenceClassifierTests(unittest.TestCase):
             self.assertEqual((institutional['confidence'], institutional['category']), ('auto', 'supplies'))
             self.assertEqual((tequila['confidence'], tequila['category']), ('auto', 'group_activities'))
 
+    def test_mercadolibre_credit_is_an_expense_refund_not_a_purchase(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.classifier(directory).classify({
+                'description': 'ABONO', 'reference': 'MERPAGO MERCADOLIBRE',
+                'direction': 'credit', 'amount': 490, 'spei': None,
+            })
+        self.assertEqual(result['category'], 'supplies')
+        self.assertTrue(result['expense_refund'])
+        self.assertEqual(result['confidence'], 'auto')
+
+    def test_fx_conversion_extracts_bank_executed_usd_and_rate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.classifier(directory).classify({
+                'description': 'COMPRA DE DIVISAS 7 500.00 USD A UN TIPO DE CAMBIO DE 17.04',
+                'reference': '', 'direction': 'credit', 'amount': 127800, 'spei': None,
+            })
+        self.assertEqual(result['category'], 'fx_conversion')
+        self.assertEqual(result['transfer_amount_usd'], 7500)
+        self.assertEqual(result['transfer_exchange_rate'], 17.04)
+
+    def test_owner_funding_requires_an_exact_bofa_amount(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.classifier(directory).classify({
+                'description': '(NB) RECEPCION DE CUENTA', 'reference': '',
+                'direction': 'credit', 'amount': 850, 'spei': None,
+            })
+        self.assertEqual(result['category'], 'owner_transfer')
+        self.assertTrue(result['exact_transfer_required'])
+
 
 if __name__ == '__main__':
     unittest.main()

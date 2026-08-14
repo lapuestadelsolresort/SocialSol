@@ -6,6 +6,7 @@ Parses the quirky Kapital statement format into clean transaction dicts.
 import csv
 import re
 import io
+import unicodedata
 from datetime import datetime, date
 from typing import List, Dict, Optional, Tuple
 
@@ -18,8 +19,17 @@ def parse_kapital_csv(file_path: str) -> Tuple[Dict, List[Dict]]:
         (metadata, transactions) where metadata has account info and
         transactions is a list of parsed transaction dicts.
     """
-    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-        raw = f.read()
+    with open(file_path, 'rb') as statement_file:
+        raw_bytes = statement_file.read()
+    try:
+        raw = raw_bytes.decode('utf-8-sig')
+        encoding = 'utf-8'
+    except UnicodeDecodeError:
+        # Kapital's production exports are Windows/Latin-1 text. Decode them
+        # losslessly instead of replacing accented characters with U+FFFD,
+        # which previously broadened fee matching and corrupted QBO memos.
+        raw = raw_bytes.decode('cp1252')
+        encoding = 'cp1252'
 
     # Extract metadata from header
     metadata = _extract_metadata(raw)
@@ -27,11 +37,17 @@ def parse_kapital_csv(file_path: str) -> Tuple[Dict, List[Dict]]:
     # Find the header row and parse transactions
     transactions = _parse_transactions(raw)
 
+    # A malformed or shifted row must never disappear silently. Kapital puts
+    # the running SALDO on every row, so validate each parsed movement before
+    # grouping fees under their parent transfer.
+    _validate_running_balances(metadata, transactions)
+
     # Group SPEI triplets (transfer + comisión + IVA)
     grouped = _group_spei_triplets(transactions)
 
     metadata['transaction_count'] = len(transactions)
     metadata['grouped_count'] = len(grouped)
+    metadata['encoding'] = encoding
 
     return metadata, grouped
 
@@ -40,7 +56,9 @@ def _extract_metadata(raw: str) -> Dict:
     """Extract account holder info from the CSV header."""
     meta = {}
     lines = raw.split('\n')
-    for line in lines[:10]:
+    for line in lines:
+        if re.search(r',_\d{8},', line):
+            break
         clean = line.strip().strip(',').strip()
         if 'Estado de Cuenta' in clean:
             meta['statement_type'] = clean
@@ -49,17 +67,50 @@ def _extract_metadata(raw: str) -> Dict:
         elif 'RFC:' in clean:
             meta['rfc'] = clean.replace('RFC:', '').strip()
         elif 'Saldo Inicial' in clean:
-            # Extract opening balance
-            parts = line.split(',')
-            for p in parts:
-                p = p.strip().strip('_')
+            numeric_values = []
+            for part in line.split(','):
+                part = part.strip().strip('_')
                 try:
-                    val = float(p)
-                    if val > 100:  # likely the balance
-                        meta['opening_balance'] = val
+                    numeric_values.append(float(part))
                 except (ValueError, TypeError):
                     pass
+            if numeric_values:
+                meta['opening_balance'] = numeric_values[-1]
     return meta
+
+
+def _validate_running_balances(metadata: Dict, transactions: List[Dict], tolerance: float = 0.02) -> None:
+    """Fail closed when parsed movements do not reproduce Kapital's SALDO."""
+    opening = metadata.get('opening_balance')
+    if opening is None:
+        raise ValueError('Kapital balance validation failed: opening balance is missing')
+    if not transactions:
+        metadata['closing_balance'] = round(float(opening), 2)
+        metadata['parsed_credits'] = 0.0
+        metadata['parsed_debits'] = 0.0
+        metadata['balance_reconciled'] = True
+        return
+
+    running = float(opening)
+    for index, transaction in enumerate(transactions, start=1):
+        running += float(transaction.get('credit') or 0)
+        running -= float(transaction.get('debit') or 0)
+        stated = transaction.get('balance')
+        if stated is None:
+            raise ValueError(
+                f"Kapital balance validation failed at transaction {index}: missing SALDO"
+            )
+        if abs(running - float(stated)) > tolerance:
+            raise ValueError(
+                "Kapital balance validation failed at transaction "
+                f"{index} ({transaction.get('date')}): calculated {running:.2f}, "
+                f"statement {float(stated):.2f}"
+            )
+
+    metadata['closing_balance'] = round(float(transactions[-1]['balance']), 2)
+    metadata['parsed_credits'] = round(sum(float(t.get('credit') or 0) for t in transactions), 2)
+    metadata['parsed_debits'] = round(sum(float(t.get('debit') or 0) for t in transactions), 2)
+    metadata['balance_reconciled'] = True
 
 
 def _clean_field(val: str) -> str:
@@ -115,18 +166,20 @@ def _parse_transactions(raw: str) -> List[Dict]:
     # Parse each line after the header
     for i in range(header_idx + 1, len(lines)):
         line = lines[i].strip()
-        if not line or line.startswith(' ,'):
-            # Check if it's an empty separator line
-            clean = line.replace(',', '').replace(' ', '')
-            if not clean:
-                continue
+        if not line or not re.sub(r'[,_\s]', '', line):
+            continue
+        if 'Saldo Inicial' in line:
+            continue
 
         # Split by comma, respecting the Kapital format
         # The description field can contain commas, pipes, etc.
         # Kapital uses a fixed column structure with leading underscores
         txn = _parse_transaction_line(line)
-        if txn:
-            transactions.append(txn)
+        if txn is None:
+            raise ValueError(
+                f"Kapital transaction row {i + 1} could not be parsed; statement rejected"
+            )
+        transactions.append(txn)
 
     return transactions
 
@@ -176,8 +229,10 @@ def _parse_transaction_line(line: str) -> Optional[Dict]:
     # OPERACION and TRANSACCION are at the very end
     # Let's find them by working backwards
 
-    # Remove trailing empty parts
-    while parts and not parts[-1].strip().strip(','):
+    # Kapital terminates rows with one delimiter. Remove only that delimiter;
+    # additional empty fields may be the real OPERACION or TRANSACCION values
+    # and must retain their positions.
+    if parts and not parts[-1].strip():
         parts.pop()
 
     if len(parts) < 8:
@@ -321,15 +376,23 @@ def _extract_spei_details(desc: str) -> Optional[Dict]:
 
 def _is_spei_fee(desc: str) -> bool:
     """Check if this is a SPEI commission line."""
-    return ('Comisi' in desc and 'Transferencia' in desc and 'SPEI' in desc) or \
-           desc.strip().startswith('COM. SPEI') or \
-           'Comisión Transferencia' in desc or \
-           'Comisi\ufffd' in desc  # encoding issues
+    normalized = _normalized_description(desc)
+    return (
+        ('COMISION' in normalized and 'TRANSFERENCIA' in normalized and 'SPEI' in normalized)
+        or normalized.startswith('COM SPEI')
+    )
 
 
 def _is_spei_iva(desc: str) -> bool:
     """Check if this is a SPEI IVA line."""
-    return 'IVA por Transferencia' in desc or 'IVA SPEI' in desc
+    normalized = _normalized_description(desc)
+    return 'IVA POR TRANSFERENCIA' in normalized or 'IVA SPEI' in normalized
+
+
+def _normalized_description(value: str) -> str:
+    text = unicodedata.normalize('NFKD', str(value or ''))
+    text = ''.join(char for char in text if not unicodedata.combining(char))
+    return re.sub(r'[^A-Z0-9]+', ' ', text.upper()).strip()
 
 
 def _group_spei_triplets(transactions: List[Dict]) -> List[Dict]:
@@ -351,7 +414,11 @@ def _group_spei_triplets(transactions: List[Dict]) -> List[Dict]:
             j = i + 1
             while j < len(transactions) and j <= i + 2:
                 next_txn = transactions[j]
-                if next_txn['is_spei_fee'] or next_txn['is_spei_iva']:
+                same_operation = (
+                    bool(txn.get('operation'))
+                    and txn.get('operation') == next_txn.get('operation')
+                )
+                if same_operation and (next_txn['is_spei_fee'] or next_txn['is_spei_iva']):
                     fees.append(next_txn)
                     j += 1
                 else:

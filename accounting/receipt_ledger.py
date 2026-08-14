@@ -12,7 +12,8 @@ POSSIBLE_DUPLICATE_WINDOW_DAYS = 30
 
 
 def payment_references(transaction: Dict) -> List[str]:
-    text = f"{transaction.get('description') or ''} {transaction.get('reference') or ''}"
+    explicit = str(transaction.get('payment_reference') or '').upper()
+    text = f"{transaction.get('description') or ''} {transaction.get('reference') or ''} {explicit}"
     return list(dict.fromkeys(match.upper() for match in PAYMENT_REFERENCE_RE.findall(text)))
 
 
@@ -48,6 +49,28 @@ def _possible_duplicate_reference(transaction: Dict, referenced: List[Dict]):
             continue
         return references[0]
     return None
+
+
+def _durable_referenced_transactions(connection: sqlite3.Connection) -> List[Dict]:
+    """Load coded reimbursements reconciled by earlier statement uploads."""
+    rows = connection.execute(
+        """
+        SELECT DISTINCT r.payment_reference, b.transaction_date, b.description,
+               b.reference, b.currency, b.amount
+        FROM accounting_receipts r
+        JOIN accounting_reconciliations x
+          ON x.receipt_id = r.id AND x.status = 'matched'
+        JOIN accounting_bank_transactions b ON b.source_key = x.bank_reference
+        WHERE r.status IN ('matched', 'posted')
+          AND r.payment_reference IS NOT NULL
+        """
+    ).fetchall()
+    from kapital_parser import _extract_spei_details
+    return [{
+        **dict(row),
+        'date': row['transaction_date'],
+        'spei': _extract_spei_details(str(row['description'] or '')),
+    } for row in rows]
 
 
 def _matched_receipt(connection: sqlite3.Connection, payment_reference: str):
@@ -218,7 +241,7 @@ def apply_receipt_ledger(results: Dict[str, List[Dict]], database_path: str) -> 
     connection.row_factory = sqlite3.Row
     try:
         referenced_matches = {}
-        matched_reference_transactions = []
+        matched_reference_transactions = _durable_referenced_transactions(connection)
         for bucket in ('auto', 'guess', 'unknown'):
             for transaction in results.get(bucket, []):
                 if payment_references(transaction):

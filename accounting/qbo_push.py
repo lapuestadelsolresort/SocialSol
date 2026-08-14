@@ -7,6 +7,7 @@ and MXN→USD conversion.
 """
 
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -20,12 +21,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
-DEFAULT_QBO_EXPENSE_ACCOUNTS = {
-    # Active QBO default review account. This fallback is intentionally code
-    # owned so a guarded statement run can record an unresolved debit without
-    # requiring a runtime-only config edit.
-    'uncategorized_expense': '2',
-}
+TRANSFER_CATEGORIES = ('owner_transfer', 'fx_conversion')
+INCOME_CATEGORIES = ('income_airbnb', 'income_direct', 'income_vrbo', 'bank_interest')
+SKIP_CATEGORIES = ('income_other',)
 
 
 def allocate_receipt_item_usd(total_usd: float, items: List[Dict]) -> List[float]:
@@ -113,31 +111,43 @@ class QBOClient:
 
     def refresh_auth(self) -> bool:
         """Refresh the OAuth2 token."""
+        stale_access_token = self.access_token
         try:
-            body = urllib.parse.urlencode({
-                'grant_type': 'refresh_token',
-                'refresh_token': self.refresh_token,
-            }).encode()
-            basic = base64.b64encode(
-                f"{self.client_id}:{self.client_secret}".encode()
-            ).decode()
-            req = urllib.request.Request(
-                "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
-                data=body,
-                headers={
-                    "Authorization": f"Basic {basic}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "application/json",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
-            new_access = data.get('access_token')
-            new_refresh = data.get('refresh_token')
-            if new_access:
-                self._save_tokens(new_access, new_refresh or self.refresh_token)
-                return True
+            lock_path = self.secrets_path + '.refresh.lock'
+            with open(lock_path, 'a+', encoding='utf-8') as lock_file:
+                os.chmod(lock_path, 0o600)
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                # Another process may have completed the refresh while this
+                # request waited for the lock. Reload and reuse its token.
+                self._load_secrets()
+                if self.access_token != stale_access_token:
+                    return True
+
+                body = urllib.parse.urlencode({
+                    'grant_type': 'refresh_token',
+                    'refresh_token': self.refresh_token,
+                }).encode()
+                basic = base64.b64encode(
+                    f"{self.client_id}:{self.client_secret}".encode()
+                ).decode()
+                req = urllib.request.Request(
+                    "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
+                    data=body,
+                    headers={
+                        "Authorization": f"Basic {basic}",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "application/json",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode())
+                new_access = data.get('access_token')
+                new_refresh = data.get('refresh_token')
+                if new_access:
+                    self._save_tokens(new_access, new_refresh or self.refresh_token)
+                    return True
         except Exception as e:
             print(f"Token refresh failed: {e}")
         return False
@@ -212,6 +222,7 @@ class QBOClient:
             memo_parts.append(f"Kapital: {desc[:150]}")
         if txn.get('reference'):
             memo_parts.append(f"Ref: {txn['reference'][:80]}")
+        memo_parts.append(f"Kapital txn: {kapital_transaction_token(txn)}")
         if txn.get('payment_reference'):
             memo_parts.append(f"Receipt ref: {txn['payment_reference']}")
         if txn.get('fx_rate'):
@@ -253,7 +264,7 @@ class QBOClient:
 
         purchase = {
             "PaymentType": "Cash",
-            "AccountRef": {"value": "1150040001"},  # Kapital bank account
+            "AccountRef": {"value": str(self._resolve_bank_account_id('kapital'))},
             "TxnDate": txn_date.isoformat() if isinstance(txn_date, date) else str(txn_date),
             "CurrencyRef": {"value": "USD"},
             "TotalAmt": round(amount_usd, 2),
@@ -294,14 +305,19 @@ class QBOClient:
             memo += f" | Parent orig ${float(parent_txn['amount']):,.2f} MXN"
         if parent_txn.get('fx_rate'):
             memo += f" | FX: {parent_txn['fx_rate']} MXN/USD, orig ${fee.get('amount', 0):,.2f} MXN"
+        memo += f" | Kapital txn: {kapital_transaction_token(parent_txn)}"
+
+        kapital_vendor_id = self._resolve_vendor_id('kapital')
+        if not kapital_vendor_id:
+            raise ValueError('No QBO vendor configured for kapital')
 
         purchase = {
             "PaymentType": "Cash",
-            "AccountRef": {"value": "1150040001"},
+            "AccountRef": {"value": str(self._resolve_bank_account_id('kapital'))},
             "TxnDate": txn_date.isoformat() if isinstance(txn_date, date) else str(txn_date),
             "CurrencyRef": {"value": "USD"},
             "TotalAmt": round(fee_usd, 2),
-            "EntityRef": {"value": "16", "type": "Vendor"},  # Kapital Mexico
+            "EntityRef": {"value": str(kapital_vendor_id), "type": "Vendor"},
             "PrivateNote": memo,
             "Line": [{
                 "Amount": round(fee_usd, 2),
@@ -327,10 +343,14 @@ class QBOClient:
         if not amount_usd or amount_usd <= 0:
             raise ValueError(f"Invalid USD amount: {amount_usd}")
 
-        # Resolve income account
-        income_account_id = self._resolve_income_account_id(category)
-        if not income_account_id:
-            raise ValueError(f"No QBO income account for category: {category}")
+        if txn.get('expense_refund'):
+            posting_account_id = self._resolve_account_id(category)
+            account_kind = 'expense refund'
+        else:
+            posting_account_id = self._resolve_income_account_id(category)
+            account_kind = 'income'
+        if not posting_account_id:
+            raise ValueError(f"No QBO {account_kind} account for category: {category}")
 
         memo_parts = []
         if txn.get('note'):
@@ -338,12 +358,15 @@ class QBOClient:
         desc = txn.get('description', '')
         if desc and len(desc) < 200:
             memo_parts.append(f"Kapital: {desc[:150]}")
+        if txn.get('reference'):
+            memo_parts.append(f"Ref: {txn['reference'][:80]}")
+        memo_parts.append(f"Kapital txn: {kapital_transaction_token(txn)}")
         if txn.get('fx_rate'):
             memo_parts.append(f"FX: {txn['fx_rate']} MXN/USD, orig ${txn.get('amount', 0):,.2f} MXN")
         memo = ' | '.join(memo_parts)[:4000]
 
         deposit = {
-            "DepositToAccountRef": {"value": "1150040001"},  # Kapital bank account
+            "DepositToAccountRef": {"value": str(self._resolve_bank_account_id('kapital'))},
             "TxnDate": txn_date.isoformat() if isinstance(txn_date, date) else str(txn_date),
             "CurrencyRef": {"value": "USD"},
             "TotalAmt": round(amount_usd, 2),
@@ -352,7 +375,7 @@ class QBOClient:
                 "Amount": round(amount_usd, 2),
                 "DetailType": "DepositLineDetail",
                 "DepositLineDetail": {
-                    "AccountRef": {"value": str(income_account_id)},
+                    "AccountRef": {"value": str(posting_account_id)},
                 },
                 "Description": memo[:4000],
             }],
@@ -365,7 +388,7 @@ class QBOClient:
         """
         Create a Transfer in QBO for owner funding or internal transfers.
         """
-        amount_usd = txn.get('amount_usd', 0)
+        amount_usd = txn.get('transfer_amount_usd', 0)
         txn_date = txn.get('date')
 
         if not amount_usd or amount_usd <= 0:
@@ -376,11 +399,14 @@ class QBOClient:
             memo_parts.append(txn['note'])
         if txn.get('fx_rate'):
             memo_parts.append(f"FX: {txn['fx_rate']} MXN/USD, orig ${txn.get('amount', 0):,.2f} MXN")
+        if txn.get('reference'):
+            memo_parts.append(f"Ref: {txn['reference'][:80]}")
+        memo_parts.append(f"Kapital txn: {kapital_transaction_token(txn)}")
         memo = ' | '.join(memo_parts)[:4000]
 
         transfer = {
-            "FromAccountRef": {"value": "9"},  # BofA checking
-            "ToAccountRef": {"value": "1150040001"},  # Kapital
+            "FromAccountRef": {"value": str(self._resolve_bank_account_id('bofa'))},
+            "ToAccountRef": {"value": str(self._resolve_bank_account_id('kapital'))},
             "TxnDate": txn_date.isoformat() if isinstance(txn_date, date) else str(txn_date),
             "Amount": round(amount_usd, 2),
             "PrivateNote": memo,
@@ -426,7 +452,7 @@ class QBOClient:
             config = json.load(f)
         accounts = config.get('qbo_accounts', {}).get('expenses', {})
         account = accounts.get(category_key, {})
-        return account.get('id') or DEFAULT_QBO_EXPENSE_ACCOUNTS.get(category_key)
+        return account.get('id')
 
     def _resolve_income_account_id(self, category_key: str) -> Optional[str]:
         """Look up QBO income account ID from config."""
@@ -450,16 +476,68 @@ class QBOClient:
         vendor = vendors.get(vendor_key, {})
         return vendor.get('id')
 
+    def _resolve_bank_account_id(self, account_key: str) -> Optional[str]:
+        """Look up realm-specific QBO bank account IDs from ignored config."""
+        config_path = str(Path(__file__).parent / 'config.json')
+        with open(config_path) as f:
+            config = json.load(f)
+        account = config.get('qbo_accounts', {}).get('bank_accounts', {}).get(account_key, {})
+        account_id = account.get('id')
+        if not account_id:
+            raise ValueError(f"No QBO bank account configured for {account_key}")
+        return account_id
+
 
 def qbo_request_id(txn: Dict, record_type: str, suffix: str = '') -> str:
     """Stable, non-PII QBO requestid for a Kapital-derived write."""
     raw = '|'.join([
-        'socialsol', record_type, str(txn.get('date') or ''),
-        str(txn.get('reference') or txn.get('clave') or txn.get('description') or ''),
-        str(txn.get('amount') or ''), str(txn.get('category') or ''), suffix,
+        'socialsol', record_type, kapital_transaction_token(txn),
+        str(txn.get('category') or ''), suffix,
     ])
     digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()[:36]
     return f"ss-{record_type[:3]}-{digest}"[:50]
+
+
+def kapital_transaction_token(txn: Dict) -> str:
+    """Stable non-PII identity carried into QBO memos and request IDs."""
+    raw = '|'.join([
+        str(txn.get('date') or ''),
+        str(txn.get('time') or ''),
+        str(txn.get('operation') or ''),
+        str(txn.get('transaction_code') or ''),
+        str(txn.get('reference') or txn.get('clave') or ''),
+        str(txn.get('description') or ''),
+        str(txn.get('amount') or ''),
+        str(txn.get('direction') or ''),
+    ])
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:24]
+
+
+def qbo_record_type(txn: Dict) -> Tuple[Optional[str], Optional[str]]:
+    """Return a direction-safe QBO record type or a fail-closed hold reason."""
+    direction = str(txn.get('direction') or '').lower()
+    category = str(txn.get('category') or '')
+    if direction == 'credit':
+        if category in TRANSFER_CATEGORIES:
+            return 'transfer', None
+        if category in INCOME_CATEGORIES or txn.get('expense_refund') is True:
+            return 'deposit', None
+        return None, f"Credit category {category or 'unclassified'} is not configured for autonomous posting"
+    if direction == 'debit':
+        if category in TRANSFER_CATEGORIES or category in INCOME_CATEGORIES or txn.get('expense_refund') is True:
+            return None, f"Debit cannot be posted through credit/transfer category {category or 'unclassified'}"
+        return 'expense', None
+    return None, 'Transaction direction is missing or invalid'
+
+
+def _is_intentional_subcent_skip(txn: Dict) -> bool:
+    description = str(txn.get('description') or '').upper()
+    return (
+        txn.get('category') == 'bank_fee'
+        and 'TIMBRADO' in description
+        and float(txn.get('amount') or 0) <= 0.05
+        and round(float(txn.get('amount_usd') or 0), 2) == 0
+    )
 
 
 def verify_receipt_purchase_readback(txn: Dict, purchase: Dict) -> None:
@@ -489,6 +567,58 @@ def verify_receipt_purchase_readback(txn: Dict, purchase: Dict) -> None:
     ledger_marker = txn.get('payment_reference') or txn.get('receipt_id')
     if not ledger_marker or str(ledger_marker) not in str(purchase.get('PrivateNote') or ''):
         raise RuntimeError('QBO receipt purchase ledger marker failed readback')
+
+
+def verify_principal_readback(client: QBOClient, txn: Dict, record_type: str, entity: Dict) -> None:
+    """Verify amount, bank direction, posting account, and stable source marker."""
+    expected_amount = float(
+        txn.get('transfer_amount_usd') if record_type == 'transfer' else txn.get('amount_usd')
+    )
+    actual_amount = float(entity.get('Amount') if record_type == 'transfer' else entity.get('TotalAmt') or 0)
+    if round(actual_amount, 2) != round(expected_amount, 2):
+        raise RuntimeError(f'QBO {record_type} amount failed readback')
+
+    kapital_account = str(client._resolve_bank_account_id('kapital'))
+    if record_type == 'expense':
+        actual_bank = str(entity.get('AccountRef', {}).get('value') or '')
+        if actual_bank != kapital_account:
+            raise RuntimeError('QBO Purchase bank account failed readback')
+        if not txn.get('receipt_items'):
+            expected_posting = str(client._resolve_account_id(txn.get('category')) or '')
+            actual_lines = [
+                line for line in entity.get('Line', [])
+                if line.get('DetailType') == 'AccountBasedExpenseLineDetail'
+            ]
+            actual_posting = str(
+                actual_lines[0].get('AccountBasedExpenseLineDetail', {})
+                .get('AccountRef', {}).get('value') or ''
+            ) if len(actual_lines) == 1 else ''
+            if not expected_posting or actual_posting != expected_posting:
+                raise RuntimeError('QBO Purchase posting account failed readback')
+    elif record_type == 'deposit':
+        actual_bank = str(entity.get('DepositToAccountRef', {}).get('value') or '')
+        if actual_bank != kapital_account:
+            raise RuntimeError('QBO Deposit bank account failed readback')
+        expected_posting = (
+            client._resolve_account_id(txn.get('category'))
+            if txn.get('expense_refund')
+            else client._resolve_income_account_id(txn.get('category'))
+        )
+        actual_lines = [line for line in entity.get('Line', []) if line.get('DetailType') == 'DepositLineDetail']
+        actual_posting = str(
+            actual_lines[0].get('DepositLineDetail', {}).get('AccountRef', {}).get('value') or ''
+        ) if len(actual_lines) == 1 else ''
+        if actual_posting != str(expected_posting or ''):
+            raise RuntimeError('QBO Deposit posting account failed readback')
+    else:
+        actual_from = str(entity.get('FromAccountRef', {}).get('value') or '')
+        actual_to = str(entity.get('ToAccountRef', {}).get('value') or '')
+        if actual_from != str(client._resolve_bank_account_id('bofa')) or actual_to != kapital_account:
+            raise RuntimeError('QBO Transfer bank direction failed readback')
+
+    marker = kapital_transaction_token(txn)
+    if marker not in str(entity.get('PrivateNote') or ''):
+        raise RuntimeError(f'QBO {record_type} source identity failed readback')
 
 
 def _normalized_text(value: object) -> str:
@@ -523,6 +653,10 @@ def _transaction_detail(txn: Dict, *, status: str, bucket: str, qbo_id: str = No
         'vendor': txn.get('vendor_name'),
         'label': _transaction_label(txn),
         'reference': txn.get('reference'),
+        'direction': txn.get('direction'),
+        'time': txn.get('time'),
+        'operation': txn.get('operation'),
+        'transaction_code': txn.get('transaction_code'),
         'payment_reference': txn.get('payment_reference'),
         'bucket': bucket,
         'status': status,
@@ -530,16 +664,6 @@ def _transaction_detail(txn: Dict, *, status: str, bucket: str, qbo_id: str = No
         'requires_review': bool(txn.get('_requires_review')),
         'review_reason': txn.get('_review_reason'),
     }
-
-
-def _qbo_purchase_rows(query_qbo, sql: str) -> List[Dict]:
-    data = query_qbo(sql)
-    if not isinstance(data, dict) or not isinstance(data.get('QueryResponse'), dict):
-        raise RuntimeError('QBO SPEI fee query returned no QueryResponse')
-    rows = data['QueryResponse'].get('Purchase', [])
-    if not isinstance(rows, list):
-        raise RuntimeError('QBO SPEI fee query returned invalid Purchase rows')
-    return rows
 
 
 def _fee_kind(value: Dict) -> str:
@@ -573,9 +697,10 @@ def find_missing_spei_fees(
     dates = [str(item['parent'].get('date') or '') for item in expected]
     sql = (
         "SELECT Id, TxnDate, TotalAmt, PrivateNote FROM Purchase "
-        f"WHERE TxnDate >= '{min(dates)}' AND TxnDate <= '{max(dates)}' MAXRESULTS 1000"
+        f"WHERE TxnDate >= '{min(dates)}' AND TxnDate <= '{max(dates)}'"
     )
-    rows = _qbo_purchase_rows(query_qbo, sql)
+    from dedup import query_all_qbo
+    rows = query_all_qbo(query_qbo, sql, 'Purchase')
     actual = []
     for row in rows:
         note = str(row.get('PrivateNote') or '')
@@ -679,6 +804,8 @@ def push_classified_to_qbo(
         'skipped': 0,
         'review_required': 0,
         'review_details': [],
+        'intentional_skipped': 0,
+        'intentional_skip_details': [],
         'held': 0,
         'held_details': [],
         'errors': [],
@@ -697,13 +824,6 @@ def push_classified_to_qbo(
             ),
         },
     }
-
-    # Categories that are internal transfers (not income, not expense)
-    TRANSFER_CATS = ('owner_transfer', 'fx_conversion')
-    # Categories that are income deposits
-    INCOME_CATS = ('income_airbnb', 'income_direct', 'income_vrbo', 'bank_interest')
-    # Skip these (they net to zero or are negligible)
-    SKIP_CATS = ('income_other',)
 
     # Deduplicate every principal that may be recorded. Previously review
     # items were removed before this preflight, which falsely reported an
@@ -729,6 +849,15 @@ def push_classified_to_qbo(
             selected_ids.add(id(txn))
             all_txns.append(txn)
             bucket_by_id[id(txn)] = bucket_name
+            record_type, _hold_reason = qbo_record_type(txn)
+            txn['_expected_qbo_entity_type'] = {
+                'expense': 'Purchase', 'deposit': 'Deposit', 'transfer': 'Transfer',
+            }.get(record_type)
+            txn['_expected_qbo_vendor_id'] = (
+                client._resolve_vendor_id(txn.get('vendor_key'))
+                if record_type == 'expense' and txn.get('vendor_key') else None
+            )
+            txn['_kapital_transaction_token'] = kapital_transaction_token(txn)
 
     for bucket_name in ('guess', 'unknown'):
         if (bucket_name == 'guess' and (push_guess or record_unresolved)) or (
@@ -820,6 +949,14 @@ def push_classified_to_qbo(
         for txn in txns:
             category = txn.get('category', '')
 
+            if _is_intentional_subcent_skip(txn):
+                summary['skipped'] += 1
+                summary['intentional_skipped'] += 1
+                summary['intentional_skip_details'].append(_transaction_detail(
+                    txn, status='INTENTIONAL_SKIP', bucket=bucket_name
+                ) | {'review_reason': 'Sub-cent fiscal-stamp debit/credit intentionally omitted from QBO'})
+                continue
+
             # Skip if no USD amount
             if not txn.get('amount_usd'):
                 summary['skipped'] += 1
@@ -830,30 +967,33 @@ def push_classified_to_qbo(
                 ) | {'review_reason': 'No verified USD conversion was available'})
                 continue
 
-            # Skip bank fee credits (fiscal stamp discount — $0.01, nets to zero)
-            if category == 'bank_fee' and txn.get('category_name', '').endswith('(credit)'):
-                summary['skipped'] += 1
-                continue
-
             # Skip unknown income
-            if category in SKIP_CATS:
+            if category in SKIP_CATEGORIES:
                 summary['skipped'] += 1
                 summary['held_details'].append(_transaction_detail(
                     txn, status='HELD', bucket=bucket_name
                 ) | {'review_reason': f'Category {category} is not configured for autonomous posting'})
                 continue
 
-            # Determine record type
-            if category in TRANSFER_CATS:
-                record_type = 'transfer'
-            elif category in INCOME_CATS:
-                record_type = 'deposit'
-            else:
-                record_type = 'expense'
+            record_type, hold_reason = qbo_record_type(txn)
+            if record_type is None:
+                summary['held_details'].append(_transaction_detail(
+                    txn, status='HELD', bucket=bucket_name
+                ) | {'review_reason': hold_reason})
+                continue
+            if record_type == 'transfer' and not txn.get('transfer_amount_usd'):
+                summary['held_details'].append(_transaction_detail(
+                    txn, status='HELD', bucket=bucket_name
+                ) | {'review_reason': 'Exact USD transfer amount is required before posting between bank accounts'})
+                continue
 
             if dry_run:
-                key = f'{record_type}s_pushed' if record_type != 'expense' else 'expenses_pushed'
-                summary[key] = summary.get(key, 0) + 1
+                key = {
+                    'expense': 'expenses_pushed',
+                    'deposit': 'income_pushed',
+                    'transfer': 'transfers_pushed',
+                }[record_type]
+                summary[key] += 1
                 summary['details'].append({
                     'date': str(txn.get('date')),
                     'amount': txn.get('amount'),
@@ -866,6 +1006,10 @@ def push_classified_to_qbo(
                     'vendor': txn.get('vendor_name'),
                     'label': _transaction_label(txn),
                     'reference': txn.get('reference'),
+                    'direction': txn.get('direction'),
+                    'time': txn.get('time'),
+                    'operation': txn.get('operation'),
+                    'transaction_code': txn.get('transaction_code'),
                     'record_type': record_type,
                     'bucket': bucket_name,
                     'status': 'DRY_RUN',
@@ -902,6 +1046,7 @@ def push_classified_to_qbo(
                 readback = client.read_entity(entity_type, qbo_id)
                 if str(readback.get('Id')) != str(qbo_id):
                     raise RuntimeError(f"QBO {record_type} readback mismatch for {qbo_id}")
+                verify_principal_readback(client, txn, record_type, readback)
                 if record_type == 'expense':
                     verify_receipt_purchase_readback(txn, readback)
 
@@ -917,6 +1062,10 @@ def push_classified_to_qbo(
                     'vendor': txn.get('vendor_name'),
                     'label': _transaction_label(txn),
                     'reference': txn.get('reference'),
+                    'direction': txn.get('direction'),
+                    'time': txn.get('time'),
+                    'operation': txn.get('operation'),
+                    'transaction_code': txn.get('transaction_code'),
                     'qbo_id': qbo_id,
                     'request_id': request_id,
                     'verified_by_readback': True,
@@ -981,9 +1130,17 @@ def push_classified_to_qbo(
     summary['principal_written'] = len([
         row for row in summary['details'] if row.get('status') in ('PUSHED', 'DRY_RUN')
     ])
-    summary['principal_recorded'] = summary['principal_written'] + summary.get('dedup_skipped', 0)
+    summary['principal_recorded'] = (
+        summary['principal_written']
+        + summary.get('dedup_skipped', 0)
+        + summary.get('intentional_skipped', 0)
+    )
     summary['fee_records_recorded'] = summary['fee_records_pushed'] + summary['fee_records_existing']
-    summary['principal_details'] = [*summary['dedup_details'], *summary['details']]
+    summary['principal_details'] = [
+        *summary['dedup_details'],
+        *summary['details'],
+        *summary['intentional_skip_details'],
+    ]
     category_totals = {}
     for row in summary['principal_details']:
         category = row.get('category') or row.get('category_key') or 'Unclassified'
@@ -1013,7 +1170,7 @@ if __name__ == '__main__':
     sys.path.insert(0, str(Path(__file__).parent))
     from kapital_parser import parse_kapital_csv
     from classifier import KapitalClassifier
-    from fx_rates import get_usd_rate, convert_mxn_to_usd
+    from fx_rates import apply_transaction_fx
     from receipt_ledger import apply_receipt_ledger
 
     if len(sys.argv) < 2:
@@ -1040,12 +1197,7 @@ if __name__ == '__main__':
         for txn in bucket:
             if txn.get('date'):
                 try:
-                    rate = get_usd_rate(txn['date'])
-                    txn['fx_rate'] = rate
-                    txn['amount_usd'] = convert_mxn_to_usd(txn['amount'], txn['date'])
-                    if txn.get('spei_fees'):
-                        for fee in txn['spei_fees']:
-                            fee['amount_usd'] = convert_mxn_to_usd(fee['amount'], txn['date'])
+                    apply_transaction_fx(txn)
                 except Exception:
                     txn['amount_usd'] = None
 

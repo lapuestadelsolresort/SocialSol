@@ -16,7 +16,7 @@ Squarespace orders; they enter accounting only through Kapital statements.
 | `config.json` | All configuration: receipt channels, QBO accounts, vendors, salary patterns. **Add new channels/vendors here.** |
 | `kapital_parser.py` | Parses the quirky Kapital CSV format. Groups SPEI triplets (transfer + comisión + IVA). |
 | `classifier.py` | Three-tier rule engine: auto → guess → unknown. Also has `format_classification_report()`. |
-| `fx_rates.py` | MXN/USD exchange rate via Banxico API (with cache + fallback). |
+| `fx_rates.py` | MXN/USD exchange rate via the official Banxico FIX API and ignored cache. |
 | `run_classify.py` | Main entry point. Dry-run by default. |
 | `fx_cache/` | Cached daily FX rates (auto-created). |
 
@@ -88,6 +88,31 @@ run-scoped writes, existing QBO records, recorded categorization reviews, and
 any truly unrecorded holds. SPEI fees are reconciled independently from their
 parent principal, including legacy fee rows without a parent marker.
 It is posted to the channel without tagging global workflow reviewers.
+
+Kapital credits are direction-gated: income becomes a Deposit, a known vendor
+refund becomes a Deposit back to the original expense account, and an unknown
+credit is held for review. A credit can never fall through to a QBO Purchase.
+The original statement time, operation, and transaction code form part of the
+durable identity and QBO request ID, so equal same-day rows remain distinct.
+QBO duplicate queries are fully paginated and date/amount fallback matching is
+limited to SocialSol-owned Kapital records.
+
+The parser decodes Kapital's Windows-1252 exports without replacement
+characters and verifies every running statement balance before classification.
+Malformed or shifted transaction rows reject the entire statement. Fiscal
+stamp debit/credit entries that convert below one USD cent are reported as
+intentional omissions and still count toward statement completion. Currency
+conversion transfers use the exact USD amount and executed rate printed by
+Kapital; owner-funding transfers without a verifiable BofA-side USD amount are
+held instead of estimated from FIX.
+
+Realm-specific accounts must be present in ignored `config.json` under
+`qbo_accounts.bank_accounts.kapital`, `qbo_accounts.bank_accounts.bofa`, and
+`qbo_accounts.expenses.uncategorized_expense`; there are no source-code account
+ID fallbacks. Put the Banxico credential in
+`$SOCIALSOL_SECRETS_DIR/banxico.json` as `{"api_token":"…"}` (or provide
+`BANXICO_API_TOKEN`). Never commit it. Business-day statements wait for the
+official FIX instead of caching an intraday spot quote.
 
 A Kapital CSV attached in `#accounting` is refetched from the exact Slack
 message and atomically staged in `accounting/inbox/`. The inbox processor then

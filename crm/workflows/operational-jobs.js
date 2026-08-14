@@ -8,6 +8,7 @@ const { ROOT, DB_PATH } = require('../../lib/runtime-paths');
 const { nodeCommand, pythonCommand, resolveRepoFile } = require('../lib/workflow-command');
 const { makeDurableJob } = require('./durable-job');
 const { listPosts } = require('../lib/postiz');
+const { sha256 } = require('../lib/workflow-store');
 
 function safeAccountingCsv(input) {
   const supplied = typeof input.csvPath === 'string' ? input.csvPath.trim() : '';
@@ -26,6 +27,49 @@ function parseRequiredJson(command, label) {
     return { verified: false, reason: `${label} did not emit a machine-readable result` };
   }
   return null;
+}
+
+function legacyBankSourceKey(txn) {
+  return sha256({
+    provider: 'kapital', date: txn.date, reference: txn.reference || txn.clave,
+    description: txn.description, amount: txn.amount, direction: txn.direction,
+  });
+}
+
+function preferredBankSourceKey(txn) {
+  return sha256({
+    provider: 'kapital', date: txn.date, time: txn.time || null,
+    operation: txn.operation || null, transactionCode: txn.transaction_code || null,
+    reference: txn.reference || txn.clave, description: txn.description,
+    amount: txn.amount, direction: txn.direction,
+  });
+}
+
+async function resolveBankSourceKey(db, txn) {
+  const legacy = legacyBankSourceKey(txn);
+  const time = String(txn.time || '');
+  const operation = String(txn.operation || '');
+  const transactionCode = String(txn.transaction_code || '');
+  if (!time && !operation && !transactionCode) return legacy;
+
+  const exact = await db.query(sql`SELECT source_key FROM accounting_bank_transactions
+    WHERE transaction_date=${String(txn.date || '')}
+      AND amount=${Number(txn.amount || 0)}
+      AND direction=${String(txn.direction || '')}
+      AND COALESCE(reference,'')=${String(txn.reference || txn.clave || '')}
+      AND COALESCE(source_time,'')=${time}
+      AND COALESCE(source_operation,'')=${operation}
+      AND COALESCE(source_transaction_code,'')=${transactionCode}`);
+  if (exact.length > 1) throw new Error('Kapital source identity matched multiple durable bank rows');
+  if (exact.length === 1) return exact[0].source_key;
+
+  // Preserve the original source key when a row was classified before source
+  // discriminators were stored. This keeps receipt reconciliation references
+  // valid while upgrading the row in place.
+  const legacyRows = await db.query(sql`SELECT source_key FROM accounting_bank_transactions
+    WHERE source_key=${legacy}
+      AND source_time IS NULL AND source_operation IS NULL AND source_transaction_code IS NULL`);
+  return legacyRows.length === 1 ? legacyRows[0].source_key : preferredBankSourceKey(txn);
 }
 
 const paulinaDaily = makeDurableJob({
@@ -409,18 +453,17 @@ const accountingClassify = makeDurableJob({
     let persisted = 0;
     for (const tier of ['auto', 'guess', 'unknown']) {
       for (const txn of state.execute.parsed.results?.[tier] || []) {
-        const sourceKey = require('../lib/workflow-store').sha256({
-          provider: 'kapital', date: txn.date, reference: txn.reference || txn.clave,
-          description: txn.description, amount: txn.amount, direction: txn.direction,
-        });
+        const sourceKey = await resolveBankSourceKey(db, txn);
         await db.query(sql`INSERT INTO accounting_bank_transactions (
             id, source_key, transaction_date, description, reference, direction,
+            source_time, source_operation, source_transaction_code,
             currency, amount, amount_usd, category_key, category_name,
             classification_tier, classification_reason, source_file_hash,
             workflow_run_id, status
           ) VALUES (
             ${sourceKey}, ${sourceKey}, ${txn.date || null}, ${txn.description || null},
-            ${txn.reference || txn.clave || null}, ${txn.direction || null}, 'MXN',
+            ${txn.reference || txn.clave || null}, ${txn.direction || null},
+            ${txn.time || null}, ${txn.operation || null}, ${txn.transaction_code || null}, 'MXN',
             ${Number(txn.amount || 0)}, ${txn.amount_usd == null ? null : Number(txn.amount_usd)},
             ${txn.category || null}, ${txn.category_name || null}, ${tier},
             ${txn.reason || txn.note || null}, ${sourceFileHash}, ${run.id}, 'classified'
@@ -429,6 +472,9 @@ const accountingClassify = makeDurableJob({
             category_name=excluded.category_name,
             classification_tier=excluded.classification_tier,
             classification_reason=excluded.classification_reason,
+            source_time=excluded.source_time,
+            source_operation=excluded.source_operation,
+            source_transaction_code=excluded.source_transaction_code,
             amount_usd=excluded.amount_usd,
             workflow_run_id=excluded.workflow_run_id,
             updated_at=datetime('now')`);
@@ -480,28 +526,45 @@ async function projectBankTransactionQboWrites(db, runId, summary) {
   const rows = [
     ...(Array.isArray(summary.dedup_details) ? summary.dedup_details : []),
     ...(Array.isArray(summary.details) ? summary.details : []),
-  ].filter(row => ['EXISTING', 'PUSHED'].includes(row.status));
+    ...(Array.isArray(summary.intentional_skip_details) ? summary.intentional_skip_details : []),
+  ].filter(row => ['EXISTING', 'PUSHED', 'INTENTIONAL_SKIP'].includes(row.status));
   if (!sourceFileHash || !rows.length) return rows.length === 0;
 
   for (const row of rows) {
-    const status = row.requires_review ? 'posted_review'
-      : row.status === 'EXISTING' ? 'already_recorded' : 'posted';
-    const qboEntityType = row.qbo_entity_type
+    const intentionalSkip = row.status === 'INTENTIONAL_SKIP';
+    const status = intentionalSkip ? 'intentionally_omitted'
+      : row.requires_review ? 'posted_review'
+        : row.status === 'EXISTING' ? 'already_recorded' : 'posted';
+    const qboEntityType = intentionalSkip ? null : row.qbo_entity_type
       || (row.record_type === 'deposit' ? 'Deposit'
         : row.record_type === 'transfer' ? 'Transfer' : 'Purchase');
     const reference = row.reference || null;
-    // Overlapping Kapital exports reuse the durable transaction row. The
-    // classifier updates that row's workflow run but intentionally preserves
-    // the hash of the first source file, so an exact bank reference must be
-    // resolved across source files. Requiring one exact candidate keeps the
-    // projection fail-closed if the upstream identity is ever ambiguous.
-    const candidates = reference
-      ? await db.query(sql`SELECT id FROM accounting_bank_transactions
-          WHERE transaction_date=${String(row.date || '')}
-            AND amount=${Number(row.amount || 0)} AND reference=${reference}`)
-      : await db.query(sql`SELECT id FROM accounting_bank_transactions
-          WHERE source_file_hash=${sourceFileHash} AND transaction_date=${String(row.date || '')}
-            AND amount=${Number(row.amount || 0)} AND reference IS NULL`);
+    // Overlapping Kapital exports reuse the durable transaction row while
+    // preserving the hash of the first source file. Resolve every stable
+    // identity across source files and fail closed if it is ambiguous.
+    const direction = String(row.direction || '');
+    const sourceTime = String(row.time || '');
+    const sourceOperation = String(row.operation || '');
+    const sourceTransactionCode = String(row.transaction_code || '');
+    let candidates;
+    if (sourceTime || sourceOperation || sourceTransactionCode) {
+      candidates = await db.query(sql`SELECT id FROM accounting_bank_transactions
+        WHERE transaction_date=${String(row.date || '')}
+          AND amount=${Number(row.amount || 0)} AND direction=${direction}
+          AND COALESCE(source_time,'')=${sourceTime}
+          AND COALESCE(source_operation,'')=${sourceOperation}
+          AND COALESCE(source_transaction_code,'')=${sourceTransactionCode}`);
+    } else if (reference) {
+      candidates = await db.query(sql`SELECT id FROM accounting_bank_transactions
+        WHERE transaction_date=${String(row.date || '')}
+          AND amount=${Number(row.amount || 0)} AND direction=${direction}
+          AND reference=${reference}`);
+    } else {
+      candidates = await db.query(sql`SELECT id FROM accounting_bank_transactions
+        WHERE transaction_date=${String(row.date || '')}
+          AND amount=${Number(row.amount || 0)} AND direction=${direction}
+          AND reference IS NULL`);
+    }
     if (candidates.length !== 1) return false;
     await db.query(sql`UPDATE accounting_bank_transactions SET
       qbo_workflow_run_id=${runId}, qbo_entity_type=${qboEntityType},
@@ -534,6 +597,7 @@ function buildQboNotificationMessage({ run, state }) {
     `• Principal transactions recorded: ${principalRecorded}/${principalTotal}`,
     `• Principal transactions written in this run: ${summary.principalWritten || 0}`,
     `• Principal transactions already present: ${summary.dedupSkipped || 0}`,
+    `• Sub-cent fiscal-stamp lines intentionally omitted: ${summary.intentionalSkipped || 0}`,
     `• SPEI fee lines recorded: ${feeRecordsRecorded}/${feeRecordsExpected} (${summary.feeRecordsWritten || 0} written now)`,
     `• Recorded to Uncategorized Expense for categorization review: ${summary.reviewRequired || 0}`,
     `• Not recorded: ${summary.held || 0}`,
@@ -613,6 +677,8 @@ const qboWrite = makeDurableJob({
         feeRecordsExpected: summary.fee_records_expected || 0,
         feeDedupSkipped: summary.fee_dedup_skipped || 0,
         dedupSkipped: summary.dedup_skipped || 0,
+        intentionalSkipped: summary.intentional_skipped || 0,
+        intentionalSkipDetails: summary.intentional_skip_details || [],
         skipped: summary.skipped || 0,
         receiptsPosted: receiptWrites.length,
         reviewRequired: summary.review_required || 0,
@@ -638,10 +704,12 @@ module.exports = {
   paulinaDaily,
   projectReceiptQboWrites,
   projectBankTransactionQboWrites,
+  preferredBankSourceKey,
   qboWrite,
   reginaCampaign,
   reginaDaily,
   safeAccountingCsv,
+  resolveBankSourceKey,
   socialPublishRoutine,
   squarespaceCrmSync,
 };

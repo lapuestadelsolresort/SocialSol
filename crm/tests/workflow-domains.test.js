@@ -15,7 +15,11 @@ const { getDefinition, listDefinitions } = require('../workflows/registry');
 const { runVerifiedCommand } = require('../workflows/paulina-prepare');
 const { matchingPost } = require('../workflows/social-publish');
 const { _internal: readModelInternals } = require('../workflows/read-models');
-const { projectBankTransactionQboWrites } = require('../workflows/operational-jobs');
+const {
+  preferredBankSourceKey,
+  projectBankTransactionQboWrites,
+  resolveBankSourceKey,
+} = require('../workflows/operational-jobs');
 
 async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-domains-'));
@@ -222,12 +226,14 @@ test('QBO projection resolves exact transactions retained from overlapping Kapit
       source_file_hash: 'current-file-hash',
       dedup_details: [{
         date: '2026-08-06', amount: 2105,
+        direction: 'debit',
         reference: 'Clave: 136-06/08/2026/old', status: 'EXISTING',
         qbo_id: '2522', qbo_entity_type: 'Purchase',
         category_key: 'maintenance', category: 'Maintenance',
       }],
       details: [{
         date: '2026-08-06', amount: 2105,
+        direction: 'debit',
         reference: 'Clave: 136-06/08/2026/new', status: 'PUSHED',
         qbo_id: '2523', record_type: 'expense', request_id: 'request-2523',
         category_key: 'uncategorized_expense', category: 'Uncategorized Expense',
@@ -247,6 +253,100 @@ test('QBO projection resolves exact transactions retained from overlapping Kapit
         qbo_entity_id: '2522', qbo_category_key: 'maintenance', review_required: 0,
       },
     ]);
+  });
+});
+
+test('Kapital source identity distinguishes same-day reference-less rows', async () => {
+  await withDb(async db => {
+    const interest = {
+      date: '2026-07-31', time: '22:51:00', operation: '0667845413000',
+      transaction_code: '000001', reference: '', description: 'Interes',
+      amount: 53.40, direction: 'credit',
+    };
+    const tax = {
+      ...interest, transaction_code: '000002', description: 'ISR', direction: 'debit',
+    };
+    assert.notEqual(preferredBankSourceKey(interest), preferredBankSourceKey(tax));
+    assert.notEqual(await resolveBankSourceKey(db, interest), await resolveBankSourceKey(db, tax));
+  });
+});
+
+test('QBO projection separates equal month-end credit/debit and crosses file hashes', async () => {
+  await withDb(async db => {
+    const qboRunId = 'qbo-month-end-projection';
+    await db.query(sql`INSERT INTO workflow_runs (
+      id, workflow_name, workflow_version, idempotency_key, status,
+      trigger_type, input_json, state_json
+    ) VALUES (
+      ${qboRunId}, 'qbo.write', 2, 'seed:qbo-month-end-projection', 'running',
+      'system', '{}', '{}'
+    )`);
+    for (const row of [
+      ['bank-interest', 'Interes', 'credit', '000001'],
+      ['bank-isr', 'ISR', 'debit', '000002'],
+      ['bank-timbrado', 'Comisión por timbrado fiscal', 'debit', '000054'],
+    ]) {
+      await db.query(sql`INSERT INTO accounting_bank_transactions (
+        id, source_key, transaction_date, description, reference, direction,
+        source_time, source_operation, source_transaction_code,
+        currency, amount, classification_tier, source_file_hash, workflow_run_id, status
+      ) VALUES (
+        ${row[0]}, ${`source-${row[0]}`}, '2026-07-31', ${row[1]}, NULL, ${row[2]},
+        ${row[3] === '000054' ? '22:52:00' : '22:51:00'}, '0667845413000', ${row[3]},
+        'MXN', ${row[3] === '000054' ? 0.01 : 53.40}, 'auto', 'older-file-hash', ${qboRunId}, 'classified'
+      )`);
+    }
+    const projected = await projectBankTransactionQboWrites(db, qboRunId, {
+      source_file_hash: 'new-overlap-file-hash',
+      details: [
+        {
+          date: '2026-07-31', time: '22:51:00', operation: '0667845413000',
+          transaction_code: '000001', amount: 53.40, direction: 'credit',
+          reference: null, status: 'PUSHED', qbo_id: 'deposit-1',
+          record_type: 'deposit', category_key: 'bank_interest', category: 'Bank Interest',
+        },
+        {
+          date: '2026-07-31', time: '22:51:00', operation: '0667845413000',
+          transaction_code: '000002', amount: 53.40, direction: 'debit',
+          reference: null, status: 'PUSHED', qbo_id: 'purchase-1',
+          record_type: 'expense', category_key: 'taxes', category: 'Taxes',
+        },
+      ],
+      intentional_skip_details: [{
+        date: '2026-07-31', time: '22:52:00', operation: '0667845413000',
+        transaction_code: '000054', amount: 0.01, direction: 'debit',
+        reference: null, status: 'INTENTIONAL_SKIP', category_key: 'bank_fee',
+        category: 'Bank Fee',
+      }],
+    });
+    assert.equal(projected, true);
+    const rows = await db.query(sql`SELECT id, qbo_entity_type, qbo_entity_id
+      FROM accounting_bank_transactions ORDER BY id`);
+    assert.deepEqual(rows, [
+      { id: 'bank-interest', qbo_entity_type: 'Deposit', qbo_entity_id: 'deposit-1' },
+      { id: 'bank-isr', qbo_entity_type: 'Purchase', qbo_entity_id: 'purchase-1' },
+      { id: 'bank-timbrado', qbo_entity_type: null, qbo_entity_id: null },
+    ]);
+    const [timbrado] = await db.query(sql`SELECT status FROM accounting_bank_transactions
+      WHERE id='bank-timbrado'`);
+    assert.equal(timbrado.status, 'intentionally_omitted');
+
+    await db.query(sql`INSERT INTO accounting_bank_transactions (
+      id, source_key, transaction_date, description, reference, direction,
+      currency, amount, classification_tier, source_file_hash, workflow_run_id, status
+    ) VALUES (
+      'bank-null-legacy', 'source-bank-null-legacy', '2026-07-15', 'Legacy fee', NULL, 'debit',
+      'MXN', 99, 'auto', 'first-export-hash', ${qboRunId}, 'classified'
+    )`);
+    const legacyProjected = await projectBankTransactionQboWrites(db, qboRunId, {
+      source_file_hash: 'different-export-hash',
+      details: [{
+        date: '2026-07-15', amount: 99, direction: 'debit', reference: null,
+        status: 'PUSHED', qbo_id: 'legacy-purchase', record_type: 'expense',
+        category_key: 'bank_fee', category: 'Bank Fee',
+      }],
+    });
+    assert.equal(legacyProjected, true);
   });
 });
 
