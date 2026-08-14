@@ -87,6 +87,22 @@ function accountChannelPath(accountId, channelId) {
   return `channels.slack.accounts[${JSON.stringify(accountId)}].channels[${JSON.stringify(channelId)}]`;
 }
 
+const WORKFLOW_PLUGIN_CONFIG_PATH = 'plugins.entries["resort-workflows"].config';
+
+function taskTrackerPluginConfig({ root, configPath, settings, joined }) {
+  return {
+    taskTrackerAgentIds: [settings.agentId],
+    taskTrackerAccountIds: [settings.accountId],
+    taskTrackerChannelIds: joined.map(channel => channel.id).sort(),
+    taskTrackerDatabasePath: path.join(root, 'paloma', 'data', 'tasks.db'),
+    taskTrackerConfigPath: configPath,
+  };
+}
+
+function taskTrackerConfigMatches(current = {}, expected = {}) {
+  return Object.entries(expected).every(([key, value]) => isDeepStrictEqual(current?.[key], value));
+}
+
 function cronWriteArgs(contract, agentId) {
   return [
     '--agent', agentId,
@@ -132,6 +148,7 @@ function monitoringSettings(config, args) {
 
 function planMonitoring({
   config, account, agents, cronJobs, groups, soul, root, settings, checkpointGuards = [],
+  workflowPluginConfig = {}, configPath = path.join(root, 'paloma', 'config.json'),
 }) {
   if (!account || account.enabled === false) throw new Error('Paloma Slack account is missing or disabled');
   const agentIndex = agents.findIndex(agent => agent.id === settings.agentId);
@@ -149,6 +166,9 @@ function planMonitoring({
   });
   const block = soulMonitoringBlock({ accountId: settings.accountId, databasePath });
   const nextSoul = mergeSoulMonitoringBlock(soul, block);
+  const taskTrackerConfig = taskTrackerPluginConfig({
+    root, configPath, settings, joined: channelPlan.joined,
+  });
   const changedChannelIds = channelPlan.joined
     .filter(channel => !isDeepStrictEqual(account.channels?.[channel.id] || {}, channelPlan.channels[channel.id]))
     .map(channel => channel.id);
@@ -171,6 +191,8 @@ function planMonitoring({
     cronChanged: !cronMatches(cronJob, monitorCron, settings.agentId),
     legacyHeartbeatPresent: Boolean(agents[agentIndex].heartbeat),
     soulChanged: soul !== nextSoul,
+    taskTrackerConfig,
+    taskTrackerConfigChanged: !taskTrackerConfigMatches(workflowPluginConfig, taskTrackerConfig),
     config,
   };
 }
@@ -194,6 +216,9 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     'config', 'get', `channels.slack.accounts[${JSON.stringify(settings.accountId)}]`, '--json',
   ], dependencies);
   const agents = openClawJson(['config', 'get', 'agents.list', '--json'], dependencies);
+  const workflowPluginConfig = openClawJson([
+    'config', 'get', WORKFLOW_PLUGIN_CONFIG_PATH, '--json',
+  ], dependencies);
   const cronPayload = openClawJson(['cron', 'list', '--all', '--json'], dependencies);
   const agent = agents.find(candidate => candidate.id === settings.agentId);
   if (!agent?.workspace) throw new Error(`OpenClaw agent ${settings.agentId} has no workspace`);
@@ -201,11 +226,11 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
   const soul = fs.readFileSync(soulPath, 'utf8');
   const plan = planMonitoring({
     config, account, agents, cronJobs: cronPayload.jobs || [], groups, soul, root, settings,
-    checkpointGuards,
+    checkpointGuards, workflowPluginConfig, configPath,
   });
   const changed = plan.changedChannelIds.length > 0 || plan.cronChanged
     || plan.missingCheckpointGuards.length > 0
-    || plan.legacyHeartbeatPresent || plan.soulChanged;
+    || plan.legacyHeartbeatPresent || plan.soulChanged || plan.taskTrackerConfigChanged;
   const command = dependencies.runOpenClaw || runOpenClaw;
   const summary = {
     ok: true,
@@ -222,8 +247,15 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     cronChanged: plan.cronChanged,
     legacyHeartbeatRemoval: plan.legacyHeartbeatPresent,
     soulChanged: plan.soulChanged,
+    deterministicTaskReplies: !plan.taskTrackerConfigChanged ? 'configured' : 'configure',
   };
   if (!confirmProduction) {
+    if (plan.taskTrackerConfigChanged) {
+      command([
+        'config', 'set', WORKFLOW_PLUGIN_CONFIG_PATH,
+        JSON.stringify(plan.taskTrackerConfig), '--strict-json', '--merge', '--dry-run',
+      ], dependencies);
+    }
     for (const channelId of plan.changedChannelIds) {
       command([
         'config', 'set', accountChannelPath(settings.accountId, channelId),
@@ -248,6 +280,12 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     if (plan.soulChanged) writeAtomic(soulPath, plan.nextSoul);
     if (plan.missingCheckpointGuards.length) {
       (dependencies.runSqlite || runSqlite)(databasePath, checkpointGuardSql(), dependencies);
+    }
+    if (plan.taskTrackerConfigChanged) {
+      command([
+        'config', 'set', WORKFLOW_PLUGIN_CONFIG_PATH,
+        JSON.stringify(plan.taskTrackerConfig), '--strict-json', '--merge',
+      ], dependencies);
     }
     for (const channelId of plan.changedChannelIds) {
       command([
@@ -282,6 +320,9 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
       'config', 'get', `channels.slack.accounts[${JSON.stringify(settings.accountId)}]`, '--json',
     ], dependencies);
     const verifiedAgents = openClawJson(['config', 'get', 'agents.list', '--json'], dependencies);
+    const verifiedWorkflowPluginConfig = openClawJson([
+      'config', 'get', WORKFLOW_PLUGIN_CONFIG_PATH, '--json',
+    ], dependencies);
     const verifiedCronPayload = openClawJson(['cron', 'list', '--all', '--json'], dependencies);
     const verifiedCronJobs = (verifiedCronPayload.jobs || [])
       .filter(job => job.name === plan.monitorCron.name && job.agentId === settings.agentId);
@@ -304,6 +345,9 @@ function configure(args = process.argv.slice(2), dependencies = {}) {
     }
     if (fs.readFileSync(soulPath, 'utf8') !== plan.nextSoul) {
       throw new Error('verification failed for Paloma SOUL monitoring contract');
+    }
+    if (!taskTrackerConfigMatches(verifiedWorkflowPluginConfig, plan.taskTrackerConfig)) {
+      throw new Error('verification failed for deterministic Paloma task reply configuration');
     }
   } catch (error) {
     if (createdCronId) {
@@ -340,4 +384,7 @@ module.exports = {
   runOpenClaw,
   runSqlite,
   installedCheckpointGuards,
+  taskTrackerConfigMatches,
+  taskTrackerPluginConfig,
+  WORKFLOW_PLUGIN_CONFIG_PATH,
 };

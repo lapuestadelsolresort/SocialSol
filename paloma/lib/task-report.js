@@ -173,6 +173,9 @@ function buildTaskReport(database, options = {}) {
     all: options.all,
     users: options.users || {},
   });
+  if (selector.kind !== 'all' && options.selectorLabel) {
+    selector.requested = requiredText(options.selectorLabel, 'selector label');
+  }
   const query = taskQuery({ selector, statuses, limit });
   const rows = database.prepare(query.sql).all(query.parameters);
   const truncated = rows.length > limit;
