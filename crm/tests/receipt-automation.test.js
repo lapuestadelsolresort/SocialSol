@@ -28,6 +28,7 @@ async function withReceiptDb(run) {
       maintenance: { id: '5100', name: 'Maintenance' },
       cleaning_services: { id: '5200', name: 'Cleaning Services' },
       contract_labor: { id: '5300', name: 'Contract Labor' },
+      supplies: { id: '5400', name: 'Supplies' },
     } },
     receipt_channels: { [CHANNEL]: { name: '#receipts-temo', scope: 'temo' } },
     receipt_payment: { approver_user_ids: ['U123MAYELA'] },
@@ -167,8 +168,8 @@ test('a receipt-channel quotation is automatically logged as Sergio reimbursemen
     const [outbox] = await db.query(sql`SELECT payload_json FROM workflow_outbox
       WHERE id=${annotation.output.outboxId}`);
     const message = JSON.parse(outbox.payload_json).message;
-    assert.match(message, /<@U123SERGIO>, please confirm/);
-    assert.match(message, /<@U123MAYELA> \*Kapital payment instruction\*/);
+    assert.match(message, /Reembolso clasificado y listo para validación/);
+    assert.match(message, /<@U123MAYELA> por favor confirma que el gasto y la clasificación son válidos/);
     assert.match(message, /MXN \$800\.00 · Maintenance · IRVING FLORES GOMEZ/);
     assert.match(message, new RegExp(receipt.payment_reference));
   });
@@ -202,6 +203,104 @@ test('one seven-image Slack post creates seven receipt items and one reimburseme
     assert.equal(items.length, 7);
     assert.deepEqual(items.map(item => item.file_ref_id), files.map(file => file.id));
     assert.equal(items.reduce((sum, item) => sum + Number(item.amount), 0), 3086);
+    const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${annotation.output.outboxId}`);
+    const message = JSON.parse(notification.payload_json).message;
+    assert.equal((message.match(/LPDSR[A-F0-9]{16}/g) || []).length, 1);
+    assert.doesNotMatch(message, /separate top-level|mensaje nuevo para cada/i);
+  });
+});
+
+test('one two-receipt post is classified as one bundle even when the service voucher has no vendor field', async () => {
+  await withReceiptDb(async db => {
+    const messageId = '1786671381.027229';
+    const files = [
+      { id: 'F-MI-POLLO', name: 'IMG-20260813-WA0043.jpg' },
+      { id: 'F-SUSY-VOUCHER', name: 'IMG-20260813-WA0044.jpg' },
+    ];
+    const extraction = {
+      ok: true,
+      responseId: 'resp_susy_bundle',
+      model: 'gpt-4.1',
+      requestHash: 'susy-bundle-hash',
+      validationIssues: ['item 2 vendor is missing'],
+      extracted: {
+        items: [
+          extractedItem(files[0].id, {
+            vendor: 'Miscelanea Mi Pollo',
+            transaction_date: '2026-08-12',
+            amount: 87.09,
+            description: 'Cleaning and household supplies including bathroom sandpaper',
+            category_key: 'supplies',
+          }),
+          extractedItem(files[1].id, {
+            vendor: null,
+            transaction_date: '2026-08-14',
+            amount: 1000,
+            description: 'Pago de limpieza por dos días para Susy',
+            category_key: 'cleaning_services',
+          }),
+        ],
+        confidence: 0.96,
+        review_reason: null,
+      },
+    };
+    const { annotation } = await runAutomaticReceipt(db, { messageId, files, extraction });
+    const [receipt] = await db.query(sql`SELECT * FROM accounting_receipts WHERE slack_message_id=${messageId}`);
+    assert.equal(receipt.status, 'extracted');
+    assert.equal(receipt.amount, 1087.09);
+    assert.equal(receipt.payment_reference?.startsWith('LPDSR'), true);
+    const items = await db.query(sql`SELECT item_index, vendor, amount, category_key
+      FROM accounting_receipt_items WHERE receipt_id=${receipt.id} ORDER BY item_index`);
+    assert.deepEqual(items, [
+      { item_index: 1, vendor: 'Miscelanea Mi Pollo', amount: 87.09, category_key: 'supplies' },
+      { item_index: 2, vendor: null, amount: 1000, category_key: 'cleaning_services' },
+    ]);
+    const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${annotation.output.outboxId}`);
+    const message = JSON.parse(notification.payload_json).message;
+    assert.match(message, /1\. MXN \$87\.09 · Supplies · Miscelanea Mi Pollo/);
+    assert.match(message, /2\. MXN \$1,000\.00 · Cleaning Services/);
+    assert.match(message, /\*Total: MXN \$1,087\.09\*/);
+    assert.match(message, /por favor confirma que el gasto y la clasificación son válidos/);
+    assert.doesNotMatch(message, /top-level|vuelve a publicar|separa/i);
+  });
+});
+
+test('a top-level payment confirmation is held as proof instead of becoming another payable receipt', async () => {
+  await withReceiptDb(async db => {
+    const messageId = '1786672535.030389';
+    const file = { id: 'F-SUSY-PAYMENT', name: 'comprobante SPEI 0673606335.pdf' };
+    const ingest = await startGraph(db, getDefinition('receipt.ingest'), {
+      idempotencyKey: `slack:${CHANNEL}:${messageId}:receipt.ingest:proof`,
+      triggerType: 'slack_receipt_hook', triggerRef: messageId, channelId: CHANNEL,
+      actorUserId: 'U123MAYELA', input: { slackMessageId: messageId },
+    }, { fetchSlackReceipt: async () => slackSource(messageId, [file], '') });
+    const extraction = {
+      ok: true, responseId: 'resp_susy_payment', model: 'gpt-4.1', requestHash: 'susy-payment-hash',
+      extracted: {
+        items: [extractedItem(file.id, {
+          document_type: 'payment_confirmation', vendor: 'SUSY', transaction_date: '2026-08-13',
+          amount: 1088, description: 'WEEKLY PAYMENT COMMON AREAS', category_key: 'cleaning_services',
+        })],
+        confidence: 0.98, review_reason: null,
+      },
+    };
+    const process = await executeGraph(db, getDefinition('receipt.process'), ingest.output.processRunId, {
+      extractReimbursementReceipt: async () => extraction,
+    });
+    assert.equal(process.status, 'completed', process.error_message);
+    assert.equal(process.output.status, 'needs_review');
+    const [receipt] = await db.query(sql`SELECT status, payment_reference, review_reason
+      FROM accounting_receipts WHERE id=${ingest.output.receiptId}`);
+    assert.equal(receipt.status, 'needs_review');
+    assert.equal(receipt.payment_reference, null);
+    assert.match(receipt.review_reason, /payment proof must be linked to the original reimbursement/);
+    const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${process.output.outboxId}`);
+    const message = JSON.parse(notification.payload_json).message;
+    assert.match(message, /el comprobante de pago debe vincularse al reembolso original/);
+    assert.doesNotMatch(message, /payment proof must be linked/);
   });
 });
 
@@ -355,9 +454,11 @@ test('a receipt review reply directs annotation without requesting banking detai
       WHERE id=${process.output.outboxId}`);
     const message = JSON.parse(notification.payload_json).message;
     assert.match(message, new RegExp(ingest.output.receiptId));
-    assert.match(message, /use receipt\.annotate with that receipt id/);
-    assert.match(message, /Do not ask for or include a CLABE/);
-    assert.match(message, /never required for receipt annotation or code generation/);
+    assert.match(message, /usa receipt\.annotate con ese identificador/);
+    assert.match(message, /concepto 1: falta la fecha o no es válida/);
+    assert.doesNotMatch(message, /date is missing or invalid/);
+    assert.match(message, /No vuelvas a publicar ni separes los comprobantes/);
+    assert.match(message, /No pidas ni incluyas CLABE/);
   });
 });
 
@@ -425,11 +526,11 @@ test('an already-completed reimbursement is documented without a code or duplica
     const [notification] = await db.query(sql`SELECT payload_json FROM workflow_outbox
       WHERE id=${annotation.output.outboxId}`);
     const message = JSON.parse(notification.payload_json).message;
-    assert.match(message, /Payment already completed and receipt documented/);
-    assert.match(message, /no new transfer is needed/i);
+    assert.match(message, /Pago realizado y comprobantes documentados/);
+    assert.match(message, /no es necesario hacer otra transferencia/i);
     assert.match(message, /TEMO PAYMENT/);
     assert.match(message, /0673602901/);
-    assert.match(message, /No CLABE, bank-account number/);
+    assert.match(message, /no necesita ni guarda CLABE/i);
     assert.doesNotMatch(message, /LPDSR[A-F0-9]{16}/);
 
     await db.query(sql`INSERT INTO accounting_bank_transactions (
@@ -441,6 +542,114 @@ test('an already-completed reimbursement is documented without a code or duplica
       idempotencyKey: 'receipt-reconcile-temo-already-paid',
       triggerType: 'system',
       input: {},
+    });
+    assert.equal(reconciliation.status, 'completed', reconciliation.error_message);
+    assert.equal(reconciliation.output.legacyMatched, 1);
+    assert.equal(reconciliation.output.referenceMatched, 0);
+  });
+});
+
+test('an MXN 1088 payment closes the MXN 1087.09 bundle and its mistakenly ingested proof', async () => {
+  await withReceiptDb(async db => {
+    const originalMessageId = '1786671381.027229';
+    const originalFiles = [
+      { id: 'F-MI-POLLO-PAID', name: 'IMG-20260813-WA0043.jpg' },
+      { id: 'F-SUSY-PAID', name: 'IMG-20260813-WA0044.jpg' },
+    ];
+    const original = await startGraph(db, getDefinition('receipt.ingest'), {
+      idempotencyKey: `slack:${CHANNEL}:${originalMessageId}:receipt.ingest:paid-bundle`,
+      triggerType: 'slack_receipt_hook', triggerRef: originalMessageId, channelId: CHANNEL,
+      actorUserId: 'U123MAYELA', input: { slackMessageId: originalMessageId },
+    }, { fetchSlackReceipt: async () => slackSource(originalMessageId, originalFiles, 'Susy weekly payment and reimbursement') });
+    const paid = await startGraph(db, getDefinition('receipt.annotate'), {
+      idempotencyKey: `slack:${CHANNEL}:${originalMessageId}:receipt.annotate:paid-bundle`,
+      triggerType: 'slack', triggerRef: originalMessageId, channelId: CHANNEL,
+      actorUserId: 'U123MAYELA',
+      input: {
+        receiptId: original.output.receiptId,
+        vendor: 'Multiple vendors', transactionDate: '2026-08-14', currency: 'MXN', amount: 1087.09,
+        description: 'Susy cleaning payment and household supplies reimbursement',
+        reimbursementRecipientUserId: 'U123MAYELA',
+        paymentAlreadyCompleted: true,
+        paymentConfirmationReference: '0673606335',
+        actualPaymentDescription: 'WEEKLY PAYMENT COMMON AREAS',
+        actualPaymentAmount: 1088,
+        items: [
+          {
+            fileRefId: originalFiles[0].id, vendor: 'Miscelanea Mi Pollo',
+            transactionDate: '2026-08-12', currency: 'MXN', amount: 87.09,
+            description: 'Cleaning and household supplies including bathroom sandpaper',
+            categoryKey: 'supplies', categoryName: 'Supplies', extractionConfidence: 1,
+          },
+          {
+            fileRefId: originalFiles[1].id, vendor: 'Susy',
+            transactionDate: '2026-08-14', currency: 'MXN', amount: 1000,
+            description: 'Pago de limpieza por dos días',
+            categoryKey: 'cleaning_services', categoryName: 'Cleaning Services', extractionConfidence: 1,
+          },
+        ],
+      },
+    });
+    assert.equal(paid.status, 'completed', paid.error_message);
+    assert.equal(paid.output.paymentReference, null);
+    const [paidNotice] = await db.query(sql`SELECT payload_json FROM workflow_outbox WHERE id=${paid.output.outboxId}`);
+    const paidMessage = JSON.parse(paidNotice.payload_json).message;
+    assert.match(paidMessage, /Total de los comprobantes: MXN \$1,087\.09/);
+    assert.match(paidMessage, /Transferencia realizada: MXN \$1,088\.00/);
+    assert.match(paidMessage, /0673606335/);
+
+    const proofMessageId = '1786672535.030389';
+    const proofFile = { id: 'F-SUSY-PROOF-DUPLICATE', name: 'comprobante SPEI 0673606335.pdf' };
+    const proof = await startGraph(db, getDefinition('receipt.ingest'), {
+      idempotencyKey: `slack:${CHANNEL}:${proofMessageId}:receipt.ingest:legacy-duplicate`,
+      triggerType: 'slack_receipt_hook', triggerRef: proofMessageId, channelId: CHANNEL,
+      actorUserId: 'U123MAYELA', input: { slackMessageId: proofMessageId },
+    }, { fetchSlackReceipt: async () => slackSource(proofMessageId, [proofFile], '') });
+    const mistaken = await startGraph(db, getDefinition('receipt.annotate'), {
+      idempotencyKey: `slack:${CHANNEL}:${proofMessageId}:receipt.annotate:mistaken`,
+      triggerType: 'slack', triggerRef: proofMessageId, channelId: CHANNEL,
+      actorUserId: 'U123MAYELA',
+      input: {
+        receiptId: proof.output.receiptId, vendor: 'SUSY', transactionDate: '2026-08-13',
+        currency: 'MXN', amount: 1088, description: 'WEEKLY PAYMENT COMMON AREAS',
+        categoryKey: 'cleaning_services', categoryName: 'Cleaning Services',
+      },
+    });
+    assert.equal(mistaken.status, 'completed', mistaken.error_message);
+    assert.match(mistaken.output.paymentReference, /^LPDSR/);
+
+    const resolved = await startGraph(db, getDefinition('receipt.annotate'), {
+      idempotencyKey: `slack:${CHANNEL}:${proofMessageId}:receipt.annotate:duplicate`,
+      triggerType: 'slack', triggerRef: proofMessageId, channelId: CHANNEL,
+      actorUserId: 'U123MAYELA',
+      input: {
+        receiptId: proof.output.receiptId, amount: 1088, currency: 'MXN',
+        duplicateOfReceiptId: original.output.receiptId,
+      },
+    });
+    assert.equal(resolved.status, 'completed', resolved.error_message);
+    assert.equal(resolved.output.duplicateResolved, true);
+    assert.equal(resolved.output.canonicalReceiptId, original.output.receiptId);
+    assert.equal(resolved.output.paymentReference, null);
+    const [duplicate] = await db.query(sql`SELECT status, review_reason, payment_reference,
+      payment_instruction_queued_at FROM accounting_receipts WHERE id=${proof.output.receiptId}`);
+    assert.deepEqual(duplicate, {
+      status: 'ignored', review_reason: `duplicate_of:${original.output.receiptId}`,
+      payment_reference: null, payment_instruction_queued_at: null,
+    });
+    const [duplicateNotice] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${resolved.output.outboxId}`);
+    const duplicateMessage = JSON.parse(duplicateNotice.payload_json).message;
+    assert.match(duplicateMessage, /no es una nueva solicitud de reembolso/);
+    assert.match(duplicateMessage, /No hagas otra transferencia/);
+
+    await db.query(sql`INSERT INTO accounting_bank_transactions (
+      id, source_key, transaction_date, description, currency, amount,
+      classification_tier, source_file_hash
+    ) VALUES ('bank-susy-1088', 'bank-susy-1088', '2026-08-13',
+      'WEEKLY PAYMENT COMMON AREAS', 'MXN', 1088, 'unknown', 'statement-hash')`);
+    const reconciliation = await startGraph(db, getDefinition('receipt.reconcile'), {
+      idempotencyKey: 'receipt-reconcile-susy-rounded-payment', triggerType: 'system', input: {},
     });
     assert.equal(reconciliation.status, 'completed', reconciliation.error_message);
     assert.equal(reconciliation.output.legacyMatched, 1);

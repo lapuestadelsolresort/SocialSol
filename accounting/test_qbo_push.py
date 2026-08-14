@@ -5,12 +5,13 @@ import unittest
 import urllib.error
 from datetime import date
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from qbo_push import (  # noqa: E402
     QBOClient, allocate_receipt_item_usd, push_classified_to_qbo, qbo_request_id,
+    verify_receipt_purchase_readback,
 )
 
 
@@ -78,6 +79,37 @@ class QBOIntegrityTests(unittest.TestCase):
                           for line in purchase['Line']], ['10', '11'])
         self.assertEqual(round(sum(line['Amount'] for line in purchase['Line']), 2), 118.53)
         self.assertIn('LPDSRA1B2C3D4E5F60718', purchase['PrivateNote'])
+
+    def test_legacy_receipt_readback_uses_durable_receipt_marker(self):
+        transaction = {
+            'amount_usd': 62.41, 'receipt_id': 'receipt-susy-1088',
+            'payment_reference': None,
+            'receipt_items': [
+                {'amount': 87.09, 'category_key': 'supplies'},
+                {'amount': 1000, 'category_key': 'cleaning_services'},
+            ],
+        }
+        purchase = {
+            'TotalAmt': 62.41,
+            'PrivateNote': 'Reconciled receipt reimbursement receipt-susy-1088',
+            'Line': [
+                {
+                    'Amount': 5,
+                    'DetailType': 'AccountBasedExpenseLineDetail',
+                    'AccountBasedExpenseLineDetail': {'AccountRef': {'value': '10'}},
+                },
+                {
+                    'Amount': 57.41,
+                    'DetailType': 'AccountBasedExpenseLineDetail',
+                    'AccountBasedExpenseLineDetail': {'AccountRef': {'value': '11'}},
+                },
+            ],
+        }
+        config = {'qbo_accounts': {'expenses': {
+            'supplies': {'id': '10'}, 'cleaning_services': {'id': '11'},
+        }}}
+        with patch('builtins.open', mock_open(read_data=json.dumps(config))):
+            verify_receipt_purchase_readback(transaction, purchase)
 
     def test_provider_request_id_is_sent_on_create(self):
         seen = []

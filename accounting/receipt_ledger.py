@@ -65,6 +65,37 @@ def _matched_receipt(connection: sqlite3.Connection, payment_reference: str):
     return rows[0] if len(rows) == 1 else None
 
 
+def _matched_legacy_receipt(connection: sqlite3.Connection, transaction: Dict):
+    """Resolve one uncoded transaction through the durable reconciliation ledger."""
+    transaction_date = _date_value(transaction.get('date'))
+    if transaction_date is None:
+        return None
+    currency = str(transaction.get('currency') or 'MXN').upper()
+    tolerance = 1 if currency == 'MXN' else 0.01
+    rows = connection.execute(
+        """
+        SELECT DISTINCT r.id, r.currency, r.amount, r.category_key, r.category_name,
+               r.description, r.payment_reference
+        FROM accounting_receipts r
+        JOIN accounting_reconciliations x
+          ON x.receipt_id = r.id AND x.status = 'matched'
+        JOIN accounting_bank_transactions b ON b.source_key = x.bank_reference
+        WHERE r.status IN ('matched', 'posted')
+          AND b.transaction_date = ?
+          AND upper(b.currency) = ?
+          AND abs(b.amount - ?) <= ?
+          AND coalesce(b.description, '') = ?
+          AND coalesce(b.reference, '') = ?
+        """,
+        (
+            transaction_date.isoformat(), currency, float(transaction.get('amount') or 0), tolerance,
+            str(transaction.get('description') or ''),
+            str(transaction.get('reference') or transaction.get('clave') or ''),
+        ),
+    ).fetchall()
+    return rows[0] if len(rows) == 1 else None
+
+
 def _receipt_lines(connection: sqlite3.Connection, receipt) -> List[Dict]:
     rows = connection.execute(
         """
@@ -89,6 +120,63 @@ def _receipt_lines(connection: sqlite3.Connection, receipt) -> List[Dict]:
     return [dict(row) for row in rows]
 
 
+def _enrich_from_receipt(
+        transaction: Dict, connection: sqlite3.Connection, receipt,
+        payment_reference: str = None, match_rule: str = 'reconciled_receipt') -> Dict:
+    result = dict(transaction)
+    transaction_currency = str(transaction.get('currency') or 'MXN').upper()
+    receipt_currency = str(receipt['currency'] or '').upper()
+    tolerance = 1 if receipt_currency == 'MXN' else 0.01
+    match_label = payment_reference or receipt['id']
+    if transaction_currency != receipt_currency or abs(float(transaction.get('amount') or 0) - float(receipt['amount'])) > tolerance:
+        result.update({
+            'confidence': 'unknown',
+            'category': None,
+            'category_name': None,
+            'reason': f'Reconciled receipt amount or currency mismatch: {match_label}',
+            'payment_reference': payment_reference,
+            'receipt_reference_error': True,
+        })
+        return result
+
+    lines = _receipt_lines(connection, receipt)
+    if any(not line.get('category_key') for line in lines):
+        result.update({
+            'confidence': 'unknown',
+            'category': None,
+            'category_name': None,
+            'reason': f'Reconciled receipt has an unclassified expense item: {match_label}',
+            'payment_reference': payment_reference,
+            'receipt_id': receipt['id'],
+            'receipt_reference_error': True,
+        })
+        return result
+    if abs(sum(float(line['amount']) for line in lines) - float(receipt['amount'])) > 0.005:
+        result.update({
+            'confidence': 'unknown',
+            'category': None,
+            'category_name': None,
+            'reason': f'Reconciled receipt item total does not equal reimbursement: {match_label}',
+            'payment_reference': payment_reference,
+            'receipt_id': receipt['id'],
+            'receipt_reference_error': True,
+        })
+        return result
+
+    result.update({
+        'confidence': 'auto',
+        'category': 'receipt_bundle',
+        'category_name': 'Receipt Reimbursement',
+        'reason': match_rule,
+        'note': f"Reconciled receipt reimbursement {payment_reference or receipt['id']}",
+        'payment_reference': payment_reference,
+        'receipt_id': receipt['id'],
+        'receipt_items': lines,
+        'receipt_reference_error': False,
+    })
+    return result
+
+
 def _enrich(transaction: Dict, connection: sqlite3.Connection) -> Dict:
     references = payment_references(transaction)
     result = dict(transaction)
@@ -101,7 +189,6 @@ def _enrich(transaction: Dict, connection: sqlite3.Connection) -> Dict:
             'receipt_reference_error': True,
         })
         return result
-
     reference = references[0]
     receipt = _matched_receipt(connection, reference)
     if receipt is None:
@@ -114,64 +201,14 @@ def _enrich(transaction: Dict, connection: sqlite3.Connection) -> Dict:
             'receipt_reference_error': True,
         })
         return result
-
-    transaction_currency = str(transaction.get('currency') or 'MXN').upper()
-    receipt_currency = str(receipt['currency'] or '').upper()
-    tolerance = 1 if receipt_currency == 'MXN' else 0.01
-    if transaction_currency != receipt_currency or abs(float(transaction.get('amount') or 0) - float(receipt['amount'])) > tolerance:
-        result.update({
-            'confidence': 'unknown',
-            'category': None,
-            'category_name': None,
-            'reason': f'Receipt payment reference amount or currency mismatch: {reference}',
-            'payment_reference': reference,
-            'receipt_reference_error': True,
-        })
-        return result
-
-    lines = _receipt_lines(connection, receipt)
-    if any(not line.get('category_key') for line in lines):
-        result.update({
-            'confidence': 'unknown',
-            'category': None,
-            'category_name': None,
-            'reason': f'Reconciled receipt has an unclassified expense item: {reference}',
-            'payment_reference': reference,
-            'receipt_id': receipt['id'],
-            'receipt_reference_error': True,
-        })
-        return result
-    if abs(sum(float(line['amount']) for line in lines) - float(receipt['amount'])) > 0.005:
-        result.update({
-            'confidence': 'unknown',
-            'category': None,
-            'category_name': None,
-            'reason': f'Reconciled receipt item total does not equal reimbursement: {reference}',
-            'payment_reference': reference,
-            'receipt_id': receipt['id'],
-            'receipt_reference_error': True,
-        })
-        return result
-
-    result.update({
-        'confidence': 'auto',
-        'category': 'receipt_bundle',
-        'category_name': 'Receipt Reimbursement',
-        'reason': f'Exact reconciled receipt payment reference: {reference}',
-        'note': f'Reconciled receipt reimbursement {reference}',
-        'payment_reference': reference,
-        'receipt_id': receipt['id'],
-        'receipt_items': lines,
-        'receipt_reference_error': False,
-    })
-    return result
+    return _enrich_from_receipt(
+        transaction, connection, receipt, payment_reference=reference,
+        match_rule=f'Exact reconciled receipt payment reference: {reference}',
+    )
 
 
 def apply_receipt_ledger(results: Dict[str, List[Dict]], database_path: str) -> Dict[str, List[Dict]]:
-    """Move reference-tagged transactions into the safe bucket from ledger evidence."""
-    tagged = any(payment_references(txn) for bucket in results.values() for txn in bucket)
-    if not tagged:
-        return results
+    """Move uniquely reconciled receipt transactions into the safe bucket."""
     database = Path(database_path)
     if not database.is_file():
         raise FileNotFoundError(f"receipt ledger database does not exist: {database}")
@@ -193,6 +230,14 @@ def apply_receipt_ledger(results: Dict[str, List[Dict]], database_path: str) -> 
             for transaction in results.get(bucket, []):
                 if payment_references(transaction):
                     receipt_transaction = referenced_matches[id(transaction)]
+                    enriched[receipt_transaction['confidence']].append(receipt_transaction)
+                    continue
+                legacy_receipt = _matched_legacy_receipt(connection, transaction)
+                if legacy_receipt is not None:
+                    receipt_transaction = _enrich_from_receipt(
+                        transaction, connection, legacy_receipt,
+                        match_rule='Unique reconciled legacy receipt transaction',
+                    )
                     enriched[receipt_transaction['confidence']].append(receipt_transaction)
                     continue
                 duplicate_reference = _possible_duplicate_reference(
