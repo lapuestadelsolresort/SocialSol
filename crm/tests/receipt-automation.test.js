@@ -35,7 +35,10 @@ async function withReceiptDb(run) {
   }));
   fs.writeFileSync(policyPath, JSON.stringify({
     version: 1, shadow_mode: false,
-    live_workflows: ['receipt.ingest', 'receipt.process', 'receipt.annotate', 'receipt.reconcile'],
+    live_workflows: [
+      'receipt.ingest', 'receipt.process', 'receipt.payment_source.select',
+      'receipt.annotate', 'receipt.reconcile',
+    ],
     autonomous_workflows: [], always_on_effects: [],
     channels: { [CHANNEL]: { name: 'receipts-pettycash', capabilities: [
       'receipts.submit', 'receipts.write', 'accounting.read_scoped',
@@ -92,7 +95,9 @@ function extractedItem(fileId, overrides = {}) {
   };
 }
 
-async function runAutomaticReceipt(db, { messageId, files, extraction, onExtract = null }) {
+async function runAutomaticReceipt(db, {
+  messageId, files, extraction, onExtract = null, paymentSource = 'personal_reimbursement',
+}) {
   const ingest = await startGraph(db, getDefinition('receipt.ingest'), {
     idempotencyKey: `slack:${CHANNEL}:${messageId}:receipt.ingest`,
     triggerType: 'slack_receipt_hook',
@@ -111,11 +116,26 @@ async function runAutomaticReceipt(db, { messageId, files, extraction, onExtract
     },
   });
   assert.equal(process.status, 'completed', process.error_message);
-  assert.equal(process.output.status, 'queued');
+  assert.equal(process.output.status, 'awaiting_payment_source');
 
-  const annotation = await executeGraph(db, getDefinition('receipt.annotate'), process.output.annotationRunId);
+  const [beforeSelection] = await db.query(sql`SELECT status, payment_source, payment_reference
+    FROM accounting_receipts WHERE id=${ingest.output.receiptId}`);
+  assert.equal(beforeSelection.status, 'awaiting_payment_source');
+  assert.equal(beforeSelection.payment_source, 'unselected');
+  assert.equal(beforeSelection.payment_reference, null);
+
+  const selection = await startGraph(db, getDefinition('receipt.payment_source.select'), {
+    idempotencyKey: `receipt:${ingest.output.receiptId}:payment-source:${paymentSource}`,
+    triggerType: 'slack_receipt_source_action', triggerRef: `button-${messageId}`,
+    channelId: CHANNEL, actorUserId: ACTOR,
+    input: { receiptId: ingest.output.receiptId, paymentSource },
+  });
+  assert.equal(selection.status, 'completed', selection.error_message);
+  assert.equal(selection.output.status, 'queued');
+
+  const annotation = await executeGraph(db, getDefinition('receipt.annotate'), selection.output.annotationRunId);
   assert.equal(annotation.status, 'completed', annotation.error_message);
-  return { ingest, process, annotation };
+  return { ingest, process, selection, annotation };
 }
 
 test('a receipt-channel quotation is automatically logged as Sergio reimbursement intent', async () => {
@@ -140,7 +160,7 @@ test('a receipt-channel quotation is automatically logged as Sergio reimbursemen
       },
     };
     let extractionRequest;
-    const { annotation } = await runAutomaticReceipt(db, {
+    const { ingest, annotation } = await runAutomaticReceipt(db, {
       messageId, files: [file], extraction, onExtract: request => { extractionRequest = request; },
     });
     assert.deepEqual(extractionRequest.context, {
@@ -162,6 +182,22 @@ test('a receipt-channel quotation is automatically logged as Sergio reimbursemen
     assert.equal(extractionRecord.extracted.items[0].document_type, 'quotation');
     assert.equal(extractionRecord.annotation.source, 'automatic_receipt_process');
     assert.equal(annotation.output.itemCount, 1);
+    const [sourcePrompt] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${ingest.output.paymentSourcePromptOutboxId}`);
+    const promptPayload = JSON.parse(sourcePrompt.payload_json);
+    assert.match(promptPayload.message, /indica cómo se pagó/);
+    assert.deepEqual(
+      promptPayload.presentation.blocks[0].buttons.map(button => button.label),
+      ['Reembolso personal', 'Pagado con Kapital', 'Ya reembolsado'],
+    );
+    assert.deepEqual(
+      promptPayload.presentation.blocks[0].buttons.map(button => button.value),
+      [
+        `receiptsource:personal:${receipt.id}`,
+        `receiptsource:kapital:${receipt.id}`,
+        `receiptsource:reimbursed:${receipt.id}`,
+      ],
+    );
     const [item] = await db.query(sql`SELECT extraction_confidence FROM accounting_receipt_items
       WHERE receipt_id=${receipt.id}`);
     assert.equal(item.extraction_confidence, 0.98);
@@ -208,6 +244,121 @@ test('one seven-image Slack post creates seven receipt items and one reimburseme
     const message = JSON.parse(notification.payload_json).message;
     assert.equal((message.match(/LPDSR[A-F0-9]{16}/g) || []).length, 1);
     assert.doesNotMatch(message, /separate top-level|mensaje nuevo para cada/i);
+  });
+});
+
+test('Kapital business-paid selection classifies without a reimbursement code and reconciles the original debit', async () => {
+  await withReceiptDb(async db => {
+    const messageId = '1786660400.000099';
+    const file = { id: 'F-KAPITAL-BUSINESS', name: 'business-paid.jpg' };
+    const extraction = {
+      ok: true, responseId: 'resp_business_paid', model: 'gpt-4.1', requestHash: 'business-paid-hash',
+      extracted: {
+        items: [extractedItem(file.id, {
+          transaction_date: '2026-08-12', amount: 1250,
+          description: 'Maintenance materials paid directly with Kapital',
+        })],
+        confidence: 0.98, review_reason: null,
+      },
+    };
+    const { ingest, annotation } = await runAutomaticReceipt(db, {
+      messageId, files: [file], extraction, paymentSource: 'kapital_business_paid',
+    });
+    const [receipt] = await db.query(sql`SELECT status, payment_source, payment_reference,
+      reimbursement_recipient_user_id FROM accounting_receipts WHERE id=${ingest.output.receiptId}`);
+    assert.deepEqual(receipt, {
+      status: 'extracted', payment_source: 'kapital_business_paid',
+      payment_reference: null, reimbursement_recipient_user_id: null,
+    });
+    const [notice] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${annotation.output.outboxId}`);
+    const message = JSON.parse(notice.payload_json).message;
+    assert.match(message, /Gasto pagado con fondos de Kapital y clasificado/);
+    assert.match(message, /No se requiere reembolso, transferencia ni código LPDSR/);
+    assert.doesNotMatch(message, /LPDSR[A-F0-9]{16}/);
+
+    await db.query(sql`INSERT INTO accounting_bank_transactions (
+      id, source_key, transaction_date, description, currency, amount,
+      classification_tier, source_file_hash
+    ) VALUES (
+      'bank-business-paid', 'kapital-business-paid', '2026-08-13', 'Compra negocio',
+      'MXN', 1250, 'auto', 'business-file-hash'
+    )`);
+    const reconciliation = await startGraph(db, getDefinition('receipt.reconcile'), {
+      idempotencyKey: 'receipt-reconcile-business-paid', triggerType: 'system', input: {},
+    });
+    assert.equal(reconciliation.status, 'completed', reconciliation.error_message);
+    assert.equal(reconciliation.output.legacyMatched, 1);
+    assert.equal(reconciliation.output.referenceMatched, 0);
+  });
+});
+
+test('already-reimbursed selection issues no code or second-payment instruction', async () => {
+  await withReceiptDb(async db => {
+    const messageId = '1786660400.000100';
+    const file = { id: 'F-ALREADY-REIMBURSED', name: 'already-reimbursed.jpg' };
+    const extraction = {
+      ok: true, responseId: 'resp_already_reimbursed', model: 'gpt-4.1', requestHash: 'already-hash',
+      extracted: {
+        items: [extractedItem(file.id, { amount: 875, description: 'Previously reimbursed supplies' })],
+        confidence: 0.98, review_reason: null,
+      },
+    };
+    const { ingest, annotation } = await runAutomaticReceipt(db, {
+      messageId, files: [file], extraction, paymentSource: 'already_reimbursed',
+    });
+    const [receipt] = await db.query(sql`SELECT payment_source, payment_reference,
+      reimbursement_recipient_user_id FROM accounting_receipts WHERE id=${ingest.output.receiptId}`);
+    assert.deepEqual(receipt, {
+      payment_source: 'already_reimbursed', payment_reference: null,
+      reimbursement_recipient_user_id: ACTOR,
+    });
+    const [notice] = await db.query(sql`SELECT payload_json FROM workflow_outbox
+      WHERE id=${annotation.output.outboxId}`);
+    const message = JSON.parse(notice.payload_json).message;
+    assert.match(message, /Gasto clasificado como ya reembolsado/);
+    assert.match(message, /no hagas otra transferencia/i);
+    assert.match(message, /mismo hilo el comprobante del pago/);
+    assert.doesNotMatch(message, /LPDSR[A-F0-9]{16}/);
+  });
+});
+
+test('payment-source buttons are submitter-or-approver only and become immutable after selection', async () => {
+  await withReceiptDb(async db => {
+    const messageId = '1786660400.000101';
+    const file = { id: 'F-SOURCE-AUTH', name: 'source-auth.jpg' };
+    const ingest = await startGraph(db, getDefinition('receipt.ingest'), {
+      idempotencyKey: `slack:${CHANNEL}:${messageId}:receipt.ingest:source-auth`,
+      triggerType: 'slack_receipt_hook', triggerRef: messageId, channelId: CHANNEL,
+      actorUserId: ACTOR, input: { slackMessageId: messageId },
+    }, { fetchSlackReceipt: async () => slackSource(messageId, [file]) });
+
+    const forbidden = await startGraph(db, getDefinition('receipt.payment_source.select'), {
+      idempotencyKey: `receipt:${ingest.output.receiptId}:source:forbidden`,
+      triggerType: 'slack_receipt_source_action', triggerRef: 'button-forbidden',
+      channelId: CHANNEL, actorUserId: 'U123STRANGER',
+      input: { receiptId: ingest.output.receiptId, paymentSource: 'personal_reimbursement' },
+    });
+    assert.equal(forbidden.status, 'failed');
+    assert.equal(forbidden.error_code, 'receipt_payment_source_actor_forbidden');
+
+    const selected = await startGraph(db, getDefinition('receipt.payment_source.select'), {
+      idempotencyKey: `receipt:${ingest.output.receiptId}:source:approver`,
+      triggerType: 'slack_receipt_source_action', triggerRef: 'button-approver',
+      channelId: CHANNEL, actorUserId: 'U123MAYELA',
+      input: { receiptId: ingest.output.receiptId, paymentSource: 'kapital_business_paid' },
+    });
+    assert.equal(selected.status, 'completed', selected.error_message);
+    assert.equal(selected.output.status, 'waiting_for_extraction');
+
+    const changed = await startGraph(db, getDefinition('receipt.payment_source.select'), {
+      idempotencyKey: `receipt:${ingest.output.receiptId}:source:change`,
+      triggerType: 'slack_receipt_source_action', triggerRef: 'button-change',
+      channelId: CHANNEL, actorUserId: ACTOR,
+      input: { receiptId: ingest.output.receiptId, paymentSource: 'personal_reimbursement' },
+    });
+    assert.equal(changed.status, 'failed');
+    assert.equal(changed.error_code, 'receipt_payment_source_locked');
   });
 });
 
@@ -613,6 +764,7 @@ test('an MXN 1088 payment closes the MXN 1087.09 bundle and its mistakenly inges
         receiptId: proof.output.receiptId, vendor: 'SUSY', transactionDate: '2026-08-13',
         currency: 'MXN', amount: 1088, description: 'WEEKLY PAYMENT COMMON AREAS',
         categoryKey: 'cleaning_services', categoryName: 'Cleaning Services',
+        paymentSource: 'personal_reimbursement',
       },
     });
     assert.equal(mistaken.status, 'completed', mistaken.error_message);

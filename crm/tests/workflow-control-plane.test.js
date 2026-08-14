@@ -69,7 +69,11 @@ test('workflow schema is additive and includes durable run/effect/outbox state',
     assert.equal(reviewColumns.has('resolution_provider_ref'), true);
     assert.equal(reviewColumns.has('review_channel_id'), true);
     const receiptColumns = new Set((await db.query(sql`PRAGMA table_info(accounting_receipts)`)).map(row => row.name));
-    for (const expected of ['description', 'category_key', 'amount_usd', 'qbo_entity_type', 'qbo_entity_id', 'posted_at']) {
+    for (const expected of [
+      'description', 'category_key', 'amount_usd', 'qbo_entity_type', 'qbo_entity_id', 'posted_at',
+      'payment_source', 'payment_source_selected_by', 'payment_source_selected_at',
+      'payment_source_workflow_run_id',
+    ]) {
       assert.equal(receiptColumns.has(expected), true, expected);
     }
     const columns = await db.query(sql`PRAGMA table_info(meta_messages)`);

@@ -8,7 +8,10 @@ const { ROOT } = require('../lib/runtime-paths');
 const { validateAccountingConfig } = require('../crm/lib/accounting-config');
 const { validatePolicy } = require('../crm/lib/channel-policy');
 
-const RECEIPT_WORKFLOWS = ['receipt.ingest', 'receipt.process', 'receipt.annotate', 'receipt.reconcile'];
+const RECEIPT_WORKFLOWS = [
+  'receipt.ingest', 'receipt.process', 'receipt.payment_source.select',
+  'receipt.annotate', 'receipt.reconcile',
+];
 const RECEIPT_CAPABILITIES = ['receipts.submit', 'receipts.write', 'accounting.read_scoped'];
 
 function option(args, name, fallback = null) {

@@ -63,6 +63,7 @@ const COMMAND_ONLY_WORKFLOWS = new Set([
   'ownerrez.mutation.confirm',
   'marketing.change.confirm',
   'receipt.ingest',
+  'receipt.payment_source.select',
   'receipt.owner_expense.ingest',
   'receipt.owner_expense.process',
   'receipt.owner_expense.confirm',
@@ -1333,6 +1334,87 @@ export function createReceiptHandler({ config, execute = callControlPlane, logge
   };
 }
 
+export function parseReceiptPaymentSourceAction(value) {
+  const match = String(value || '').trim().match(/^(personal|kapital|reimbursed):([0-9a-f-]{36})$/i);
+  if (!match) return null;
+  const sources = {
+    personal: 'personal_reimbursement',
+    kapital: 'kapital_business_paid',
+    reimbursed: 'already_reimbursed',
+  };
+  return {
+    paymentSource: sources[match[1].toLowerCase()],
+    receiptId: match[2].toLowerCase(),
+  };
+}
+
+function receiptPaymentSourceLabel(paymentSource) {
+  if (paymentSource === 'personal_reimbursement') return 'Reembolso personal';
+  if (paymentSource === 'kapital_business_paid') return 'Pagado con Kapital';
+  if (paymentSource === 'already_reimbursed') return 'Ya reembolsado';
+  return 'Fuente desconocida';
+}
+
+export function createReceiptPaymentSourceInteractionHandler({
+  config, execute = callControlPlane, logger = null,
+} = {}) {
+  return async ctx => {
+    const action = parseReceiptPaymentSourceAction(ctx?.interaction?.payload);
+    if (!action) return { handled: false };
+    const channelId = String(ctx?.conversationId || '');
+    const actorUserId = String(ctx?.senderId || '');
+    const messageId = String(ctx?.interaction?.messageTs || ctx?.interactionId || '');
+    if (!config.receiptChannelIds.has(channelId) || config.ownerExpenseChannelIds.has(channelId)) {
+      await ctx.respond?.reply?.({ text: 'Esta opción no corresponde a un canal de comprobantes.', responseType: 'ephemeral' });
+      return { handled: true };
+    }
+    if (!workflowIsLive(config, 'receipt.payment_source.select')) {
+      await ctx.respond?.reply?.({ text: 'La selección de fuente de pago no está activa.', responseType: 'ephemeral' });
+      return { handled: true };
+    }
+    if (!actorUserId || !messageId) {
+      await ctx.respond?.reply?.({ text: 'No se pudo verificar tu identidad o el mensaje de Slack.', responseType: 'ephemeral' });
+      return { handled: true };
+    }
+    await ctx.respond?.acknowledge?.();
+    try {
+      const payload = await execute(config, {
+        workflow: 'receipt.payment_source.select',
+        input: action,
+        context: {
+          channelId,
+          actorUserId,
+          messageId,
+          entrypoint: 'slack_receipt_source_action',
+        },
+        idempotencyKey: `receipt:${action.receiptId}:payment-source:${action.paymentSource}`,
+      });
+      const run = payload?.run;
+      if (!run || run.status === 'failed') {
+        throw Object.assign(new Error(run?.error_message || 'la selección no se completó'), {
+          code: run?.error_code || 'workflow_failed',
+        });
+      }
+      const label = receiptPaymentSourceLabel(action.paymentSource);
+      await ctx.respond?.editMessage?.({
+        text: `✅ Fuente de pago: *${label}*. La selección quedó vinculada a este gasto y la clasificación continúa automáticamente.`,
+        blocks: [],
+      });
+      return { handled: true };
+    } catch (error) {
+      logger?.error?.(`resort-workflows receipt payment-source selection failed: ${error.code || error.message}`);
+      const locked = error.code === 'receipt_payment_source_locked';
+      await ctx.respond?.reply?.({
+        text: locked
+          ? 'La fuente de pago ya está bloqueada. Cualquier cambio requiere revisión manual de contabilidad.'
+          : `No se guardó la selección (${error.code || 'workflow_error'}).`,
+        responseType: 'ephemeral',
+      });
+      return { handled: true };
+    }
+  };
+}
+
 export function createAccountingStatementHandler({
   config,
   stage = stageSlackAccountingStatement,
@@ -1383,6 +1465,11 @@ const plugin = {
       if (!config.agentIds.has(ctx.agentId)) return null;
       return createWorkflowTool({ config, ctx });
     }, { name: 'resort_workflow' });
+    api.registerInteractiveHandler({
+      channel: 'slack',
+      namespace: 'receiptsource',
+      handler: createReceiptPaymentSourceInteractionHandler({ config, logger: api.logger }),
+    });
     // OpenClaw 2026.5 invokes inbound_claim only for plugin-bound conversations.
     // reply_dispatch is the terminal pre-model hook for ordinary Slack channels.
     api.on('reply_dispatch', createReservationReplyDispatchHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
