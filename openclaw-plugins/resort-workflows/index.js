@@ -395,7 +395,7 @@ function accountingTransactionLabel(value) {
   const speiPayee = raw.match(/\bEnvio SPEI\b[^|]*\|\s*([^|]+)/i)?.[1]
     ?.replace(/\bDato no verificado por esta institucion\b[\s\S]*$/i, '').trim();
   if (speiPayee) return safeInline(speiPayee, 'Payee unavailable', 100);
-  const merchant = raw.match(/^(.{2,100}?)(?=\s+\d{6}\b)/)?.[1]?.trim();
+  const merchant = raw.match(/^(.{2,100}?)(?=\s+[_|:-]*\s*\d{6}\b)/)?.[1]?.trim();
   const label = merchant || raw;
   return safeInline(label.replace(/\d{7,}/g, digits => `••••${digits.slice(-4)}`), 'No description', 100);
 }
