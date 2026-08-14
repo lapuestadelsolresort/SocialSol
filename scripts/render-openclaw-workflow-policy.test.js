@@ -39,6 +39,9 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   assert.match(account.channels.CRECEIPT1.systemPrompt, /Every top-level post.*reimbursement/);
   assert.match(account.channels.CRECEIPT1.systemPrompt, /including a receipt, invoice, quotation/);
   assert.match(account.channels.CRECEIPT1.systemPrompt, /Do not call receipt\.ingest/);
+  assert.match(account.channels.CRECEIPT1.systemPrompt, /use receipt\.annotate with the exact receipt id/);
+  assert.match(account.channels.CRECEIPT1.systemPrompt, /CLABE.*never needed/);
+  assert.match(account.channels.CRECEIPT1.systemPrompt, /paymentAlreadyCompleted=true/);
   assert.match(account.channels.CACCT1.systemPrompt, /CSV attachments are captured automatically/);
   assert.match(account.channels.CACCT1.systemPrompt, /Never manually save an upload/);
   assert.match(account.channels.COWNER1.systemPrompt, /owner-ledger channel/);

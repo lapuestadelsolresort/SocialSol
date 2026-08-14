@@ -231,7 +231,12 @@ runtime/state/          Generated health and tracking snapshots (not committed)
   classification context. Annotated reimbursements receive an itemized Slack
   thread reply with a stable, alphanumeric-only Kapital payment concept; exact
   reference + amount + currency reconciliation then preserves receipt-level
-  category splits in QBO. Unknown transactions are escalated to the configured
+  category splits in QBO. Receipt annotation and code generation never require
+  a CLABE, bank-account number, or other banking details. If payment proof is
+  posted after a transfer was already completed without a workflow code, the
+  receipt is documented as already paid, no second transfer is requested, and
+  the existing payment stays on legacy unique currency + amount + ±3-day date
+  reconciliation. Unknown transactions are escalated to the configured
   payment approver. Kapital CSV uploads in `#accounting` are captured
   automatically and run through classify → receipt reconciliation → QBO
   readback as one hash-idempotent sequence; direct shell/QBO tool bypasses are

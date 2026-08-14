@@ -9,6 +9,7 @@ const ENDPOINT = 'https://api.openai.com/v1/responses';
 const DEFAULT_MODEL = 'gpt-4.1';
 const MAX_FILES = 20;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+const MAX_RECEIPT_DATE_DISTANCE_DAYS = 370;
 
 function reimbursementExtractionSchema(categoryKeys, fileIds) {
   return {
@@ -99,7 +100,23 @@ function buildInstructions({ ownerName, liabilityAccountName, accounts }) {
   ].join('\n');
 }
 
-function buildReimbursementInstructions({ accounts, fileIds }) {
+function reimbursementContextLines(context = {}) {
+  const channelName = String(context.channelName || '').trim().slice(0, 160);
+  const channelScope = String(context.channelScope || '').trim().slice(0, 160);
+  const submittedDate = String(context.submittedDate || '').trim();
+  const lines = [];
+  if (channelName) lines.push(`Receipt channel: ${channelName}`);
+  if (channelScope) lines.push(`Configured channel scope: ${channelScope}`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(submittedDate)) {
+    lines.push(`Slack submission date in the resort time zone: ${submittedDate}`);
+  }
+  if (lines.length) {
+    lines.push('Channel name/scope may establish vendor, payee, or purpose when the Slack text is abbreviated. Never derive or alter an amount from channel metadata.');
+  }
+  return lines;
+}
+
+function buildReimbursementInstructions({ accounts, fileIds, context = {} }) {
   const choices = accounts.map(account => `${account.key}: ${account.name}`).join('\n');
   return [
     'Extract a reimbursement bundle posted in a dedicated resort receipt channel.',
@@ -109,14 +126,64 @@ function buildReimbursementInstructions({ accounts, fileIds }) {
       ? `Return exactly one item for each attached source file (${fileIds.length} total), using each supplied file_ref_id exactly once.`
       : 'There is no attachment. Return exactly one item extracted from the Slack text with file_ref_id null.',
     'Each item amount is that document’s total in its original currency. Never use a balance, subtotal when a total exists, or unit price when an extended total exists.',
-    'Use the document transaction date, not the Slack upload date, and format it YYYY-MM-DD.',
+    'Read every handwritten and printed amount field. When an amount is repeated, cross-check the repetitions before answering. A handwritten "$1000" means one thousand; never invent a leading digit.',
+    'Use the document transaction date, not the Slack upload date, and format it YYYY-MM-DD. Interpret two-digit years relative to the Slack submission date: for example, 13/08/26 on a 2026 post is 2026-08-13, not 2023-08-13.',
     'Choose the narrowest supported expense category. Quotations for repair parts, plumbing, filters, hardware, or installed equipment are normally maintenance unless the document clearly supports another category.',
     'Do not combine files, omit a file, or invent missing fields. If a document is unreadable, return null for the missing field and explain it in review_reason.',
     'All items in one reimbursement must use the same currency. Report the document faithfully if they differ; the workflow will hold the bundle for review.',
+    ...reimbursementContextLines(context),
     '',
     'Allowed expense categories:',
     choices,
   ].join('\n');
+}
+
+function validIsoDate(value) {
+  const text = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === text;
+}
+
+function reimbursementExtractionIssues(extracted, context = {}) {
+  const issues = [];
+  const items = Array.isArray(extracted?.items) ? extracted.items : [];
+  if (!items.length) return ['no reimbursement items were extracted'];
+  const submittedDate = validIsoDate(context.submittedDate) ? context.submittedDate : null;
+  const currencies = new Set();
+  items.forEach((item, offset) => {
+    const label = `item ${offset + 1}`;
+    if (!String(item.vendor || '').trim()) issues.push(`${label} vendor is missing`);
+    if (!validIsoDate(item.transaction_date)) {
+      issues.push(`${label} date is missing or invalid`);
+    } else if (submittedDate) {
+      const distance = Math.abs((new Date(`${item.transaction_date}T00:00:00.000Z`)
+        - new Date(`${submittedDate}T00:00:00.000Z`)) / 86_400_000);
+      if (distance > MAX_RECEIPT_DATE_DISTANCE_DAYS) {
+        issues.push(`${label} date is implausibly far from the Slack submission date`);
+      }
+    }
+    if (!['MXN', 'USD'].includes(item.currency)) issues.push(`${label} currency is missing`);
+    else currencies.add(item.currency);
+    if (!Number.isFinite(Number(item.amount)) || Number(item.amount) <= 0) issues.push(`${label} amount is missing`);
+    if (!String(item.description || '').trim()) issues.push(`${label} description is missing`);
+    if (!String(item.category_key || '').trim()) issues.push(`${label} expense category is missing`);
+    if (Number(item.confidence) < 0.8) {
+      issues.push(`${label} confidence ${Number(item.confidence || 0).toFixed(2)} is below 0.80`);
+    }
+  });
+  if (currencies.size > 1) issues.push('items use different currencies');
+  if (Number(extracted?.confidence) < 0.8) {
+    issues.push(`bundle confidence ${Number(extracted?.confidence || 0).toFixed(2)} is below 0.80`);
+  }
+  return [...new Set(issues)];
+}
+
+function extractionIsBetter(candidate, current, context) {
+  const candidateIssues = reimbursementExtractionIssues(candidate, context);
+  const currentIssues = reimbursementExtractionIssues(current, context);
+  if (candidateIssues.length !== currentIssues.length) return candidateIssues.length < currentIssues.length;
+  return Number(candidate?.confidence || 0) > Number(current?.confidence || 0);
 }
 
 function fileContentBlock(file) {
@@ -249,7 +316,7 @@ async function requestStructuredExtraction({ content, schema, schemaName, maxOut
   return { payload, model, request };
 }
 
-async function extractReimbursementReceipt({ messageText, files }, options = {}) {
+async function extractReimbursementReceipt({ messageText, files, context = {} }, options = {}) {
   const accounts = options.accounts || expenseAccountChoices();
   const categoryKeys = accounts.map(account => account.key);
   const selectedFiles = (Array.isArray(files) ? files : []).slice(0, MAX_FILES);
@@ -261,16 +328,18 @@ async function extractReimbursementReceipt({ messageText, files }, options = {})
     return { ok: false, confidence: 0, reviewReason: 'receipt source files do not have unique Slack file ids' };
   }
   const schema = reimbursementExtractionSchema(categoryKeys, fileIds);
+  const instructionText = [
+    buildReimbursementInstructions({ accounts, fileIds, context }),
+    '',
+    'Slack message:',
+    String(messageText || '').slice(0, 12_000) || '(no accompanying text)',
+    '',
+    `Source file ids in attachment order: ${fileIds.join(', ') || '(none)'}`,
+  ].join('\n');
+  const attachmentBlocks = [];
   const content = [{
     type: 'input_text',
-    text: [
-      buildReimbursementInstructions({ accounts, fileIds }),
-      '',
-      'Slack message:',
-      String(messageText || '').slice(0, 12_000) || '(no accompanying text)',
-      '',
-      `Source file ids in attachment order: ${fileIds.join(', ') || '(none)'}`,
-    ].join('\n'),
+    text: instructionText,
   }];
   let totalBytes = 0;
   for (const file of selectedFiles) {
@@ -279,35 +348,81 @@ async function extractReimbursementReceipt({ messageText, files }, options = {})
     if (totalBytes > MAX_TOTAL_BYTES) {
       return { ok: false, confidence: 0, reviewReason: `receipt attachments exceed ${MAX_TOTAL_BYTES} bytes` };
     }
+    attachmentBlocks.push(item.block);
     content.push(item.block);
   }
-  const response = await requestStructuredExtraction({
+  const firstResponse = await requestStructuredExtraction({
     content,
     schema,
     schemaName: 'reimbursement_receipt_bundle',
     maxOutputTokens: Math.min(6000, 800 + (selectedFiles.length || 1) * 500),
   }, options);
-  if (!response.payload) return response;
+  if (!firstResponse.payload) return firstResponse;
   try {
-    const raw = responseText(response.payload);
+    const raw = responseText(firstResponse.payload);
     if (!raw) throw new Error('no structured output text');
-    const extracted = validateReimbursementExtraction(JSON.parse(raw), categoryKeys, fileIds);
+    let extracted = validateReimbursementExtraction(JSON.parse(raw), categoryKeys, fileIds);
+    let selectedResponse = firstResponse;
+    const initialIssues = reimbursementExtractionIssues(extracted, context);
+    let verificationAttempted = false;
+    let verificationResponseId = null;
+    if (initialIssues.length) {
+      verificationAttempted = true;
+      const verificationContent = [{
+        type: 'input_text',
+        text: [
+          instructionText,
+          '',
+          'QUALITY-CONTROL RECHECK:',
+          'The first pass below has missing, low-confidence, or implausible fields. Independently reread every original attachment at high detail before returning a corrected bundle.',
+          'Pay special attention to handwritten vendor/purpose text, every repeated amount field, and two-digit dates. Do not preserve a first-pass value merely because it was previously returned.',
+          `First-pass issues: ${initialIssues.join('; ')}`,
+          `First-pass output: ${JSON.stringify(extracted)}`,
+        ].join('\n'),
+      }, ...attachmentBlocks];
+      const verificationResponse = await requestStructuredExtraction({
+        content: verificationContent,
+        schema,
+        schemaName: 'reimbursement_receipt_bundle_verification',
+        maxOutputTokens: Math.min(6000, 1000 + (selectedFiles.length || 1) * 550),
+      }, options);
+      verificationResponseId = verificationResponse.payload?.id || null;
+      if (verificationResponse.payload) {
+        const verificationRaw = responseText(verificationResponse.payload);
+        if (verificationRaw) {
+          try {
+            const verified = validateReimbursementExtraction(JSON.parse(verificationRaw), categoryKeys, fileIds);
+            if (extractionIsBetter(verified, extracted, context)) {
+              extracted = verified;
+              selectedResponse = verificationResponse;
+            }
+          } catch {
+            // Keep the valid first-pass extraction and its review issues if the
+            // quality-control response itself is malformed.
+          }
+        }
+      }
+    }
+    const validationIssues = reimbursementExtractionIssues(extracted, context);
     return {
       ok: true,
       extracted,
       confidence: extracted.confidence,
-      responseId: response.payload.id || null,
-      model: response.payload.model || response.model,
-      usage: response.payload.usage || null,
+      responseId: selectedResponse.payload.id || null,
+      verificationResponseId,
+      verificationAttempted,
+      validationIssues,
+      model: selectedResponse.payload.model || selectedResponse.model,
+      usage: selectedResponse.payload.usage || null,
       requestHash: crypto.createHash('sha256')
-        .update(JSON.stringify({ model: response.model, schema }))
+        .update(JSON.stringify({ model: selectedResponse.model, schema, instructionText, verificationAttempted }))
         .digest('hex'),
     };
   } catch (error) {
     return {
       ok: false,
       confidence: 0,
-      responseId: response.payload.id || null,
+      responseId: firstResponse.payload.id || null,
       reviewReason: `OpenAI extraction parse failed: ${error.message}`,
     };
   }
@@ -393,15 +508,19 @@ module.exports = {
   DEFAULT_MODEL,
   ENDPOINT,
   MAX_FILES,
+  MAX_RECEIPT_DATE_DISTANCE_DAYS,
   MAX_TOTAL_BYTES,
   buildInstructions,
   buildReimbursementInstructions,
   extractOwnerExpense,
   extractReimbursementReceipt,
+  extractionIsBetter,
   extractionSchema,
   reimbursementExtractionSchema,
   fileContentBlock,
   responseText,
+  reimbursementContextLines,
+  reimbursementExtractionIssues,
   validateExtraction,
   validateReimbursementExtraction,
 };
