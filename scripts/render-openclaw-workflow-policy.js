@@ -64,7 +64,7 @@ function loadedPluginIds(openclawBin = process.env.OPENCLAW_BIN || '/opt/homebre
   }
 }
 
-function render({ policy, currentConfig, pluginIds = [] }) {
+function resolveSlackAccountId(policy, currentConfig) {
   const configuredAccounts = Object.keys(currentConfig.channels?.slack?.accounts || {});
   const policyNames = new Set(Object.values(policy.channels || {}).map(channel => channel.name));
   const scoredAccounts = configuredAccounts.map(id => {
@@ -80,7 +80,60 @@ function render({ policy, currentConfig, pluginIds = [] }) {
   if (!accountId) {
     throw new Error('OPENCLAW_SLACK_ACCOUNT is required when the OpenClaw config has zero or multiple Slack accounts');
   }
+  return accountId;
+}
+
+function normalizeJoinedSlackChannels(groups) {
+  if (!Array.isArray(groups)) throw new Error('Slack group directory response must be an array');
+  const channels = new Map();
+  for (const group of groups) {
+    const raw = group?.raw || {};
+    if ((raw.is_member ?? group?.is_member) !== true) continue;
+    if ((raw.is_archived ?? group?.is_archived) === true) continue;
+    const id = raw.id || String(group?.id || '').replace(/^channel:/, '');
+    if (!/^C[A-Z0-9]+$/.test(id)) continue;
+    const name = raw.name || group?.name || id;
+    channels.set(id, { id, name });
+  }
+  return [...channels.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function joinedSlackChannels(accountId, openclawBin = process.env.OPENCLAW_BIN || '/opt/homebrew/bin/openclaw') {
+  let raw;
+  try {
+    raw = execFileSync(openclawBin, [
+      'directory', 'groups', 'list',
+      '--channel', 'slack',
+      '--account', accountId,
+      '--limit', '500',
+      '--json',
+    ], { encoding: 'utf8', timeout: 30_000, maxBuffer: 5 * 1024 * 1024 });
+  } catch (error) {
+    throw new Error(`failed to discover joined Slack channels for ${accountId}: ${error.message}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`invalid Slack group directory response for ${accountId}: ${error.message}`);
+  }
+  const channels = normalizeJoinedSlackChannels(parsed);
+  if (channels.length === 0) {
+    throw new Error(`Slack account ${accountId} is not a member of any active channels`);
+  }
+  return channels;
+}
+
+function render({ policy, currentConfig, pluginIds = [], joinedChannels = [] }) {
+  const accountId = resolveSlackAccountId(policy, currentConfig);
   const channels = {};
+  for (const channel of joinedChannels) {
+    channels[channel.id] = {
+      enabled: true,
+      requireMention: false,
+      allowBots: false,
+    };
+  }
   const liveWorkflows = new Set(Array.isArray(policy.live_workflows) ? policy.live_workflows : []);
   for (const [channelId, channel] of Object.entries(policy.channels || {})) {
     const receipt = channel.capabilities.includes('accounting.read_scoped');
@@ -210,7 +263,13 @@ function render({ policy, currentConfig, pluginIds = [] }) {
 function main() {
   const policy = JSON.parse(fs.readFileSync(POLICY_PATH, 'utf8'));
   const currentConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  const patch = render({ policy, currentConfig, pluginIds: loadedPluginIds() });
+  const accountId = resolveSlackAccountId(policy, currentConfig);
+  const patch = render({
+    policy,
+    currentConfig,
+    pluginIds: loadedPluginIds(),
+    joinedChannels: joinedSlackChannels(accountId),
+  });
   const outputIndex = process.argv.indexOf('--output');
   const output = outputIndex >= 0 ? process.argv[outputIndex + 1] : null;
   if (outputIndex >= 0 && !output) throw new Error('--output requires a file path');
@@ -232,9 +291,12 @@ module.exports = {
   CONFIG_PATH,
   POLICY_PATH,
   PROMPTS,
+  joinedSlackChannels,
   loadedPluginIds,
   noAuthorityPrompt,
+  normalizeJoinedSlackChannels,
   receiptPrompt,
+  resolveSlackAccountId,
   ownerExpensePrompt,
   render,
 };

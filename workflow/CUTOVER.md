@@ -34,6 +34,11 @@ worker and health/restore agents from the same reviewed commit. Confirm
 Confirm `workflow/policy.json` still has `"shadow_mode": true`. Review the
 rendered OpenClaw patch and generated plists. Do not replace the full OpenClaw
 config with the patch; merge only its Slack channel policy and plugin sections.
+The policy renderer queries the configured resort Slack account and adds every
+non-archived channel that Sol has joined to the stable-ID ingress allowlist.
+Only channels in ignored `workflow/policy.json` receive resort workflow tools
+or business-system authority; ordinary joined channels retain default Sol
+conversation behavior without gaining controlled workflow capabilities.
 The guarded `npm run apply:openclaw-shadow` command performs that merge,
 validates it, and creates a mode-600 config backup before the atomic write.
 `npm run install:shadow-services` installs only the durable worker, health
