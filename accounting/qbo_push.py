@@ -472,8 +472,9 @@ def verify_receipt_purchase_readback(txn: Dict, purchase: Dict) -> None:
         raise RuntimeError('QBO receipt purchase total failed readback')
     if actual_amounts != expected_amounts or actual_accounts != expected_accounts:
         raise RuntimeError('QBO receipt purchase split lines failed readback')
-    if str(txn.get('payment_reference')) not in str(purchase.get('PrivateNote') or ''):
-        raise RuntimeError('QBO receipt purchase reference failed readback')
+    ledger_marker = txn.get('payment_reference') or txn.get('receipt_id')
+    if not ledger_marker or str(ledger_marker) not in str(purchase.get('PrivateNote') or ''):
+        raise RuntimeError('QBO receipt purchase ledger marker failed readback')
 
 
 def push_classified_to_qbo(

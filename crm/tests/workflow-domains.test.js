@@ -421,8 +421,7 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     const instructionPayload = JSON.parse(instruction.payload_json);
     assert.equal(instructionPayload.channelId, 'RECEIPT-A');
     assert.equal(instructionPayload.threadTs, '171.2');
-    assert.match(instructionPayload.message, /<@U123MAYELA> \*Kapital payment instruction\*/);
-    assert.match(instructionPayload.message, /<@UTESTWORKER>, please confirm/);
+    assert.match(instructionPayload.message, /<@U123MAYELA> por favor confirma que el gasto y la clasificación son válidos/);
     assert.match(instructionPayload.message, /MXN \$1,000\.00 · Maintenance/);
     assert.match(instructionPayload.message, /MXN \$250\.00 · Cleaning Services/);
     assert.match(instructionPayload.message, new RegExp(receipt.payment_reference));
@@ -453,7 +452,7 @@ test('receipt ingestion is idempotent, hash-verified, and channel-scoped', async
     const [correctedInstruction] = await db.query(sql`SELECT payload_json FROM workflow_outbox
       WHERE id=${corrected.output.outboxId}`);
     assert.match(JSON.parse(correctedInstruction.payload_json).message,
-      /Corrected Kapital-compatible reimbursement instruction/);
+      /Instrucción corregida para el reembolso en Kapital/);
 
     assert.throws(() => annotate.validate({
       receiptId: first.output.receiptId, amount: 1250, currency: 'MXN',

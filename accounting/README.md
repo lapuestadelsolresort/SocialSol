@@ -53,14 +53,18 @@ Normal reimbursement posts are annotated as a single bundle with one child
 item per attached receipt. Annotation replies in the original Slack thread
 with the itemized total and a stable, alphanumeric-only `LPDSR…` Kapital
 concept for the
-configured payment approver to copy exactly. New referenced reimbursements
+configured payment approver to copy exactly. Multi-attachment posts are never
+split or reposted, and Mayela-facing validation/payment instructions are in
+Spanish. New referenced reimbursements
 reconcile on that exact concept plus amount and currency; the legacy ±3-day
 rule is used only for older receipts that have no payment reference. Receipt
 annotation and reference generation never need a CLABE, bank-account number,
 or bank name. When proof shows a transfer was already completed without the
 workflow reference, the receipt is marked already paid, no duplicate transfer
 instruction is issued, and its actual description plus non-sensitive payment
-folio are preserved for legacy reconciliation. A matched
+folio are preserved for legacy reconciliation. A top-level payment-confirmation
+PDF is held for linkage to the original bundle and cannot generate another
+payable reimbursement or payment code. A matched
 bundle is written to QBO with one expense line per receipt item so mixed
 categories remain split even though Kapital contains one reimbursement.
 If an uncoded transfer has the same payee, currency, and amount within 30 days

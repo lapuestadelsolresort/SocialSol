@@ -128,6 +128,7 @@ function buildReimbursementInstructions({ accounts, fileIds, context = {} }) {
     'Each item amount is that document’s total in its original currency. Never use a balance, subtotal when a total exists, or unit price when an extended total exists.',
     'Read every handwritten and printed amount field. When an amount is repeated, cross-check the repetitions before answering. A handwritten "$1000" means one thousand; never invent a leading digit.',
     'Use the document transaction date, not the Slack upload date, and format it YYYY-MM-DD. Interpret two-digit years relative to the Slack submission date: for example, 13/08/26 on a 2026 post is 2026-08-13, not 2023-08-13.',
+    'For a petty-cash voucher, the named worker, service provider, recipient, or person identified in the Slack message is the vendor. A missing store header or blank "recibido por" box does not make the vendor unknown when the worker is identified elsewhere.',
     'Choose the narrowest supported expense category. Quotations for repair parts, plumbing, filters, hardware, or installed equipment are normally maintenance unless the document clearly supports another category.',
     'Do not combine files, omit a file, or invent missing fields. If a document is unreadable, return null for the missing field and explain it in review_reason.',
     'All items in one reimbursement must use the same currency. Report the document faithfully if they differ; the workflow will hold the bundle for review.',

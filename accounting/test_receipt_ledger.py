@@ -21,7 +21,11 @@ class ReceiptLedgerTests(unittest.TestCase):
                 payment_reference TEXT
             );
             CREATE TABLE accounting_reconciliations (
-                receipt_id TEXT, status TEXT
+                receipt_id TEXT, status TEXT, bank_reference TEXT
+            );
+            CREATE TABLE accounting_bank_transactions (
+                source_key TEXT, transaction_date TEXT, description TEXT,
+                reference TEXT, currency TEXT, amount REAL
             );
             CREATE TABLE accounting_receipt_items (
                 receipt_id TEXT, item_index INTEGER, amount REAL, currency TEXT,
@@ -31,7 +35,8 @@ class ReceiptLedgerTests(unittest.TestCase):
                 'receipt-1', 'matched', 'MXN', 2105, 'maintenance', 'Maintenance',
                 'Five petty-cash receipts', 'LPDSRA1B2C3D4E5F60718'
             );
-            INSERT INTO accounting_reconciliations VALUES ('receipt-1', 'matched');
+            INSERT INTO accounting_reconciliations (receipt_id, status)
+                VALUES ('receipt-1', 'matched');
             INSERT INTO accounting_receipt_items VALUES
                 ('receipt-1', 1, 340, 'MXN', 'maintenance', 'Maintenance', 'A', 'Item A'),
                 ('receipt-1', 2, 30, 'MXN', 'maintenance', 'Maintenance', 'B', 'Item B'),
@@ -70,6 +75,46 @@ class ReceiptLedgerTests(unittest.TestCase):
         )
         self.assertEqual(len(results['auto']), 0)
         self.assertTrue(results['unknown'][0]['receipt_reference_error'])
+
+    def test_uncoded_reconciled_rounding_match_preserves_receipt_split(self):
+        connection = sqlite3.connect(self.database)
+        connection.executescript("""
+            INSERT INTO accounting_receipts VALUES (
+                'receipt-2', 'matched', 'MXN', 1087.09, NULL, NULL,
+                'Susy cleaning and supplies', NULL
+            );
+            INSERT INTO accounting_receipt_items VALUES
+                ('receipt-2', 1, 87.09, 'MXN', 'supplies', 'Supplies',
+                 'Miscelanea Mi Pollo', 'Household supplies and sandpaper'),
+                ('receipt-2', 2, 1000, 'MXN', 'cleaning_services', 'Cleaning Services',
+                 'Susy', 'Cleaning for two days');
+            INSERT INTO accounting_bank_transactions VALUES (
+                'bank-susy-1088', '2026-08-13', 'WEEKLY PAYMENT COMMON AREAS',
+                'Clave: 0673606335', 'MXN', 1088
+            );
+            INSERT INTO accounting_reconciliations VALUES (
+                'receipt-2', 'matched', 'bank-susy-1088'
+            );
+        """)
+        connection.close()
+        transaction = {
+            'date': '2026-08-13', 'description': 'WEEKLY PAYMENT COMMON AREAS',
+            'reference': 'Clave: 0673606335', 'amount': 1088, 'currency': 'MXN',
+            'confidence': 'guess', 'category': 'cleaning_services',
+        }
+        results = apply_receipt_ledger(
+            {'auto': [], 'guess': [transaction], 'unknown': []}, str(self.database)
+        )
+        self.assertEqual(len(results['auto']), 1)
+        enriched = results['auto'][0]
+        self.assertEqual(enriched['receipt_id'], 'receipt-2')
+        self.assertIsNone(enriched['payment_reference'])
+        self.assertEqual(enriched['category'], 'receipt_bundle')
+        self.assertEqual(
+            [item['category_key'] for item in enriched['receipt_items']],
+            ['supplies', 'cleaning_services'],
+        )
+        self.assertEqual(sum(item['amount'] for item in enriched['receipt_items']), 1087.09)
 
     def test_reference_extraction_is_exact_and_case_insensitive(self):
         self.assertEqual(
