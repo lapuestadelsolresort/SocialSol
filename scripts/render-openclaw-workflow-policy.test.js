@@ -54,7 +54,8 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   assert.match(account.channels.CACCT1.systemPrompt, /CSV attachments are captured automatically/);
   assert.match(account.channels.CACCT1.systemPrompt, /Never manually save an upload/);
   assert.match(account.channels.COWNER1.systemPrompt, /owner-ledger channel/);
-  assert.match(account.channels.COWNER1.systemPrompt, /confirm repayment/);
+  assert.match(account.channels.COWNER1.systemPrompt, /Channel membership is conclusive provenance/);
+  assert.match(account.channels.COWNER1.systemPrompt, /every top-level expense post was paid personally/);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.socialChannelIds, ['CSOCIAL1']);
   assert.deepEqual(account.channels.CSOCIAL1.tools.allow, ['resort_workflow']);
   assert.equal(patch.plugins.allow.includes('resort-workflows'), true);
