@@ -32,6 +32,8 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   assert.deepEqual(Object.keys(account.channels).sort(), ['CACCT1', 'COWNER1', 'CRECEIPT1', 'CSOCIAL1', 'CWA123']);
   assert.equal(Object.hasOwn(account.channels.CWA123, 'users'), false);
   assert.deepEqual(account.channels.CWA123.tools.alsoAllow, ['resort_workflow']);
+  assert.match(account.channels.CWA123.systemPrompt, /whatsapp\.status\.read with direction=outbound/);
+  assert.match(account.channels.CWA123.systemPrompt, /legacy coverage notes/);
   assert.equal(patch.plugins.entries['resort-workflows'].config.shadowMode, true);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.receiptChannelIds, ['CRECEIPT1', 'COWNER1']);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.ownerExpenseChannelIds, ['COWNER1']);
@@ -113,7 +115,7 @@ test('email console rendering keeps proposals threaded and confirmations channel
   }
 });
 
-test('business intelligence retains its domain prompt in shadow mode and can read Gmail activity', () => {
+test('business intelligence retains its domain prompt in shadow mode and can read live activity', () => {
   const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
   process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';
   try {
@@ -127,6 +129,8 @@ test('business intelligence retains its domain prompt in shadow mode and can rea
     });
     const business = patch.channels.slack.accounts['test-account'].channels.CBI;
     assert.match(business.systemPrompt, /call email\.activity\.read against Sarah Gmail live/);
+    assert.match(business.systemPrompt, /whatsapp\.status\.read with direction=outbound/);
+    assert.match(business.systemPrompt, /every returned persisted Twilio state/);
     assert.match(business.systemPrompt, /cross-domain read surface/);
     assert.match(business.systemPrompt, /SHADOW MODE/);
     assert.deepEqual(business.tools.alsoAllow, ['resort_workflow']);

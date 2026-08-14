@@ -50,7 +50,7 @@ const WORKFLOW_SCHEMA = {
     },
     input: {
       type: 'object',
-      description: 'Workflow input. For whatsapp.reply pass message and optionally dmId; the trusted Slack thread is supplied by the plugin.',
+      description: 'Workflow input. For whatsapp.status.read use direction (outbound by default, inbound, or all), optional limit (1-100), and optional messageSid; a trusted current Slack thread is applied automatically. For whatsapp.reply pass message and optionally dmId; the trusted Slack thread is supplied by the plugin.',
       additionalProperties: true,
     },
   },
@@ -168,6 +168,65 @@ function statusTruth(status) {
   return 'Twilio accepted the request; delivery and read are not confirmed.';
 }
 
+function safeInline(value, fallback, maxLength = 80) {
+  const normalized = String(value || '').replace(/[\r\n\t]+/g, ' ').replace(/[<>&*_~`]/g, '').trim();
+  if (!normalized) return fallback;
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function whatsappLedgerTruth(message) {
+  const status = String(message?.delivery_status || 'untracked_legacy');
+  if (message?.direction === 'inbound') return `inbound received (Twilio webhook persisted; ledger state: ${status})`;
+  if (message?.direction === 'legacy_untracked' || status === 'untracked_legacy') {
+    return 'legacy/untracked (no persisted Twilio callback state)';
+  }
+  if (status === 'read') return 'read (Twilio-confirmed)';
+  if (status === 'delivered') return 'delivered (Twilio-confirmed; read unconfirmed)';
+  if (status === 'failed') return 'failed (Twilio-confirmed)';
+  if (status === 'verified_by_readback') return 'verified by provider readback';
+  if (status === 'sent') return 'sent (delivery/read unconfirmed)';
+  if (status === 'queued') return 'queued (delivery/read unconfirmed)';
+  if (status === 'accepted_by_provider') return 'accepted by Twilio (delivery/read unconfirmed)';
+  if (status === 'requested') return 'requested locally (Twilio acceptance unconfirmed)';
+  return `${safeInline(status, 'unknown', 40)} (delivery/read unconfirmed)`;
+}
+
+function formatWhatsAppStatusReply(payload) {
+  const run = payload?.run;
+  const output = run?.output || {};
+  const messages = Array.isArray(output.messages) ? output.messages : [];
+  const total = Number(output.totalMessages ?? messages.length);
+  const direction = ['outbound', 'inbound', 'all'].includes(output.direction) ? output.direction : 'outbound';
+  const scope = direction === 'all' ? 'message' : `${direction} message`;
+  const lines = [`*WhatsApp ${scope} status:* ${total} persisted record${total === 1 ? '' : 's'}.`];
+  if (!messages.length) {
+    lines.push('', `No matching ${scope} records were found in the durable WhatsApp ledger.`);
+  } else {
+    lines.push('');
+    for (const message of messages) {
+      const contact = safeInline(message.contact_name, 'unknown guest', 60);
+      const observedAt = safeInline(
+        message.provider_status_updated_at || message.received_at,
+        'unknown time',
+        40,
+      );
+      const messageSid = safeInline(message.message_id, 'no provider SID', 100);
+      const actor = message.direction === 'outbound' && message.sent_by_name
+        ? ` · sent by ${safeInline(message.sent_by_name, 'Staff', 40)}` : '';
+      lines.push(`• ${contact} · ${whatsappLedgerTruth(message)} · ${observedAt} · ${messageSid}${actor}`);
+    }
+  }
+  if (output.truncated) {
+    lines.push('', `${Number(output.displayedMessages || messages.length)} of ${total} matching records are shown; narrow by messageSid or increase limit up to 100.`);
+  }
+  const legacyCount = Number(output.legacyUntrackedMessages || 0);
+  if (legacyCount > 0) {
+    lines.push('', `Coverage note: ${legacyCount} older WhatsApp record${legacyCount === 1 ? '' : 's'} predate durable direction/status tracking. They cannot be classified as outbound or assigned a Twilio delivery state.`);
+  }
+  lines.push('', `Workflow: ${run.id}${output._evidence?.id ? ` · Evidence: ${output._evidence.id}` : ''}`);
+  return lines.join('\n');
+}
+
 function ownerRezDateLabel(value) {
   const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return String(value || 'unknown date');
@@ -267,6 +326,9 @@ export function formatWorkflowReply(payload) {
       statusTruth(output.status),
       `Workflow: ${run.id}${output.effectId ? ` · Effect: ${output.effectId}` : ''}`,
     ].join('\n');
+  }
+  if (run.workflow_name === 'whatsapp.status.read') {
+    return formatWhatsAppStatusReply(payload);
   }
   if (run.workflow_name === 'meta.dm.reply') {
     const output = run.output || {};

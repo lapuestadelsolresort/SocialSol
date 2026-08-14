@@ -20,10 +20,10 @@ async function queryIfTable(db, name, query, fallback) {
   return db.query(query);
 }
 
-function evidenceReadDefinition({ name, capability, validate = () => {}, collect }) {
+function evidenceReadDefinition({ name, version = 1, capability, validate = () => {}, collect }) {
   return {
     name,
-    version: 1,
+    version,
     capability,
     mutates: false,
     validate,
@@ -108,6 +108,25 @@ function validateLimit(input) {
   if (input.limit !== undefined) {
     const limit = Number(input.limit);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
+  }
+}
+
+function validateWhatsAppStatusInput(input) {
+  validateLimit(input);
+  const unsupported = Object.keys(input).filter(key => !['direction', 'limit', 'messageSid', 'threadTs'].includes(key));
+  if (unsupported.length) {
+    throw new Error(`unsupported whatsapp.status.read input: ${unsupported.join(', ')}; use direction, limit, or messageSid`);
+  }
+  if (input.direction !== undefined && !['outbound', 'inbound', 'all'].includes(String(input.direction))) {
+    throw new Error('direction must be outbound, inbound, or all');
+  }
+  if (input.messageSid !== undefined) {
+    const messageSid = String(input.messageSid).trim();
+    if (!messageSid || messageSid.length > 100) throw new Error('messageSid must be 1 to 100 characters');
+  }
+  if (input.threadTs !== undefined) {
+    const threadTs = String(input.threadTs).trim();
+    if (!threadTs || threadTs.length > 64) throw new Error('threadTs must be 1 to 64 characters');
   }
 }
 
@@ -232,23 +251,63 @@ const emailActivityRead = evidenceReadDefinition({
 
 const whatsappStatusRead = evidenceReadDefinition({
   name: 'whatsapp.status.read',
+  version: 2,
   capability: 'whatsapp.read',
-  validate: validateLimit,
+  validate: validateWhatsAppStatusInput,
   async collect({ db, input }) {
     const limit = Number(input.limit || 25);
-    const messageSid = input.messageSid ? String(input.messageSid).slice(0, 100) : null;
+    const messageSid = input.messageSid ? String(input.messageSid).trim().slice(0, 100) : null;
+    const threadTs = input.threadTs ? String(input.threadTs).trim().slice(0, 64) : null;
+    const direction = input.direction ? String(input.direction) : (messageSid ? 'all' : 'outbound');
     const rows = await queryIfTable(db, 'meta_messages', sql`SELECT
-      message_id, sender_name, received_at, slack_thread_ts, direction,
-      COALESCE(delivery_status,'unknown') AS delivery_status,
-      provider_status_updated_at, delivered_at, read_at, failed_at,
-      workflow_run_id, workflow_effect_id
-      FROM meta_messages WHERE platform='whatsapp'
-        AND (${messageSid} IS NULL OR message_id=${messageSid})
-      ORDER BY received_at DESC LIMIT ${limit}`, []);
+      m.message_id,
+      CASE WHEN m.direction='outbound' THEN COALESCE(
+        (SELECT exact.sender_name FROM meta_messages exact
+          WHERE exact.platform='whatsapp'
+            AND exact.id=CAST(json_extract(m.raw_payload, '$.reply_to_dm_id') AS INTEGER)
+            AND (exact.direction='inbound' OR (exact.direction IS NULL AND exact.sender_id!='outbound'))
+          LIMIT 1),
+        (SELECT threaded.sender_name FROM meta_messages threaded
+          WHERE threaded.platform='whatsapp'
+            AND m.slack_thread_ts IS NOT NULL
+            AND threaded.slack_thread_ts=m.slack_thread_ts
+            AND (threaded.direction='inbound' OR (threaded.direction IS NULL AND threaded.sender_id!='outbound'))
+          ORDER BY threaded.received_at DESC LIMIT 1),
+        'unknown guest'
+      ) ELSE COALESCE(m.sender_name, 'unknown guest') END AS contact_name,
+      CASE WHEN m.direction='outbound' THEN COALESCE(m.sender_name, 'Staff') ELSE NULL END AS sent_by_name,
+      m.received_at, m.slack_thread_ts,
+      COALESCE(m.direction,'legacy_untracked') AS direction,
+      COALESCE(m.delivery_status,'untracked_legacy') AS delivery_status,
+      m.provider_status_updated_at, m.delivered_at, m.read_at, m.failed_at,
+      m.workflow_run_id, m.workflow_effect_id
+      FROM meta_messages m WHERE m.platform='whatsapp'
+        AND (${messageSid} IS NULL OR m.message_id=${messageSid})
+        AND (${threadTs} IS NULL OR m.slack_thread_ts=${threadTs})
+        AND (${direction}='all' OR m.direction=${direction})
+      ORDER BY m.received_at DESC LIMIT ${limit}`, []);
+    const [summary = {}] = await queryIfTable(db, 'meta_messages', sql`SELECT
+      SUM(CASE WHEN direction IS NULL OR delivery_status IS NULL THEN 1 ELSE 0 END) AS legacy_untracked_messages,
+      SUM(CASE WHEN (${messageSid} IS NULL OR message_id=${messageSid})
+        AND (${threadTs} IS NULL OR slack_thread_ts=${threadTs})
+        AND (${direction}='all' OR direction=${direction}) THEN 1 ELSE 0 END) AS matching_messages
+      FROM meta_messages WHERE platform='whatsapp'`, [{}]);
+    const totalMessages = Number(summary.matching_messages || 0);
     return {
       source: 'twilio.callback_ledger',
-      sourceRef: messageSid,
-      payload: { messages: rows, statusVocabulary: ['requested','accepted_by_provider','queued','sent','delivered','read','verified_by_readback','failed'] },
+      sourceRef: messageSid || (threadTs ? `slack-thread:${threadTs}` : `direction:${direction}`),
+      payload: {
+        direction,
+        messageSid,
+        threadTs,
+        totalMessages,
+        displayedMessages: rows.length,
+        truncated: totalMessages > rows.length,
+        legacyUntrackedMessages: Number(summary.legacy_untracked_messages || 0),
+        legacyCoverageNote: 'Legacy WhatsApp rows without durable direction or Twilio callback state cannot be classified as outbound or assigned a delivery state.',
+        messages: rows,
+        statusVocabulary: ['requested','accepted_by_provider','queued','sent','delivered','read','verified_by_readback','failed','untracked_legacy'],
+      },
     };
   },
 });
@@ -492,5 +551,11 @@ module.exports = {
   socialContentRead,
   squarespaceSummaryRead,
   whatsappStatusRead,
-  _internal: { addCalendarDays, bodyPreview, validateEmailActivityInput, zonedMidnightUtc },
+  _internal: {
+    addCalendarDays,
+    bodyPreview,
+    validateEmailActivityInput,
+    validateWhatsAppStatusInput,
+    zonedMidnightUtc,
+  },
 };
