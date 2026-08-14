@@ -89,12 +89,33 @@ test('parses email replies, confirmations, and classifications only in the origi
   assert.deepEqual(parseEmailCommand(`!email confirm ${id} abcdef123456`, { hasThread: true }), {
     action: 'confirm', proposalId: id, acceptanceHash: 'abcdef123456',
   });
+  assert.deepEqual(parseEmailCommand(`\`!email confirm ${id} abcdef123456\``, { hasThread: true }), {
+    action: 'confirm', proposalId: id, acceptanceHash: 'abcdef123456',
+  });
+  assert.deepEqual(parseEmailCommand(`!email confirm \`${id} abcdef123456\``, { hasThread: true }), {
+    action: 'confirm', proposalId: id, acceptanceHash: 'abcdef123456',
+  });
   assert.deepEqual(parseEmailCommand('!email classify 17 hot', { hasThread: true }), {
     action: 'classify', eventId: 17, quality: 'hot',
   });
   assert.deepEqual(parseEmailCommand('!email reply 10339 | bypass', { hasThread: false }), {
     error: 'original_thread_required',
   });
+});
+
+test('email proposal reply exposes a plain copyable command and no deadline', () => {
+  const command = '!email confirm 4df5fc31-c9f8-4b30-8dcc-0a13482beedd abcdef123456';
+  const text = formatWorkflowReply({ run: {
+    id: 'email-proposal-run', workflow_name: 'email.reply.propose', status: 'completed',
+    output: {
+      recipient: 'Gretel', outreachSendId: 10339, requestHash: 'request-hash',
+      bodyText: 'Here are the rates.', confirmationCommand: command, doesNotExpire: true,
+    },
+  } });
+  assert.match(text, /does not expire/);
+  assert.match(text, new RegExp(`\\n${command.replaceAll('-', '\\-')}\\n`));
+  assert.doesNotMatch(text, /Expires:/);
+  assert.doesNotMatch(text, new RegExp(`\`${command.replaceAll('-', '\\-')}\``));
 });
 
 test('email reply commands bind the trusted Slack user, message, channel, and thread', async () => {

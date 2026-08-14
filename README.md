@@ -103,7 +103,8 @@ business at sale.
 - Paulina email replies are recorded in the original Slack draft thread. Gmail
   Inbox and Sarah Sent are polled read-only into `email_threads`; reply bodies
   are classified only after quoted history is removed. In that original thread,
-  `!email reply <message>` creates an immutable 15-minute proposal. Only the
+  `!email reply <message>` creates an immutable proposal that remains pending
+  until it is confirmed. Only the
   same authorized Slack user pasting the emitted `!email confirm …` in the same
   thread can send through Sarah's Gmail. The graph records Gmail acceptance,
   Sent-folder readback, the outbound CRM event, and its Slack-thread projection.

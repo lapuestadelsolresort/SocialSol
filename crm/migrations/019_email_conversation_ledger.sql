@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS email_reply_proposals (
   provider_thread_id TEXT,
   workflow_effect_id TEXT REFERENCES workflow_effects(id),
   processing_error TEXT,
-  expires_at TEXT NOT NULL,
+  expires_at TEXT,
   confirmed_at TEXT,
   completed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

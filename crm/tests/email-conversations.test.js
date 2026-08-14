@@ -183,6 +183,7 @@ test('legacy Gmail reply proposals migrate without losing pending confirmations'
       .map(column => [column.name, column]));
     assert.equal(columns.get('outreach_send_id').notnull, 0);
     assert.equal(columns.get('contact_id').notnull, 0);
+    assert.equal(columns.get('expires_at').notnull, 0);
     assert.equal(columns.get('provider').notnull, 1);
     const [proposal] = await db.query(sql`SELECT * FROM email_reply_proposals WHERE id='proposal-legacy'`);
     assert.equal(proposal.provider, 'gmail');
