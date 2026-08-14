@@ -68,6 +68,11 @@ def check_for_duplicates(
 
     for e in existing:
         note = e.get('PrivateNote', '')
+        # SPEI fee purchases carry the parent Clave and original transfer
+        # amount for exact fee reconciliation. They must never participate in
+        # principal deduplication by Clave, MXN amount, or converted amount.
+        if re.match(r'^SPEI\s+(?:Commission|IVA)\s+on transfer\b', note, re.IGNORECASE):
+            continue
         # Extract Kapital Clave reference
         ref_match = re.search(r'Clave:\s*(136-[\d/\-]+)', note)
         if ref_match:
@@ -106,6 +111,23 @@ def check_for_duplicates(
             txn['_dedup_reason'] = f'Clave {clave} already in QBO'
             txn['_dedup_qbo_id'] = str(matched.get('Id') or '') or None
             txn['_dedup_entity_type'] = matched.get('_entity_type')
+            if re.search(
+                r'REVIEW REQUIRED:\s*unresolved Kapital debit recorded to Uncategorized Expense',
+                str(matched.get('PrivateNote') or ''),
+                re.IGNORECASE,
+            ):
+                txn['_original_category_key'] = (
+                    txn.get('original_category_key') or txn.get('category')
+                )
+                txn['_original_category_name'] = (
+                    txn.get('original_category_name') or txn.get('category_name')
+                )
+                txn['category'] = 'uncategorized_expense'
+                txn['category_name'] = 'Uncategorized Expense'
+                txn['_requires_review'] = True
+                txn['_review_reason'] = (
+                    'Existing QBO principal is recorded to Uncategorized Expense; category review required'
+                )
             dupes.append(txn)
             continue
 

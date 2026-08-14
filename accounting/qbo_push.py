@@ -750,7 +750,7 @@ def push_classified_to_qbo(
                 summary['warnings'].append(
                     f"DEDUP SKIP: {d.get('date')} ${d.get('amount_usd', 0):.2f} — {d.get('_dedup_reason', 'duplicate')}"
                 )
-                summary['dedup_details'].append(_transaction_detail(
+                detail = _transaction_detail(
                     d,
                     status='EXISTING',
                     bucket=bucket_by_id.get(id(d), 'auto'),
@@ -758,7 +758,10 @@ def push_classified_to_qbo(
                 ) | {
                     'qbo_entity_type': d.get('_dedup_entity_type'),
                     'dedup_reason': d.get('_dedup_reason'),
-                })
+                }
+                summary['dedup_details'].append(detail)
+                if d.get('_requires_review'):
+                    summary['review_details'].append(detail)
 
         # Rebuild bucket lists with only genuinely new transactions. Review
         # debits are copied into Uncategorized Expense, never into a guessed
