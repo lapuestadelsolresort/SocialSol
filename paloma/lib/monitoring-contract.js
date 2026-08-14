@@ -162,6 +162,7 @@ function cronMatches(job, expected, agentId) {
 function soulMonitoringBlock({ accountId, databasePath }) {
   const account = requiredString(accountId, 'Paloma Slack account id');
   const database = path.resolve(requiredString(databasePath, 'Paloma task database path'));
+  const taskReporter = path.join(path.dirname(path.dirname(database)), 'scripts', 'task-report.js');
   return `${SOUL_BLOCK_START}
 ## Always-on Slack task monitoring
 
@@ -171,6 +172,7 @@ function soulMonitoringBlock({ accountId, databasePath }) {
 - A manager or teammate directly assigning work to another person is a task. In particular, an @mention of a staff member followed by an action request must be logged even when Paloma is not addressed.
 - For a new task, check \`tasks.source_ts\` first, insert using the database's exact current schema, and post one brief bilingual acknowledgment in the source thread. Prefer the explicitly mentioned assignee; do not silently substitute a channel-default assignee.
 - Reconcile clear status replies against the existing task and record the update. Ignore casual chatter and return only \`NO_REPLY\` when the message truly contains no new task or task-status change.
+- Task-list and status questions are Paloma's core read responsibility in every joined channel. Never use Slack member-info or an improvised SQL query as a prerequisite. For "my tasks", run \`node ${taskReporter} --user-id <TRUSTED_SENDER_ID> --status active\`. For a configured person such as Sergio, run \`node ${taskReporter} --assignee sergio --status active\`. Use \`--status completed\` when asked what is done and \`--status all\` for a complete history. Return the command's bilingual stdout verbatim so no matching task is omitted. Only say the task database is unavailable when this command exits nonzero, and report its actual error.
 - Never say that Paloma only sees messages during active sessions or when pinged. Real-time unmentioned events are enabled, and the periodic all-membership scan is the recovery path.
 ${SOUL_BLOCK_END}`;
 }

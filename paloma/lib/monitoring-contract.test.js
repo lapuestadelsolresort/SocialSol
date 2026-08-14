@@ -101,6 +101,9 @@ test('managed SOUL block is idempotent and applies task detection to every joine
   const twice = mergeSoulMonitoringBlock(once, block);
   assert.equal(twice, once);
   assert.match(once, /whether or not Paloma is mentioned/);
+  assert.match(once, /task-report\.js --user-id <TRUSTED_SENDER_ID> --status active/);
+  assert.match(once, /Never use Slack member-info or an improvised SQL query/);
+  assert.match(once, /Return the command's bilingual stdout verbatim/);
   assert.match(once, /directly assigning work to another person is a task/);
 });
 

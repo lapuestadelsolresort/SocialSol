@@ -931,6 +931,13 @@ export function createControlledChannelToolGuard({ config } = {}) {
     [...config.controlledChannelIds].map(channelId => String(channelId).toLowerCase()),
   );
   return async (event, ctx) => {
+    // The resort workflow policy belongs only to the agents explicitly named
+    // in this plugin's configuration. Other agents can share the same Slack
+    // channel while owning a separate, narrower data plane (Paloma's task
+    // ledger is one example). Applying this guard globally leaves those agents
+    // unable to use either their own tools or resort_workflow, because the tool
+    // itself is registered only for config.agentIds.
+    if (ctx?.agentId && !config.agentIds.has(ctx.agentId)) return undefined;
     const channelId = String(ctx?.channelId || channelIdFromToolContext(ctx) || '')
       .replace(/^channel:/, '').toLowerCase();
     if (!controlled.has(channelId) || event?.toolName === 'resort_workflow') return undefined;
