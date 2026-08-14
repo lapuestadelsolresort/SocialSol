@@ -2,7 +2,27 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { render } = require('./render-openclaw-workflow-policy');
+const { normalizeJoinedSlackChannels, render } = require('./render-openclaw-workflow-policy');
+
+test('joined Slack channel discovery keeps every active membership by stable ID', () => {
+  assert.deepEqual(normalizeJoinedSlackChannels([
+    { id: 'channel:CPUBLIC1', name: 'corporate', raw: {
+      id: 'CPUBLIC1', name: 'corporate', is_member: true, is_archived: false, is_private: false,
+    } },
+    { id: 'channel:CPRIVATE1', name: 'owners', raw: {
+      id: 'CPRIVATE1', name: 'owners', is_member: true, is_archived: false, is_private: true,
+    } },
+    { id: 'channel:CARCHIVED1', raw: {
+      id: 'CARCHIVED1', name: 'old', is_member: true, is_archived: true,
+    } },
+    { id: 'channel:CNOTJOINED1', raw: {
+      id: 'CNOTJOINED1', name: 'other', is_member: false, is_archived: false,
+    } },
+  ]), [
+    { id: 'CPRIVATE1', name: 'owners' },
+    { id: 'CPUBLIC1', name: 'corporate' },
+  ]);
+});
 
 test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-only tools', () => {
   const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
@@ -37,11 +57,22 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
       },
     },
     pluginIds: ['slack'],
+    joinedChannels: [
+      { id: 'CGENERAL1', name: 'general' },
+      { id: 'CWA123', name: 'whatsapp' },
+    ],
   });
   const account = patch.channels.slack.accounts['test-account'];
   assert.equal(account.groupPolicy, 'allowlist');
   assert.equal(Object.hasOwn(account, 'groupAllowFrom'), false);
-  assert.deepEqual(Object.keys(account.channels).sort(), ['CACCT1', 'COWNER1', 'CRECEIPT1', 'CSOCIAL1', 'CWA123']);
+  assert.deepEqual(Object.keys(account.channels).sort(), [
+    'CACCT1', 'CGENERAL1', 'COWNER1', 'CRECEIPT1', 'CSOCIAL1', 'CWA123',
+  ]);
+  assert.deepEqual(account.channels.CGENERAL1, {
+    enabled: true,
+    requireMention: false,
+    allowBots: false,
+  });
   assert.equal(Object.hasOwn(account.channels.CWA123, 'users'), false);
   assert.deepEqual(account.channels.CWA123.tools.alsoAllow, ['resort_workflow']);
   assert.match(account.channels.CWA123.systemPrompt, /whatsapp\.status\.read with direction=outbound/);
