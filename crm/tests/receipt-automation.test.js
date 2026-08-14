@@ -186,18 +186,21 @@ test('a receipt-channel quotation is automatically logged as Sergio reimbursemen
       WHERE id=${ingest.output.paymentSourcePromptOutboxId}`);
     const promptPayload = JSON.parse(sourcePrompt.payload_json);
     assert.match(promptPayload.message, /indica cómo se pagó/);
+    assert.equal(promptPayload.presentation, undefined);
     assert.deepEqual(
-      promptPayload.presentation.blocks[0].buttons.map(button => button.label),
+      promptPayload.slackBlocks[1].elements.map(button => button.text.text),
       ['Reembolso personal', 'Pagado con Kapital', 'Ya reembolsado'],
     );
     assert.deepEqual(
-      promptPayload.presentation.blocks[0].buttons.map(button => button.value),
+      promptPayload.slackBlocks[1].elements.map(button => `${button.action_id}:${button.value}`),
       [
         `receiptsource:personal:${receipt.id}`,
         `receiptsource:kapital:${receipt.id}`,
         `receiptsource:reimbursed:${receipt.id}`,
       ],
     );
+    assert.equal(promptPayload.slackBlocks[0].type, 'section');
+    assert.match(promptPayload.slackBlocks[0].text.text, /indica cómo se pagó/);
     const [item] = await db.query(sql`SELECT extraction_confidence FROM accounting_receipt_items
       WHERE receipt_id=${receipt.id}`);
     assert.equal(item.extraction_confidence, 0.98);
