@@ -91,7 +91,7 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
     'whatsapp.reply', 'whatsapp.inbound.process', 'meta.dm.reply', 'receipt.ingest', 'receipt.process', 'receipt.annotate', 'receipt.reconcile',
     'social.content.upsert', 'social.content.publish', 'social.publish_routine',
     'paulina.daily', 'paulina.prepare_daily', 'paulina.performance.read', 'regina.daily', 'regina.campaign',
-    'guest.reply.draft', 'crm.sync', 'crm.pipeline.read',
+    'guest.reply.draft', 'crm.sync', 'crm.pipeline.read', 'crm.contacts.read',
     'ownerrez.occupancy.read', 'squarespace.summary.read',
     'ownerrez.mutation.propose', 'ownerrez.mutation.confirm',
     'email.activity.read', 'email.message.observe', 'email.reply.propose', 'email.reply.confirm', 'email.message.classify',
@@ -99,6 +99,7 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
   ]) assert.equal(definitions.has(expected), true, expected);
   assert.equal(definitions.get('business.snapshot.read').mutates, false);
   assert.equal(definitions.get('email.activity.read').capability, 'email.read');
+  assert.equal(definitions.get('crm.contacts.read').capability, 'crm.read');
   assert.equal(definitions.get('whatsapp.status.read').version, 3);
   assert.equal(definitions.get('qbo.write').autonomous, true);
   assert.equal(definitions.has('shell.exec'), false);
@@ -210,6 +211,91 @@ test('WhatsApp status reads default to outbound, resolve recipients, and disclos
   });
   assert.throws(() => readModelInternals.validateWhatsAppStatusInput({ direction: 'recent' }), /outbound, inbound, or all/);
   assert.throws(() => readModelInternals.validateWhatsAppStatusInput({ detail: true }), /unsupported whatsapp\.status\.read input: detail/);
+});
+
+test('CRM contact reads consolidate full POCs across CRM sources and WhatsApp history', async () => {
+  await withDb(async db => {
+    await db.query(sql`CREATE TABLE contacts (
+      id INTEGER PRIMARY KEY, name TEXT, email TEXT, phone TEXT, company TEXT,
+      source TEXT, status TEXT, relationship_type TEXT, preferred_channel TEXT,
+      do_not_contact INTEGER, do_not_contact_reason TEXT, addressable INTEGER, updated_at TEXT
+    )`);
+    await db.query(sql`CREATE TABLE leads (
+      id INTEGER PRIMARY KEY, name TEXT, email TEXT, phone TEXT, source TEXT,
+      status TEXT, updated_at TEXT
+    )`);
+    await db.query(sql`CREATE TABLE squarespace_customers (
+      squarespace_customer_id TEXT PRIMARY KEY, contact_id INTEGER,
+      first_name TEXT, last_name TEXT, email TEXT, phone TEXT,
+      accepts_marketing INTEGER, created_on TEXT, synced_at TEXT
+    )`);
+    await db.query(sql`INSERT INTO contacts (
+      id, name, email, phone, company, source, status, relationship_type,
+      preferred_channel, do_not_contact, addressable, updated_at
+    ) VALUES
+      (1, 'Bethany Guest', 'bethany@example.com', '+14155550101', NULL,
+        'ownerrez', 'inquiry', 'past_guest_inquired', 'whatsapp', 0, 1,
+        '2026-08-13T12:00:00.000Z'),
+      (2, 'Fakhara Guest', 'fakhara@example.com', '+14155550102', NULL,
+        'manual', 'inquiry', NULL, 'whatsapp', 1, 1,
+        '2026-08-12T12:00:00.000Z')`);
+    await db.query(sql`INSERT INTO leads (
+      id, name, email, phone, source, status, updated_at
+    ) VALUES (
+      10, 'Bethany inquiry', NULL, '+14155550101', 'whatsapp', 'new',
+      '2026-08-14T12:00:00.000Z'
+    )`);
+    await db.query(sql`INSERT INTO squarespace_customers (
+      squarespace_customer_id, contact_id, first_name, last_name, email, phone,
+      accepts_marketing, created_on, synced_at
+    ) VALUES (
+      'sq-1', NULL, 'Mery', 'Client', 'mery@example.com', '+5215555550103',
+      1, '2026-08-10T12:00:00.000Z', '2026-08-14T11:00:00.000Z'
+    )`);
+    const recentInbound = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await db.query(sql`INSERT INTO meta_messages (
+      received_at, platform, sender_id, sender_name, message_id, message_text,
+      raw_payload, slack_thread_ts, direction, delivery_status
+    ) VALUES (
+      ${recentInbound}, 'whatsapp', '+14155550101', 'Bethany WA', 'SM-BETHANY',
+      'Hello', '{}', '300.1', 'inbound', 'delivered'
+    )`);
+
+    const run = await startGraph(db, getDefinition('crm.contacts.read'), {
+      idempotencyKey: 'crm-contacts-multiple', triggerType: 'slack',
+      channelId: 'C-WA', actorUserId: 'U-JASON',
+      input: { queries: ['Bethany', 'Mery', 'Missing Person'], limit: 10 },
+    });
+    assert.equal(run.status, 'completed', run.error_message);
+    assert.equal(run.output.authority, 'CRM consolidated contact ledger');
+    assert.equal(run.output.totalMatches, 2);
+    assert.equal(run.output.displayedContacts, 2);
+    assert.deepEqual(run.output.unmatchedQueries, ['Missing Person']);
+    const bethany = run.output.contacts.find(contact => contact.name === 'Bethany Guest');
+    assert.equal(bethany.contactRef, 'contact:1');
+    assert.equal(bethany.phone, '+14155550101');
+    assert.equal(bethany.email, 'bethany@example.com');
+    assert.deepEqual(bethany.recordRefs.sort(), ['contact:1', 'lead:10', `whatsapp:${bethany.whatsapp.dmId}`].sort());
+    assert.ok(bethany.sources.includes('contacts:ownerrez'));
+    assert.ok(bethany.sources.includes('leads:whatsapp'));
+    assert.ok(bethany.sources.includes('whatsapp_inbound'));
+    assert.equal(bethany.whatsapp.knownInbound, true);
+    assert.equal(bethany.whatsapp.serviceWindowOpen, true);
+    assert.equal(bethany.whatsapp.eligibility, 'known_whatsapp_contact');
+    assert.equal(run.output._evidence.source, 'crm.contacts+leads+meta_messages+squarespace_customers');
+
+    const dnc = await startGraph(db, getDefinition('crm.contacts.read'), {
+      idempotencyKey: 'crm-contacts-dnc', triggerType: 'slack',
+      channelId: 'C-WA', actorUserId: 'U-JASON', input: { query: 'Fakhara' },
+    });
+    assert.equal(dnc.output.contacts[0].doNotContact, true);
+    assert.equal(dnc.output.contacts[0].whatsapp.eligibility, 'blocked_do_not_contact');
+  });
+  assert.deepEqual(readModelInternals.normalizeContactQueries({ query: 'Bethany, Mery; Jim Simard' }), [
+    'Bethany', 'Mery', 'Jim Simard',
+  ]);
+  assert.throws(() => readModelInternals.validateCrmContactsInput({ includeSecrets: true }), /unsupported crm\.contacts\.read input/);
+  assert.throws(() => readModelInternals.validateCrmContactsInput({ queries: 'Bethany' }), /must be an array/);
 });
 
 test('durable shell jobs retry only before dispatch and require review after dispatch', async () => {

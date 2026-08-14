@@ -96,7 +96,12 @@ business at sale.
   classification, and auto-tier QBO writes have standing autonomous authority.
 - `#whatsapp` is the sole human WhatsApp console. A send must be an explicit
   `!wa` command by a member of that private channel; plain Slack replies and
-  the retired direct HTTP send endpoints cannot send to a guest.
+  the retired direct HTTP send endpoints cannot send to a guest. The same
+  channel has read-only `crm.contacts.read` access to full contact details from
+  CRM contacts, leads, Squarespace customers, and historical WhatsApp senders,
+  so contact/POC lookups never require a channel switch. Plain questions in a
+  WhatsApp thread remain discussion and may use read workflows; only `!wa`
+  invokes the guest-message workflow.
   Delivery callbacks are normalized into the CRM with their raw Twilio state,
   failure code, evidence source, and delivered/read/failed timestamps. Run
   `npm run reconcile:whatsapp-statuses` for a read-only provider audit; an

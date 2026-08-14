@@ -175,7 +175,7 @@ test('channel capabilities allow members by channel and restrict OwnerRez writes
   const policy = {
     version: 1,
     channels: {
-      'C-WA': { name: 'whatsapp', capabilities: ['whatsapp.read', 'whatsapp.send'] },
+      'C-WA': { name: 'whatsapp', capabilities: ['whatsapp.read', 'whatsapp.send', 'crm.read'] },
       'C-BI': { name: 'business-intel', capabilities: ['business.read_all'] },
       'C-RES': { name: 'reservations', capabilities: ['ownerrez.read', 'ownerrez.write'] },
     },
@@ -185,6 +185,7 @@ test('channel capabilities allow members by channel and restrict OwnerRez writes
   const slack = (channelId, actorUserId) => ({ origin: 'slack', originVerified: true, channelId, actorUserId });
   assert.equal(authorizationDecision({ policy, capability: 'whatsapp.send', workflowName: 'whatsapp.reply', context: slack('C-WA', 'U-SARAH') }).allowed, true);
   assert.equal(authorizationDecision({ policy, capability: 'whatsapp.read', workflowName: 'whatsapp.status.read', context: slack('C-WA', 'U-SARAH') }).allowed, true);
+  assert.equal(authorizationDecision({ policy, capability: 'crm.read', workflowName: 'crm.contacts.read', context: slack('C-WA', 'U-SARAH') }).allowed, true);
   assert.equal(authorizationDecision({ policy, capability: 'whatsapp.read', workflowName: 'whatsapp.status.read', context: slack('C-BI', 'U-JASON') }).allowed, true);
   assert.equal(authorizationDecision({ policy, capability: 'qbo.write', workflowName: 'qbo.write', context: slack('C-WA', 'U-SARAH') }).allowed, false);
   assert.equal(authorizationDecision({ policy, capability: 'qbo.read', workflowName: 'qbo.query', context: slack('C-BI', 'U-JASON') }).allowed, true);

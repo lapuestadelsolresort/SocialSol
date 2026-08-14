@@ -65,7 +65,10 @@ flowchart LR
 - WhatsApp: signed inbound storage, durable Slack outbox, resumable CRM lead
   enrichment, explicit `!wa` send, and callback-driven
   queued/sent/delivered/read states. `#whatsapp` is the sole human send surface;
-  the former direct HTTP send routes are retired.
+  the former direct HTTP send routes are retired. Its model-facing control-plane
+  tool includes read-only consolidated CRM contact lookup, so authorized members
+  can retrieve full POCs and historical WhatsApp identities without leaving the
+  channel; the model-facing tool still cannot invoke a send.
 - Meta DMs: the former loopback HTTP sender is retired. Instagram/Facebook
   replies use `!dm <dm-id> <message>` in `#social-sol`, a command-only durable
   workflow, and provider acceptance is never presented as delivery.
