@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  createAccountingStatementHandler,
+  accountingCsvSignalFromFinalizedContext,
+  createAccountingStatementClaimHandler,
+  createAccountingStatementReplyDispatchHandler,
   createControlledChannelToolGuard,
   createFinalizeHandler,
   createEmailClaimHandler,
@@ -608,124 +610,137 @@ test('native receipt Block Kit action routes through the receiptsource namespace
   });
 });
 
-test('accounting CSV hook stages trusted Slack uploads for the fixed inbox workflow', async () => {
+test('accounting CSV dispatch detects finalized media without relying on command text', () => {
+  assert.equal(accountingCsvSignalFromFinalizedContext({
+    BodyForCommands: 'Can you please process this',
+    MediaTypes: ['text/csv'],
+    MediaPaths: ['/runtime/media/statement.csv'],
+  }), true);
+  assert.equal(accountingCsvSignalFromFinalizedContext({
+    BodyForAgent: '[Slack file: ECta826 (2).csv (fileId: F-CSV)]',
+  }), true);
+  assert.equal(accountingCsvSignalFromFinalizedContext({
+    BodyForCommands: 'What was the latest reconciliation status?',
+  }), false);
+});
+
+test('accounting CSV reply dispatch stages trusted Slack uploads and stops model execution', async () => {
   const config = pluginConfig({
     accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts', shadowMode: true,
     liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
   });
   const calls = [];
-  await createAccountingStatementHandler({
+  const sent = [];
+  let finalized = null;
+  const handler = createAccountingStatementReplyDispatchHandler({
     config,
     stage: async request => {
       calls.push(request);
-      return { files: [{ name: 'statement.csv', staged: true }] };
+      return { files: [{ name: 'statement.csv', staged: true, alreadyCaptured: false, alreadyProcessed: false }] };
     },
-  })({
-    messageId: '1786640000.25', senderId: 'U-JASON',
-    metadata: {
-      channelId: 'CACCOUNTING',
-      files: [{ id: 'F-CSV', name: 'ECta826.csv', mimetype: 'text/csv', size: 4200 }],
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:CACCOUNTING', MessageSidFull: '1786640000.25',
+      SenderId: 'U-JASON', BodyForCommands: 'Can you please process this',
+      MediaTypes: ['text/csv'], MediaPaths: ['/runtime/media/statement.csv'],
     },
+    sendPolicy: 'allow',
   }, {
-    channelId: 'slack', accountId: 'ig-drafts', conversationId: 'CACCOUNTING',
-    messageId: '1786640000.25', senderId: 'U-JASON',
+    dispatcher: {
+      sendFinalReply(payload) { sent.push(payload); return true; },
+      getQueuedCounts() { return { final: sent.length }; },
+    },
+    recordProcessed(outcome, details) { finalized = { outcome, details }; },
+    markIdle() {},
   });
   assert.deepEqual(calls, [{
     channelId: 'CACCOUNTING', messageId: '1786640000.25', threadTs: null,
   }]);
+  assert.equal(result.handled, true);
+  assert.equal(result.queuedFinal, true);
+  assert.match(sent[0].text, /1 newly queued/);
+  assert.match(sent[0].text, /separate completion notice/);
+  assert.deepEqual(finalized, {
+    outcome: 'completed', details: { reason: 'accounting_statement_reply_dispatch' },
+  });
 });
 
-test('accounting CSV hook refetches the trusted message when OpenClaw omits attachment metadata', async () => {
+test('accounting CSV claim reports an exact previously processed file without restaging it', async () => {
   const config = pluginConfig({
     accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts', shadowMode: true,
     liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
   });
-  const calls = [];
-  await createAccountingStatementHandler({
+  const result = await createAccountingStatementClaimHandler({
     config,
-    stage: async request => {
-      calls.push(request);
-      return { files: [{ name: 'statement.csv', staged: true }] };
-    },
+    stage: async () => ({ files: [{
+      name: 'prior.csv', staged: false, alreadyCaptured: false, alreadyProcessed: true,
+    }] }),
   })({
-    content: '<@U-SOL> reconcile this Kapital statement',
-    messageId: '1786640000.251',
-    senderId: 'U-JASON',
-    metadata: { originatingTo: 'channel:CACCOUNTING' },
-  }, {
-    channelId: 'slack', accountId: 'ig-drafts', conversationId: 'CACCOUNTING',
-    messageId: '1786640000.251', senderId: 'U-JASON',
-  });
-  assert.deepEqual(calls, [{
-    channelId: 'CACCOUNTING', messageId: '1786640000.251', threadTs: null,
-  }]);
+    channel: 'slack', accountId: 'ig-drafts', conversationId: 'CACCOUNTING',
+    messageId: '1786640000.251', senderId: 'U-JASON', hasCsvAttachment: true,
+  }, {});
+  assert.equal(result.handled, true);
+  assert.match(result.reply.text, /already processed successfully/);
+  assert.match(result.reply.text, /not queued or written to QBO again/);
 });
 
-test('accounting CSV hook quietly ignores a provider-verified message without a CSV', async () => {
+test('accounting CSV dispatch fails closed when provider readback cannot verify the attachment', async () => {
   const config = pluginConfig({
     accountingChannelIds: ['CACCOUNTING'], slackAccountId: 'ig-drafts', shadowMode: true,
     liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
   });
-  const info = [];
-  const errors = [];
-  await createAccountingStatementHandler({
+  const result = await createAccountingStatementClaimHandler({
     config,
     stage: async () => {
       const error = new Error('Slack accounting message contains no CSV attachment');
       error.code = 'accounting_csv_missing';
       throw error;
     },
-    logger: {
-      info: message => info.push(message),
-      error: message => errors.push(message),
-    },
+    logger: { error() {} },
   })({
-    content: 'What was the latest reconciliation status?',
-    messageId: '1786640000.252',
-    metadata: { originatingTo: 'channel:CACCOUNTING' },
-  }, {
-    channelId: 'slack', accountId: 'ig-drafts', conversationId: 'CACCOUNTING',
-    messageId: '1786640000.252',
-  });
-  assert.equal(info.length, 1);
-  assert.match(info[0], /no CSV found by Slack readback/);
-  assert.deepEqual(errors, []);
+    channel: 'slack', accountId: 'ig-drafts', conversationId: 'CACCOUNTING',
+    messageId: '1786640000.252', hasCsvAttachment: true,
+  }, {});
+  assert.equal(result.handled, true);
+  assert.match(result.reply.text, /provider readback could not verify/);
+  assert.match(result.reply.text, /Nothing was staged or written to QBO/);
 });
 
-test('accounting CSV hook ignores non-CSV uploads and other channels', async () => {
+test('accounting CSV claim ignores non-CSV messages and other channels', async () => {
   const config = pluginConfig({
     accountingChannelIds: ['CACCOUNTING'], shadowMode: true,
     liveWorkflowNames: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
   });
-  const handler = createAccountingStatementHandler({
+  const handler = createAccountingStatementClaimHandler({
     config,
     stage: async () => assert.fail('non-accounting CSV event must not be staged'),
   });
-  await handler({
-    messageId: '1786640000.26', metadata: {
-      channelId: 'CACCOUNTING', files: [{ id: 'F-PDF', name: 'invoice.pdf', mimetype: 'application/pdf' }],
-    },
-  }, { channelId: 'slack', conversationId: 'CACCOUNTING', messageId: '1786640000.26' });
-  await handler({
-    messageId: '1786640000.27', metadata: {
-      channelId: 'C-OTHER', files: [{ id: 'F-CSV', name: 'statement.csv', mimetype: 'text/csv' }],
-    },
-  }, { channelId: 'slack', conversationId: 'C-OTHER', messageId: '1786640000.27' });
+  assert.equal(await handler({
+    channel: 'slack', conversationId: 'CACCOUNTING', messageId: '1786640000.26',
+    hasCsvAttachment: false,
+  }, {}), undefined);
+  assert.equal(await handler({
+    channel: 'slack', conversationId: 'C-OTHER', messageId: '1786640000.27',
+    hasCsvAttachment: true,
+  }, {}), undefined);
 });
 
-test('accounting CSV hook does not stage files before the complete workflow is live', async () => {
+test('accounting CSV claim blocks model improvisation before the complete workflow is live', async () => {
   const config = pluginConfig({
     accountingChannelIds: ['CACCOUNTING'], shadowMode: true,
     liveWorkflowNames: ['accounting.classify', 'qbo.write'],
   });
-  await createAccountingStatementHandler({
+  const result = await createAccountingStatementClaimHandler({
     config,
     stage: async () => assert.fail('partial accounting cutover must not stage a statement'),
   })({
-    messageId: '1786640000.28', metadata: {
-      channelId: 'CACCOUNTING', files: [{ id: 'F-CSV', name: 'statement.csv', mimetype: 'text/csv' }],
-    },
-  }, { channelId: 'slack', conversationId: 'CACCOUNTING', messageId: '1786640000.28' });
+    channel: 'slack', conversationId: 'CACCOUNTING', messageId: '1786640000.28',
+    hasCsvAttachment: true,
+  }, {});
+  assert.equal(result.handled, true);
+  assert.match(result.reply.text, /complete accounting workflow is not live/);
 });
 
 test('owner-expense receipt hook selects the guarded workflow', async () => {
