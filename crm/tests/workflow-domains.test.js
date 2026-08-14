@@ -396,7 +396,7 @@ test('CRM contact reads consolidate full POCs across CRM sources and WhatsApp hi
   assert.throws(() => readModelInternals.validateCrmContactsInput({ queries: 'Bethany' }), /must be an array/);
 });
 
-test('durable shell jobs retry only before dispatch and require review after dispatch', async () => {
+test('durable shell jobs preserve review gates for ambiguous non-idempotent outcomes', async () => {
   const execute = getDefinition('squarespace.crm.sync').steps
     .find(step => step.key === 'execute');
   assert.equal(execute.maxAttempts, 2);
@@ -439,6 +439,88 @@ test('durable shell jobs retry only before dispatch and require review after dis
     && error.requiresManualReview === true
   ));
   assert.equal(commandCalls, 1);
+
+  const nonIdempotentExecute = getDefinition('paulina.daily').steps
+    .find(step => step.key === 'execute');
+  await assert.rejects(() => nonIdempotentExecute.run({
+    ...base,
+    db: { query: async () => [{ id: 'effect-1', status: 'requested', provider_ref: null }] },
+    services: {
+      shadowMode: false,
+      runCommand: async () => { throw new Error('connection closed after dispatch'); },
+    },
+    store: {},
+  }), error => (
+    error.code === 'ambiguous_external_result'
+    && error.retryable === false
+  ));
+});
+
+test('CRM source-sync command failures retry without opening external-mutation review', async () => {
+  await withDb(async db => {
+    const definition = getDefinition('ownerrez.crm.sync');
+    const execute = definition.steps.find(step => step.key === 'execute');
+    assert.equal(definition.crashRecovery, 'retry');
+    assert.equal(execute.effectClass, 'external_idempotent');
+
+    let commandCalls = 0;
+    const services = {
+      runCommand: async () => {
+        commandCalls += 1;
+        if (commandCalls === 1) {
+          const error = new Error('workflow command failed (node, exit 1): OwnerRez sync incomplete: inquiries: Timeout');
+          error.code = 'workflow_command_failed';
+          throw error;
+        }
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: '{"inquiries":1,"bookings":0,"contacts_created":0,"contacts_updated":1,"leads_created":0}',
+        };
+      },
+    };
+    const first = await startGraph(db, definition, {
+      idempotencyKey: 'ownerrez-timeout-retry', triggerType: 'system', input: {},
+    }, services);
+    assert.equal(first.status, 'retry');
+    assert.equal(first.error_code, 'workflow_command_failed');
+    assert.equal(first.steps.find(step => step.step_key === 'execute').status, 'retry');
+    assert.equal(first.manualReviews.length, 0);
+    assert.equal(first.effects[0].status, 'requested');
+
+    await db.query(sql`UPDATE workflow_steps SET available_at='1970-01-01T00:00:00.000Z'
+      WHERE run_id=${first.id} AND step_key='execute'`);
+    const completed = await executeGraph(db, definition, first.id, services);
+    assert.equal(completed.status, 'completed', completed.error_message);
+    assert.equal(commandCalls, 2);
+    assert.equal(completed.manualReviews.length, 0);
+    assert.equal(completed.effects[0].status, 'verified_by_readback');
+  });
+});
+
+test('exhausted CRM source-sync retries fail the effect without manual review', async () => {
+  await withDb(async db => {
+    const definition = getDefinition('ownerrez.crm.sync');
+    const services = {
+      runCommand: async () => {
+        const error = new Error('workflow command failed (node, exit 1): OwnerRez sync incomplete: bookings: Timeout');
+        error.code = 'workflow_command_failed';
+        throw error;
+      },
+    };
+    let run = await startGraph(db, definition, {
+      idempotencyKey: 'ownerrez-timeout-exhausted', triggerType: 'system', input: {},
+    }, services);
+    assert.equal(run.status, 'retry');
+    await db.query(sql`UPDATE workflow_steps SET available_at='1970-01-01T00:00:00.000Z'
+      WHERE run_id=${run.id} AND step_key='execute'`);
+    run = await executeGraph(db, definition, run.id, services);
+    assert.equal(run.status, 'failed');
+    assert.equal(run.error_code, 'workflow_command_failed');
+    assert.equal(run.manualReviews.length, 0);
+    assert.equal(run.effects[0].status, 'failed');
+    assert.equal(run.effects[0].provider_status, 'command_failed');
+  });
 });
 
 test('inbound WhatsApp CRM enrichment is resumable and idempotent', async () => {

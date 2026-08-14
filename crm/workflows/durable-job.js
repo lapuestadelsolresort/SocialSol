@@ -2,6 +2,11 @@
 
 const { loadPolicy } = require('../lib/channel-policy');
 
+const RETRYABLE_COMMAND_EFFECT_CLASSES = new Set([
+  'external_idempotent',
+  'external_read',
+]);
+
 function lastJsonValue(stdout) {
   const text = String(stdout || '').trim();
   if (!text) return null;
@@ -53,10 +58,16 @@ function makeDurableJob(options) {
     shouldNotify = () => true,
     buildNotificationMessage = null,
     mentionUsers = true,
+    executeEffectClass = 'external_non_idempotent',
+    executeMaxAttempts = 2,
   } = options;
   if (!name || !capability || !provider || typeof buildCommand !== 'function' || typeof verify !== 'function') {
     throw new Error('invalid durable job definition');
   }
+  if (!['external_idempotent', 'external_non_idempotent', 'external_read'].includes(executeEffectClass)) {
+    throw new Error(`invalid durable job execution effect class: ${executeEffectClass}`);
+  }
+  const commandFailureIsRetryable = RETRYABLE_COMMAND_EFFECT_CLASSES.has(executeEffectClass);
 
   const definition = {
     name,
@@ -64,7 +75,7 @@ function makeDurableJob(options) {
     capability,
     mutates: true,
     autonomous,
-    crashRecovery: 'manual',
+    crashRecovery: commandFailureIsRetryable ? 'retry' : 'manual',
     notificationChannelId,
     notificationChannelName,
     validate,
@@ -89,8 +100,8 @@ function makeDurableJob(options) {
       },
       {
         key: 'execute',
-        effectClass: 'external_non_idempotent',
-        maxAttempts: 2,
+        effectClass: executeEffectClass,
+        maxAttempts: executeMaxAttempts,
         async run({ db, run, input, state, services, store, stepKey }) {
           const effectId = state.register_effect.effectId;
           let effect;
@@ -114,8 +125,24 @@ function makeDurableJob(options) {
           try {
             result = await services.runCommand(command);
           } catch (error) {
-            error.code = 'ambiguous_external_result';
-            error.retryable = false;
+            if (commandFailureIsRetryable) {
+              error.code = error.code || 'workflow_command_failed';
+              error.retryable = true;
+              const [currentStep] = await db.query(require('@databases/sqlite').sql`SELECT attempts, max_attempts
+                FROM workflow_steps WHERE run_id=${run.id} AND step_key=${stepKey}`);
+              if (currentStep && Number(currentStep.attempts) >= Number(currentStep.max_attempts)) {
+                await store.transitionEffect(db, {
+                  effectId,
+                  status: 'failed',
+                  providerStatus: 'command_failed',
+                  errorCode: error.code,
+                  errorMessage: error.message,
+                });
+              }
+            } else {
+              error.code = 'ambiguous_external_result';
+              error.retryable = false;
+            }
             throw error;
           }
           const providerRef = `job:${run.id}`;
