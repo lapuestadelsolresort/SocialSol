@@ -13,6 +13,7 @@ const { ensureSchemaAsync } = require('../lib/workflow-schema');
 const {
   applyClassification,
   confirmDefinition,
+  emailBodyFromSlack,
   observeDefinition,
   proposeDefinition,
 } = require('../workflows/email-reply');
@@ -225,7 +226,12 @@ test('Slack email replies require same-user, same-thread confirmation and Gmail 
     });
     assert.equal(proposalRun.status, 'completed', proposalRun.error_message);
     assert.equal(proposalRun.output.status, 'awaiting_explicit_confirmation');
+    assert.equal(proposalRun.output.doesNotExpire, true);
+    assert.equal(proposalRun.output.expiresAt, undefined);
     assert.match(proposalRun.output.bodyText, /planner packet/);
+    const [pendingProposal] = await db.query(sql`SELECT expires_at FROM email_reply_proposals
+      WHERE id=${proposalRun.output.proposalId}`);
+    assert.equal(pendingProposal.expires_at, null);
 
     const wrongThread = await startGraph(db, confirmDefinition, {
       idempotencyKey: 'slack:CPAULINA:200.2:email.reply.confirm',
@@ -242,6 +248,8 @@ test('Slack email replies require same-user, same-thread confirmation and Gmail 
     const [stillPending] = await db.query(sql`SELECT status FROM email_reply_proposals
       WHERE id=${proposalRun.output.proposalId}`);
     assert.equal(stillPending.status, 'pending');
+    await db.query(sql`UPDATE email_reply_proposals SET expires_at='1970-01-01T00:00:00.000Z'
+      WHERE id=${proposalRun.output.proposalId}`);
 
     let sends = 0;
     const services = {
@@ -287,6 +295,18 @@ test('Slack email replies require same-user, same-thread confirmation and Gmail 
     assert.equal(proposal.status, 'completed');
     assert.equal(proposal.provider_message_id, 'gmail-out-1');
   });
+});
+
+test('Slack link markup becomes readable plain-text email content', () => {
+  assert.equal(emailBodyFromSlack([
+    'Watch <https://youtu.be/LmQ4tUf1K9U|youtu.be/…>',
+    'Email <mailto:sarah@example.com|Sarah>',
+    'Call <tel:+18313458082|+1 831-345-8082>',
+  ].join('\n')), [
+    'Watch https://youtu.be/LmQ4tUf1K9U',
+    'Email Sarah',
+    'Call +1 831-345-8082',
+  ].join('\n'));
 });
 
 test('reply proposals use the original outreach subject instead of inbound mojibake', async () => {

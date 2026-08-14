@@ -9,7 +9,6 @@ const { sendOwnerRezMessage, readOwnerRezMessage } = require('../lib/ownerrez-me
 const { projectDirectGmailInbound } = require('../lib/inbound-email-crm');
 const { loadPolicy } = require('../lib/channel-policy');
 
-const PROPOSAL_TTL_MS = 15 * 60_000;
 const QUALITIES = new Set(['hot', 'not_interested', 'ambiguous']);
 
 function policyChannelId(name, policy = loadPolicy()) {
@@ -28,6 +27,16 @@ function sarahEmailChannelId(policy = loadPolicy()) {
 function replySubject(subject) {
   const value = String(subject || '').trim();
   return /^re\s*:/i.test(value) ? value : `Re: ${value || 'La Puesta del Sol'}`;
+}
+
+function emailBodyFromSlack(value) {
+  return String(value || '').trim()
+    .replace(/<(https?:\/\/[^|>]+)(?:\|[^>]*)?>/gi, '$1')
+    .replace(/<mailto:([^|>]+)(?:\|([^>]+))?>/gi, (_match, address, label) => label || address)
+    .replace(/<tel:([^|>]+)(?:\|([^>]+))?>/gi, (_match, number, label) => label || number)
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>');
 }
 
 function validateReplyRequest(input) {
@@ -373,7 +382,7 @@ const proposeDefinition = {
       key: 'persist_proposal', effectClass: 'local_write', maxAttempts: 1,
       async run({ db, run, input, state, store, stepKey }) {
         const target = state.resolve_thread;
-        const bodyText = input.message.trim();
+        const bodyText = emailBodyFromSlack(input.message);
         const requestHash = store.sha256({
           provider: target.provider, providerThreadId: target.providerThreadId,
           sendId: target.sendId, to: target.toAddress, subject: target.subject,
@@ -381,24 +390,23 @@ const proposeDefinition = {
         });
         const proposalId = crypto.randomUUID();
         const acceptanceHash = store.sha256(`${proposalId}:${requestHash}`).slice(0, 12);
-        const expiresAt = new Date(Date.now() + PROPOSAL_TTL_MS).toISOString();
         await db.query(sql`INSERT INTO email_reply_proposals (
           id, provider, outreach_send_id, contact_id, inbound_email_thread_id, to_address,
           subject, body_text, request_hash, acceptance_hash, proposed_by,
-          slack_channel_id, slack_thread_ts, proposal_run_id, expires_at
+          slack_channel_id, slack_thread_ts, proposal_run_id
         ) VALUES (
           ${proposalId}, ${target.provider}, ${target.sendId}, ${target.contactId}, ${target.inboundEmailThreadId},
           ${target.toAddress}, ${target.subject}, ${bodyText}, ${requestHash},
           ${acceptanceHash}, ${run.actor_user_id}, ${target.slackChannelId},
-          ${target.slackThreadTs}, ${run.id}, ${expiresAt}
+          ${target.slackThreadTs}, ${run.id}
         )`);
         const evidence = await store.createEvidence(db, {
           runId: run.id, stepKey, source: 'human.slack_email_proposal', sourceRef: proposalId,
-          expiresAt, payload: { proposalId, provider: target.provider, providerThreadId: target.providerThreadId,
+          payload: { proposalId, provider: target.provider, providerThreadId: target.providerThreadId,
             sendId: target.sendId, requestHash, to: target.toAddress },
         });
         return {
-          proposalId, acceptanceHash, expiresAt, requestHash, bodyText, evidenceId: evidence.id,
+          proposalId, acceptanceHash, requestHash, bodyText, evidenceId: evidence.id,
           confirmationCommand: `!email confirm ${proposalId} ${acceptanceHash}`,
         };
       },
@@ -414,7 +422,7 @@ const proposeDefinition = {
       toAddress: state.resolve_thread.toAddress,
       requestHash: state.persist_proposal.requestHash,
       bodyText: state.persist_proposal.bodyText,
-      expiresAt: state.persist_proposal.expiresAt,
+      doesNotExpire: true,
       confirmationCommand: state.persist_proposal.confirmationCommand,
       evidenceId: state.persist_proposal.evidenceId,
     };
@@ -444,10 +452,6 @@ const confirmDefinition = {
         if (!proposal) throw new Error('email reply proposal was not found');
         if (proposal.status === 'confirmed' && proposal.confirmation_run_id === run.id) return proposal;
         if (proposal.status !== 'pending') throw new Error(`email reply proposal is ${proposal.status}, not pending`);
-        if (new Date(proposal.expires_at).getTime() <= Date.now()) {
-          await db.query(sql`UPDATE email_reply_proposals SET status='expired', updated_at=datetime('now') WHERE id=${proposal.id}`);
-          throw new Error('email reply proposal expired; create a new proposal');
-        }
         if (proposal.proposed_by !== run.actor_user_id) {
           const error = new Error('the same authorized Slack user who proposed the email must confirm it');
           error.code = 'email_confirmer_mismatch';
@@ -699,11 +703,11 @@ const classifyDefinition = {
 };
 
 module.exports = {
-  PROPOSAL_TTL_MS,
   QUALITIES,
   applyClassification,
   classifyDefinition,
   confirmDefinition,
+  emailBodyFromSlack,
   observeDefinition,
   proposeDefinition,
   quotedBody,

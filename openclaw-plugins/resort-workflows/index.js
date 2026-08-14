@@ -285,9 +285,8 @@ export function formatWorkflowReply(payload) {
       `Immutable request: ${output.requestHash || 'unknown'}`,
       '',
       `> ${String(output.bodyText || '').split('\n').join('\n> ')}`,
-      `Expires: ${output.expiresAt || 'unknown'}`,
-      'After reviewing the exact message above, paste this command as a new Slack message:',
-      `\`${output.confirmationCommand || 'confirmation command unavailable'}\``,
+      'This proposal does not expire. After reviewing the exact message above, copy and paste the full next line as a new Slack message:',
+      output.confirmationCommand || 'confirmation command unavailable',
       `Workflow: ${run.id}${output.evidenceId ? ` · Evidence: ${output.evidenceId}` : ''}`,
     ].join('\n');
   }
@@ -506,9 +505,11 @@ export function parseMetaDmCommand(text) {
 }
 
 export function parseEmailCommand(text, { hasThread = false } = {}) {
-  const body = String(text || '').trim();
+  let body = String(text || '').trim();
+  if (body.startsWith('`') && body.endsWith('`')) body = body.slice(1, -1).trim();
   if (!/^!email(?:\s|$)/i.test(body)) return null;
   if (!hasThread) return { error: 'original_thread_required' };
+  if (/^!email\s+(?:confirm|classify)(?:\s|$)/i.test(body)) body = body.replaceAll('`', '');
   const confirm = body.match(/^!email\s+confirm\s+([0-9a-f-]{36})\s+([0-9a-f]{12})\s*$/i);
   if (confirm) return {
     action: 'confirm', proposalId: confirm[1].toLowerCase(), acceptanceHash: confirm[2].toLowerCase(),

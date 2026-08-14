@@ -25,7 +25,7 @@ Run these only inside the original message thread:
 !email classify <email-event-id> hot|not_interested|ambiguous
 ```
 
-`!email reply` records an immutable 15-minute proposal; it does not send. The
+`!email reply` records an immutable, non-expiring proposal; it does not send. The
 same authorized Slack user must paste the exact emitted confirmation command in
 the same channel and thread. The graph chooses Gmail or OwnerRez from the
 recorded inbound event, creates one durable provider effect, and requires exact
