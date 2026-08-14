@@ -30,6 +30,7 @@ const WORKFLOW_SCHEMA = {
         'squarespace.crm.sync',
         'accounting.classify',
         'qbo.write',
+        'accounting.reconciliation.read',
         'business.snapshot.read',
         'email.activity.read',
         'whatsapp.status.read',
@@ -381,6 +382,74 @@ export function formatOwnerRezOccupancyReply(payload, { mode = 'next' } = {}) {
   return lines.join('\n');
 }
 
+function mxnAmount(value) {
+  return Number(value || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function formatAccountingReconciliationReply(payload) {
+  const run = payload?.run;
+  if (!run || run.status !== 'completed') {
+    return `The authoritative reconciliation lookup is ${run?.status || 'unavailable'}, so no QBO completeness claim was generated from channel history.`;
+  }
+  const latest = run.output?.latest;
+  if (!latest) {
+    return `No completed QBO statement reconciliation exists in the durable ledger. Workflow: ${run.id}${run.output?._evidence?.id ? ` · Evidence: ${run.output._evidence.id}` : ''}`;
+  }
+  const summary = latest.summary || {};
+  const statement = summary.statement || {};
+  const principalRecorded = Number(summary.principalRecorded || 0);
+  const principalTotal = Number(summary.principalTotal || statement.principal_count || 0);
+  const feeRecorded = Number(summary.feeRecordsRecorded || 0);
+  const feeExpected = Number(summary.feeRecordsExpected || 0);
+  const held = Number(summary.held || 0);
+  const complete = summary.complete === true
+    && principalRecorded === principalTotal && feeRecorded === feeExpected && held === 0;
+  const dateRange = statement.date_start
+    ? `${statement.date_start}${statement.date_end && statement.date_end !== statement.date_start ? ` through ${statement.date_end}` : ''}`
+    : 'date range unavailable';
+  const lines = [
+    `*Latest Kapital reconciliation — ${dateRange}*`,
+    complete
+      ? '✅ Every statement principal and SPEI fee line is recorded in QBO and the run passed provider readback.'
+      : '⚠️ The latest verified run still has one or more statement records not recorded in QBO.',
+    '',
+    `• Principal transactions recorded: ${principalRecorded}/${principalTotal} (${Number(summary.principalWritten || 0)} written in this run; ${Number(summary.dedupSkipped || 0)} already present)`,
+    `• SPEI fee lines recorded: ${feeRecorded}/${feeExpected} (${Number(summary.feeRecordsWritten || 0)} written in this run; ${Number(summary.feeRecordsExisting || 0)} already present)`,
+    `• Total statement outflows: MXN ${mxnAmount(statement.total_outflows_mxn)}`,
+    `• Not recorded: ${held}`,
+  ];
+  const categories = Array.isArray(summary.categoryTotals) ? summary.categoryTotals : [];
+  if (categories.length) {
+    lines.push('', '*Statement workflow grouping (receipt reimbursements can contain split QBO expense lines):*');
+    for (const category of categories) {
+      lines.push(`• ${safeInline(category.category, 'Unclassified', 80)} — MXN ${mxnAmount(category.amount_mxn)} (${Number(category.transactions || 0)} transaction${Number(category.transactions || 0) === 1 ? '' : 's'})`);
+    }
+    if (Number(statement.spei_fees_mxn || 0) > 0) {
+      lines.push(`• Bank fees — MXN ${mxnAmount(statement.spei_fees_mxn)} (${feeExpected} QBO fee lines)`);
+    }
+  }
+  const reviews = Array.isArray(summary.reviewDetails) ? summary.reviewDetails : [];
+  if (reviews.length) {
+    lines.push('', `*Recorded in Uncategorized Expense; category review required (${reviews.length}):*`);
+    for (const item of reviews) {
+      lines.push(`• ${item.date || 'unknown date'} — MXN ${mxnAmount(item.amount)} — QBO ${item.qbo_id || 'unknown'} — ${safeInline(item.review_reason, 'category review required', 180)}`);
+    }
+  }
+  const heldDetails = Array.isArray(summary.heldDetails) ? summary.heldDetails : [];
+  if (heldDetails.length) {
+    lines.push('', '*Not recorded:*');
+    for (const item of heldDetails) {
+      lines.push(`• ${item.date || 'unknown date'} — ${item.currency || 'MXN'} ${mxnAmount(item.amount)} — ${safeInline(item.review_reason, 'posting review required', 180)}`);
+    }
+  }
+  lines.push('', `QBO reconciliation: ${latest.workflowRunId}${latest.evidenceId ? ` · QBO evidence: ${latest.evidenceId}` : ''}`);
+  lines.push(`Authoritative read: ${run.id}${run.output?._evidence?.id ? ` · Evidence: ${run.output._evidence.id}` : ''}`);
+  return lines.join('\n');
+}
+
 export function formatWorkflowReply(payload) {
   const run = payload?.run;
   if (!run) return 'The workflow returned no durable run record.';
@@ -409,6 +478,9 @@ export function formatWorkflowReply(payload) {
   }
   if (run.workflow_name === 'crm.contacts.read') {
     return formatCrmContactsReply(payload);
+  }
+  if (run.workflow_name === 'accounting.reconciliation.read') {
+    return formatAccountingReconciliationReply(payload);
   }
   if (run.workflow_name === 'meta.dm.reply') {
     const output = run.output || {};
@@ -1679,6 +1751,101 @@ export function createAccountingStatementClaimHandler({
   };
 }
 
+export function parseAccountingReconciliationRequest(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.startsWith('!')) return null;
+  const body = normalizedTaskText(raw);
+  const explicitLatest = /\b(?:latest|most recent|last|current)\b.{0,50}\b(?:reconciliation|statement)\b/.test(body)
+    || /\b(?:reconciliation|statement)\b.{0,50}\b(?:latest|most recent|last|current|status|breakdown|summary)\b/.test(body);
+  const completeness = /\b(?:transactions?|entries|fees?)\b.{0,50}\b(?:not recorded|missing|unrecorded|in qbo|written to qbo)\b/.test(body)
+    || /\b(?:anything|what|which)\b.{0,30}\b(?:missing|not recorded|unrecorded)\b.{0,30}\bqbo\b/.test(body);
+  if (!explicitLatest && !completeness) return null;
+  return { detail: true };
+}
+
+export function createAccountingReconciliationClaimHandler({
+  config,
+  execute = callControlPlane,
+  logger = null,
+} = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
+    if (!channelId || !config.accountingChannelIds.has(channelId) || event.hasCsvAttachment) return undefined;
+    const input = parseAccountingReconciliationRequest(
+      event.bodyForAgent || event.body || event.content || '',
+    );
+    if (!input) return undefined;
+    const messageId = trustedMessageId(event, ctx);
+    const actorUserId = String(event.senderId || ctx?.senderId || '');
+    if (!messageId || !actorUserId) {
+      return {
+        handled: true,
+        reply: { text: 'The authoritative QBO reconciliation lookup was not run because trusted Slack message/user identity was unavailable. No answer was generated from channel history.' },
+      };
+    }
+    try {
+      logger?.info?.(`resort-workflows claiming accounting reconciliation read ${messageId} in ${channelId}`);
+      const payload = await execute(config, {
+        workflow: 'accounting.reconciliation.read',
+        input,
+        context: {
+          channelId,
+          actorUserId,
+          messageId,
+          entrypoint: 'slack_accounting_reconciliation_read',
+        },
+        idempotencyKey: `slack:${channelId}:${messageId}:accounting.reconciliation.read`,
+      });
+      return { handled: true, reply: { text: formatAccountingReconciliationReply(payload) } };
+    } catch (error) {
+      logger?.error?.(`resort-workflows accounting reconciliation read failed: ${error.message}`);
+      return {
+        handled: true,
+        reply: { text: `The authoritative QBO reconciliation ledger is temporarily unavailable (${error.code || 'workflow_error'}). No answer was generated from channel history; please retry or check #ops.` },
+      };
+    }
+  };
+}
+
+export function createAccountingReconciliationReplyDispatchHandler(options = {}) {
+  const claim = createAccountingReconciliationClaimHandler(options);
+  const logger = options.logger || null;
+  return async (event, ctx) => {
+    if (event?.isTailDispatch) return undefined;
+    const inboundEvent = {
+      ...reservationClaimEventFromFinalizedContext(event?.ctx),
+      hasCsvAttachment: accountingCsvSignalFromFinalizedContext(event?.ctx),
+    };
+    const result = await claim(inboundEvent, {
+      channelId: inboundEvent.channel,
+      accountId: inboundEvent.accountId,
+      conversationId: inboundEvent.conversationId,
+      messageId: inboundEvent.messageId,
+      senderId: inboundEvent.senderId,
+    });
+    if (!result?.handled) return undefined;
+
+    let queuedFinal = false;
+    if (!event.suppressUserDelivery && event.sendPolicy !== 'deny' && result.reply) {
+      try {
+        await ctx.onReplyStart?.();
+        queuedFinal = ctx.dispatcher.sendFinalReply(result.reply);
+      } catch (error) {
+        logger?.error?.(`resort-workflows deterministic accounting reconciliation reply delivery failed: ${error.message}`);
+      }
+    }
+    ctx.recordProcessed?.('completed', { reason: 'accounting_reconciliation_reply_dispatch' });
+    ctx.markIdle?.('message_completed');
+    return {
+      handled: true,
+      queuedFinal,
+      counts: ctx.dispatcher.getQueuedCounts(),
+    };
+  };
+}
+
 export function createAccountingStatementReplyDispatchHandler(options = {}) {
   const claim = createAccountingStatementClaimHandler(options);
   const logger = options.logger || null;
@@ -1733,6 +1900,7 @@ const plugin = {
     });
     // OpenClaw 2026.5 invokes inbound_claim only for plugin-bound conversations.
     // reply_dispatch is the terminal pre-model hook for ordinary Slack channels.
+    api.on('reply_dispatch', createAccountingReconciliationReplyDispatchHandler({ config, logger: api.logger }), { priority: 175, timeoutMs: 70_000 });
     api.on('reply_dispatch', createAccountingStatementReplyDispatchHandler({ config, logger: api.logger }), { priority: 180, timeoutMs: 70_000 });
     api.on('reply_dispatch', createTaskListReplyDispatchHandler({ config, logger: api.logger }), { priority: 185, timeoutMs: 10_000 });
     api.on('reply_dispatch', createReservationReplyDispatchHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });

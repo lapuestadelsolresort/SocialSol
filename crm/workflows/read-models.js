@@ -656,6 +656,59 @@ const qboReportRead = evidenceReadDefinition({
   },
 });
 
+const accountingReconciliationRead = evidenceReadDefinition({
+  name: 'accounting.reconciliation.read',
+  capability: 'qbo.read',
+  validate(input) {
+    const unsupported = Object.keys(input || {}).filter(key => key !== 'detail');
+    if (unsupported.length) throw new Error(`unsupported accounting.reconciliation.read input: ${unsupported.join(', ')}`);
+  },
+  async collect({ db }) {
+    const [latest] = await queryIfTable(db, 'workflow_runs', sql`SELECT
+      id, input_json, output_json, completed_at, updated_at
+      FROM workflow_runs
+      WHERE workflow_name='qbo.write' AND status='completed'
+      ORDER BY COALESCE(completed_at, updated_at) DESC, created_at DESC LIMIT 1`, []);
+    if (!latest) {
+      return {
+        source: 'sqlite.workflow_runs.qbo_write',
+        sourceRef: 'none',
+        payload: { authority: 'QBO provider-readback reconciliation ledger', latest: null },
+      };
+    }
+    let input = {};
+    let output = {};
+    try { input = JSON.parse(latest.input_json || '{}'); } catch {}
+    try { output = JSON.parse(latest.output_json || '{}'); } catch {}
+    const summary = output.qbo || {};
+    const transactions = await queryIfTable(db, 'accounting_bank_transactions', sql`SELECT
+      transaction_date, amount, amount_usd, currency, category_key, category_name,
+      classification_tier, classification_reason, status, qbo_entity_type,
+      qbo_entity_id, qbo_category_key, qbo_category_name, review_required,
+      qbo_recorded_at
+      FROM accounting_bank_transactions
+      WHERE qbo_workflow_run_id=${latest.id}
+      ORDER BY transaction_date, amount, id`, []);
+    return {
+      source: 'sqlite.workflow_runs.qbo_write+accounting_bank_transactions',
+      sourceRef: latest.id,
+      observedAt: latest.completed_at || latest.updated_at,
+      payload: {
+        authority: 'QBO provider-readback reconciliation ledger',
+        latest: {
+          workflowRunId: latest.id,
+          completedAt: latest.completed_at || latest.updated_at,
+          verifiedStatus: output.status || null,
+          evidenceId: output.evidenceId || null,
+          sourceCsv: input.csvPath ? String(input.csvPath).split('/').pop() : null,
+          summary,
+          transactions,
+        },
+      },
+    };
+  },
+});
+
 const squarespaceSummaryRead = evidenceReadDefinition({
   name: 'squarespace.summary.read',
   capability: 'squarespace.read',
@@ -858,6 +911,7 @@ const paulinaPerformanceRead = evidenceReadDefinition({
 });
 
 module.exports = {
+  accountingReconciliationRead,
   businessSnapshot,
   emailActivityRead,
   evidenceReadDefinition,

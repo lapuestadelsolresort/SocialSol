@@ -74,15 +74,19 @@ payable reimbursement or payment code. A matched
 bundle is written to QBO with one expense line per receipt item so mixed
 categories remain split even though Kapital contains one reimbursement.
 If an uncoded transfer has the same payee, currency, and amount within 30 days
-of a successfully reconciled coded reimbursement, it is held as a possible
-duplicate instead of being auto-posted.
+of a successfully reconciled coded reimbursement, it is removed from guessed
+classification. The QBO preflight still checks its exact Kapital Clave. If it
+is genuinely absent, the debit is recorded in QBO Uncategorized Expense and
+flagged for category review instead of disappearing from the ledger.
 
 Before any QBO write, overlapping transactions are checked through the
 refresh-aware QBO client. An expired access token is refreshed automatically;
 if authentication, the duplicate query, or its response cannot be verified,
 the statement fails closed before creating any QBO entity. The completion
-message in `#accounting` reports run-scoped principal writes, separate SPEI fee
-records, deduplicated transactions, and every transaction held for review.
+message in `#accounting` reports total principals and SPEI fee lines recorded,
+run-scoped writes, existing QBO records, recorded categorization reviews, and
+any truly unrecorded holds. SPEI fees are reconciled independently from their
+parent principal, including legacy fee rows without a parent marker.
 It is posted to the channel without tagging global workflow reviewers.
 
 A Kapital CSV attached in `#accounting` is refetched from the exact Slack
@@ -99,6 +103,12 @@ instructions. Content hashes are checked against both the active inbox and the
 successful processed archive. An exact retry is reported as already queued or
 already processed and cannot reuse a workflow idempotency key with a different
 path or create a second QBO run.
+
+Questions about the latest reconciliation, its breakdown, or missing QBO
+transactions are claimed before the chat model and answered by
+`accounting.reconciliation.read`. That read model reports the latest verified
+QBO workflow and its projected bank-transaction ledger; it never infers status
+from Slack history.
 
 Configure the Slack user(s) who submit Kapital reimbursements. The command is
 a dry run unless `--confirm-production` is supplied and backs up the ignored

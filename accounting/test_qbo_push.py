@@ -10,8 +10,8 @@ from unittest.mock import Mock, mock_open, patch
 sys.path.insert(0, str(Path(__file__).parent))
 
 from qbo_push import (  # noqa: E402
-    QBOClient, allocate_receipt_item_usd, push_classified_to_qbo, qbo_request_id,
-    verify_receipt_purchase_readback,
+    QBOClient, allocate_receipt_item_usd, find_missing_spei_fees,
+    push_classified_to_qbo, qbo_request_id, verify_receipt_purchase_readback,
 )
 
 
@@ -182,24 +182,87 @@ class QBOIntegrityTests(unittest.TestCase):
                 push_classified_to_qbo(results, dry_run=False)
         client.create_purchase.assert_not_called()
 
-    def test_qbo_summary_enumerates_transactions_held_for_review(self):
+    def test_qbo_summary_distinguishes_unrecorded_holds_from_recorded_review_items(self):
         client = Mock()
         client.query.return_value = {'QueryResponse': {}}
         results = {
             'auto': [],
             'guess': [{
-                'date': date(2026, 8, 6), 'amount': 2105, 'currency': 'MXN',
+                'date': date(2026, 8, 6), 'amount': 2105, 'amount_usd': 122.17, 'currency': 'MXN',
                 'reason': 'duplicate reimbursement requires review',
             }],
             'unknown': [{
-                'date': date(2026, 8, 10), 'amount': 2499, 'currency': 'MXN',
+                'date': date(2026, 8, 10), 'amount': 2499, 'amount_usd': 146.48, 'currency': 'MXN',
                 'reason': 'manual classification required',
             }],
         }
         with patch('qbo_push.QBOClient', return_value=client):
-            summary = push_classified_to_qbo(results, dry_run=True)
-        self.assertEqual(summary['review_required'], 2)
-        self.assertEqual([row['amount'] for row in summary['review_details']], [2105, 2499])
+            held = push_classified_to_qbo(results, dry_run=True)
+            recorded = push_classified_to_qbo(results, record_unresolved=True, dry_run=True)
+        self.assertEqual(held['held'], 2)
+        self.assertEqual(held['review_required'], 0)
+        self.assertEqual([row['amount'] for row in held['held_details']], [2105, 2499])
+        self.assertEqual(recorded['held'], 0)
+        self.assertEqual(recorded['review_required'], 2)
+        self.assertEqual([row['amount'] for row in recorded['review_details']], [2105, 2499])
+        self.assertTrue(all(row['category_key'] == 'uncategorized_expense'
+                            for row in recorded['review_details']))
+
+    def test_spei_fee_reconciliation_consumes_legacy_lines_as_a_multiset(self):
+        parents = [
+            {
+                'date': date(2026, 8, 6), 'amount': amount, 'amount_usd': amount / 17.23,
+                'reference': f'Clave: 136-06/08/2026/06-{index}',
+                'vendor_name': vendor,
+                'spei_fees': [
+                    {'amount': 4, 'amount_usd': 0.23, 'is_spei_iva': False},
+                    {'amount': 0.64, 'amount_usd': 0.04, 'is_spei_iva': True},
+                ],
+            }
+            for index, (amount, vendor) in enumerate([
+                (2800, 'Sergio Gracia'), (5000, 'Sergio Gracia'),
+                (3000, 'Sergio Gracia'), (2105, 'Sergio Gracia'),
+                (4700, 'Ignacio Rubio'),
+            ], start=1)
+        ]
+        purchases = []
+        qbo_id = 100
+        for _ in range(3):
+            for kind, total in [('Commission', 0.23), ('IVA', 0.04)]:
+                purchases.append({
+                    'Id': str(qbo_id), 'TxnDate': '2026-08-06', 'TotalAmt': total,
+                    'PrivateNote': f'SPEI {kind} on transfer to Sergio Gracia | FX: 17.23 MXN/USD',
+                })
+                qbo_id += 1
+
+        missing, existing = find_missing_spei_fees(
+            parents,
+            lambda _sql: {'QueryResponse': {'Purchase': purchases}},
+        )
+        self.assertEqual(len(existing), 6)
+        self.assertEqual(len(missing), 4)
+        self.assertEqual(
+            [(item['parent']['amount'], item['kind']) for item in missing],
+            [(2105, 'commission'), (2105, 'iva'), (4700, 'commission'), (4700, 'iva')],
+        )
+
+    def test_new_spei_fee_memo_is_bound_to_exact_parent_reference(self):
+        client = self.client()
+        client._resolve_account_id = lambda _key: '1150040012'
+        seen = []
+        client._api_call = lambda method, endpoint, body, request_id=None: (
+            seen.append(body) or {'Purchase': {'Id': '42'}}
+        )
+        parent = {
+            'date': date(2026, 8, 13), 'amount': 7500, 'fx_rate': 17.06,
+            'reference': 'Clave: 136-13/08/2026/13-1704637578',
+            'vendor_name': 'The Tequila Experience',
+        }
+        client.create_spei_fee(
+            {'amount': 4, 'amount_usd': 0.23, 'is_spei_iva': False}, parent,
+        )
+        self.assertIn(parent['reference'], seen[0]['PrivateNote'])
+        self.assertIn('Parent orig $7,500.00 MXN', seen[0]['PrivateNote'])
 
     def test_journal_entry_create_and_readback_use_canonical_endpoints(self):
         seen = []

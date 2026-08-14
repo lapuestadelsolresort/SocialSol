@@ -249,6 +249,8 @@ def apply_receipt_ledger(results: Dict[str, List[Dict]], database_path: str) -> 
                 duplicate = dict(transaction)
                 duplicate.update({
                     'confidence': 'unknown',
+                    'original_category_key': transaction.get('category'),
+                    'original_category_name': transaction.get('category_name'),
                     'category': None,
                     'category_name': None,
                     'reason': (
