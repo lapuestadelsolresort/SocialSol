@@ -61,6 +61,53 @@ class QboDedupTests(unittest.TestCase):
         self.assertIn('Date+MXN fingerprint', transaction['_dedup_reason'])
         self.assertEqual(transaction['_dedup_qbo_id'], '2470')
 
+    def test_fee_parent_reference_never_deduplicates_the_principal(self):
+        transaction = self.transaction()
+
+        def query(sql):
+            if 'FROM Purchase' in sql:
+                return {'QueryResponse': {'Purchase': [{
+                    'Id': '2524', 'TxnDate': '2026-08-06', 'TotalAmt': 0.09,
+                    'PrivateNote': (
+                        'SPEI IVA on transfer to Ignacio Rubio | '
+                        'Parent ref: Clave: 136-06/08/2026/06-1704547533 | '
+                        'Parent orig $4,700.00 MXN'
+                    ),
+                }]}}
+            return {'QueryResponse': {}}
+
+        new, duplicates = check_for_duplicates([transaction], query)
+        self.assertEqual(new, [transaction])
+        self.assertEqual(duplicates, [])
+
+    def test_existing_uncategorized_principal_preserves_review_metadata(self):
+        transaction = self.transaction(
+            amount=2105,
+            amount_usd=122.17,
+            reference='Clave: 136-06/08/2026/06-1704547161',
+            category=None,
+            category_name=None,
+            original_category_key='maintenance',
+            original_category_name='Maintenance',
+        )
+
+        def query(sql):
+            if 'FROM Purchase' in sql:
+                return {'QueryResponse': {'Purchase': [{
+                    'Id': '2522', 'TxnDate': '2026-08-06', 'TotalAmt': 122.17,
+                    'PrivateNote': (
+                        'REVIEW REQUIRED: unresolved Kapital debit recorded to Uncategorized Expense; '
+                        'suggested category: Maintenance | Ref: Clave: 136-06/08/2026/06-1704547161'
+                    ),
+                }]}}
+            return {'QueryResponse': {}}
+
+        new, duplicates = check_for_duplicates([transaction], query)
+        self.assertEqual(new, [])
+        self.assertEqual(duplicates[0]['_dedup_qbo_id'], '2522')
+        self.assertEqual(duplicates[0]['category'], 'uncategorized_expense')
+        self.assertTrue(duplicates[0]['_requires_review'])
+
     def test_malformed_query_response_aborts(self):
         with self.assertRaisesRegex(RuntimeError, 'no QueryResponse'):
             check_for_duplicates([self.transaction()], lambda _sql: {})
