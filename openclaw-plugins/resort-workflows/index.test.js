@@ -74,6 +74,60 @@ test('formats live Gmail activity with unread and ledger coverage facts', () => 
   assert.match(reply, /Evidence: evidence-1/);
 });
 
+test('WhatsApp status reads surface every persisted row in both WhatsApp and business-intel tool content', async () => {
+  const tokenEnv = 'TEST_WHATSAPP_STATUS_CONTROL_TOKEN';
+  const previousToken = process.env[tokenEnv];
+  process.env[tokenEnv] = 'w'.repeat(40);
+  const requests = [];
+  const payload = { run: {
+    id: 'wa-status-run', workflow_name: 'whatsapp.status.read', status: 'completed',
+    output: {
+      direction: 'outbound', totalMessages: 2, displayedMessages: 2, truncated: false,
+      legacyUntrackedMessages: 46,
+      messages: [
+        { message_id: 'SM-READ', contact_name: 'Guest One', sent_by_name: 'Jason',
+          direction: 'outbound', delivery_status: 'read',
+          provider_status_updated_at: '2026-08-13T12:06:00.000Z' },
+        { message_id: 'SM-FAILED', contact_name: 'Guest Two', sent_by_name: 'Sarah',
+          direction: 'outbound', delivery_status: 'failed',
+          provider_status_updated_at: '2026-08-13T12:07:00.000Z' },
+      ],
+      _evidence: { id: 'wa-status-evidence' },
+    },
+  } };
+  try {
+    for (const channelId of ['CWA', 'CBI']) {
+      const tool = createWorkflowTool({
+        config: pluginConfig({ controlPlaneTokenEnv: tokenEnv }),
+        ctx: {
+          sessionId: `session-${channelId}`,
+          deliveryContext: { to: `channel:${channelId}` },
+          requesterSenderId: 'U-JASON',
+        },
+        fetchImpl: async (_url, options) => {
+          requests.push(JSON.parse(options.body));
+          return { ok: true, json: async () => payload };
+        },
+      });
+      const result = await tool.execute(`call-${channelId}`, {
+        workflow: 'whatsapp.status.read', input: { direction: 'outbound', limit: 100 },
+      });
+      const text = result.content[0].text;
+      assert.match(text, /2 persisted records/);
+      assert.match(text, /Guest One · read \(Twilio-confirmed\).*SM-READ/);
+      assert.match(text, /Guest Two · failed \(Twilio-confirmed\).*SM-FAILED/);
+      assert.match(text, /46 older WhatsApp records predate durable direction\/status tracking/);
+      assert.match(text, /Workflow: wa-status-run · Evidence: wa-status-evidence/);
+      assert.doesNotMatch(text, /completed with verified run state/);
+    }
+    assert.deepEqual(requests.map(request => request.context.channel_id), ['CWA', 'CBI']);
+    assert.ok(requests.every(request => request.input.direction === 'outbound' && request.input.limit === 100));
+  } finally {
+    if (previousToken === undefined) delete process.env[tokenEnv];
+    else process.env[tokenEnv] = previousToken;
+  }
+});
+
 test('parses only explicit Meta DM mutations', () => {
   assert.deepEqual(parseMetaDmCommand('hello'), null);
   assert.deepEqual(parseMetaDmCommand('!dm 42 Welcome'), { dmId: 42, message: 'Welcome' });

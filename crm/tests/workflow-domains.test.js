@@ -95,10 +95,11 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
     'ownerrez.occupancy.read', 'squarespace.summary.read',
     'ownerrez.mutation.propose', 'ownerrez.mutation.confirm',
     'email.activity.read', 'email.message.observe', 'email.reply.propose', 'email.reply.confirm', 'email.message.classify',
-    'qbo.write', 'qbo.bank_balances.read', 'qbo.report.read', 'business.snapshot.read',
+    'qbo.write', 'qbo.bank_balances.read', 'qbo.report.read', 'business.snapshot.read', 'whatsapp.status.read',
   ]) assert.equal(definitions.has(expected), true, expected);
   assert.equal(definitions.get('business.snapshot.read').mutates, false);
   assert.equal(definitions.get('email.activity.read').capability, 'email.read');
+  assert.equal(definitions.get('whatsapp.status.read').version, 2);
   assert.equal(definitions.get('qbo.write').autonomous, true);
   assert.equal(definitions.has('shell.exec'), false);
 });
@@ -154,6 +155,57 @@ test('email activity local date windows honor Pacific daylight-saving boundaries
   assert.equal(readModelInternals.zonedMidnightUtc('2026-11-01'), '2026-11-01T07:00:00.000Z');
   assert.equal(readModelInternals.zonedMidnightUtc('2026-11-02'), '2026-11-02T08:00:00.000Z');
   assert.throws(() => readModelInternals.validateEmailActivityInput({ start: '2026-08-13', end: '2026-10-01' }), /31 days/);
+});
+
+test('WhatsApp status reads default to outbound, resolve recipients, and disclose legacy coverage', async () => {
+  await withDb(async db => {
+    await db.query(sql`INSERT INTO meta_messages (
+      received_at, platform, sender_id, sender_name, message_id, message_text,
+      raw_payload, slack_thread_ts, direction, delivery_status,
+      provider_status_updated_at, delivered_at, read_at
+    ) VALUES
+      ('2026-08-10T12:00:00.000Z', 'whatsapp', '+14155550100', 'Legacy Guest',
+        'SM-LEGACY', 'Old inbound', '{}', '100.1', NULL, NULL, NULL, NULL, NULL),
+      ('2026-08-13T12:00:00.000Z', 'whatsapp', '+14155550101', 'Current Guest',
+        'SM-INBOUND', 'Hello', '{}', '200.1', 'inbound', 'delivered',
+        '2026-08-13T12:00:00.000Z', '2026-08-13T12:00:00.000Z', NULL)`);
+    const [inbound] = await db.query(sql`SELECT id FROM meta_messages WHERE message_id='SM-INBOUND'`);
+    await db.query(sql`INSERT INTO meta_messages (
+      received_at, platform, sender_id, sender_name, message_id, message_text,
+      raw_payload, slack_thread_ts, direction, delivery_status,
+      provider_status_updated_at, delivered_at, read_at
+    ) VALUES (
+      '2026-08-13T12:05:00.000Z', 'whatsapp', 'outbound', 'Jason',
+      'SM-OUTBOUND', 'Welcome', ${JSON.stringify({ reply_to_dm_id: inbound.id, twilio_sid: 'SM-OUTBOUND' })},
+      '200.1', 'outbound', 'read', '2026-08-13T12:06:00.000Z',
+      '2026-08-13T12:05:30.000Z', '2026-08-13T12:06:00.000Z'
+    )`);
+
+    const outbound = await startGraph(db, getDefinition('whatsapp.status.read'), {
+      idempotencyKey: 'whatsapp-status-outbound', triggerType: 'slack',
+      channelId: 'C-WA', actorUserId: 'U-JASON', input: {},
+    });
+    assert.equal(outbound.status, 'completed', outbound.error_message);
+    assert.equal(outbound.output.direction, 'outbound');
+    assert.equal(outbound.output.totalMessages, 1);
+    assert.equal(outbound.output.displayedMessages, 1);
+    assert.equal(outbound.output.messages[0].contact_name, 'Current Guest');
+    assert.equal(outbound.output.messages[0].sent_by_name, 'Jason');
+    assert.equal(outbound.output.messages[0].delivery_status, 'read');
+    assert.equal(outbound.output.legacyUntrackedMessages, 1);
+    assert.match(outbound.output.legacyCoverageNote, /cannot be classified as outbound/);
+    assert.equal(outbound.output._evidence.source, 'twilio.callback_ledger');
+
+    const all = await startGraph(db, getDefinition('whatsapp.status.read'), {
+      idempotencyKey: 'whatsapp-status-all', triggerType: 'slack',
+      channelId: 'C-BI', actorUserId: 'U-JASON', input: { direction: 'all' },
+    });
+    assert.equal(all.output.totalMessages, 3);
+    assert.equal(all.output.messages.find(message => message.message_id === 'SM-LEGACY').direction, 'legacy_untracked');
+    assert.equal(all.output.messages.find(message => message.message_id === 'SM-LEGACY').delivery_status, 'untracked_legacy');
+  });
+  assert.throws(() => readModelInternals.validateWhatsAppStatusInput({ direction: 'recent' }), /outbound, inbound, or all/);
+  assert.throws(() => readModelInternals.validateWhatsAppStatusInput({ detail: true }), /unsupported whatsapp\.status\.read input: detail/);
 });
 
 test('durable shell jobs retry only before dispatch and require review after dispatch', async () => {
