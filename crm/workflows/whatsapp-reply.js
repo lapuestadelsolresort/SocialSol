@@ -1,7 +1,7 @@
 'use strict';
 
 const { sql } = require('@databases/sqlite');
-const { normalizeTwilioEffectState } = require('../lib/twilio-whatsapp');
+const { monotonicTwilioStatus, normalizeTwilioEffectState } = require('../lib/twilio-whatsapp');
 
 function validate(input) {
   const message = typeof input.message === 'string' ? input.message.trim() : '';
@@ -144,23 +144,43 @@ const definition = {
         const conversation = state.resolve_conversation;
         const send = state.send_via_twilio;
         const now = new Date().toISOString();
+        const [currentEffect] = await db.query(sql`SELECT status, provider_status,
+            error_code, error_message, delivered_at, read_at, failed_at, updated_at
+          FROM workflow_effects WHERE id=${send.effectId} LIMIT 1`);
+        const projectionStatus = monotonicTwilioStatus(send.status, currentEffect?.status || send.status);
+        const projectionProviderStatus = currentEffect?.provider_status || send.providerStatus;
+        const projectionSource = projectionStatus !== send.status
+          ? 'twilio_status_callback' : 'twilio_send_response';
         try {
           await db.tx(async tx => {
             await tx.query(sql`INSERT OR IGNORE INTO meta_messages (
                 platform, sender_id, sender_name, message_id, message_text, received_at,
                 slack_thread_ts, raw_payload, direction, delivery_status,
+                provider_delivery_status, provider_error_code, provider_error_message,
+                delivery_status_source, delivered_at, read_at, failed_at,
                 provider_status_updated_at, workflow_run_id, workflow_effect_id
               ) VALUES (
                 'whatsapp', 'outbound', ${input.actorName || 'Staff'}, ${send.messageSid},
                 ${input.message.trim()}, ${now}, ${conversation.threadTs},
                 ${JSON.stringify({ reply_to_dm_id: conversation.dmId, twilio_sid: send.messageSid })},
-                'outbound', ${send.status}, ${now}, ${run.id}, ${send.effectId}
+                'outbound', ${projectionStatus}, ${projectionProviderStatus},
+                ${currentEffect?.error_code || null}, ${currentEffect?.error_message || null},
+                ${projectionSource}, ${currentEffect?.delivered_at || null},
+                ${currentEffect?.read_at || null}, ${currentEffect?.failed_at || null},
+                ${currentEffect?.updated_at || now}, ${run.id}, ${send.effectId}
               )`);
             await tx.query(sql`UPDATE meta_messages SET
                 workflow_run_id=COALESCE(workflow_run_id, ${run.id}),
                 workflow_effect_id=COALESCE(workflow_effect_id, ${send.effectId}),
-                delivery_status=COALESCE(delivery_status, ${send.status}),
-                provider_status_updated_at=COALESCE(provider_status_updated_at, ${now})
+                delivery_status=${projectionStatus},
+                provider_delivery_status=COALESCE(provider_delivery_status, ${projectionProviderStatus}),
+                provider_error_code=COALESCE(provider_error_code, ${currentEffect?.error_code || null}),
+                provider_error_message=COALESCE(provider_error_message, ${currentEffect?.error_message || null}),
+                delivery_status_source=COALESCE(delivery_status_source, ${projectionSource}),
+                delivered_at=COALESCE(delivered_at, ${currentEffect?.delivered_at || null}),
+                read_at=COALESCE(read_at, ${currentEffect?.read_at || null}),
+                failed_at=COALESCE(failed_at, ${currentEffect?.failed_at || null}),
+                provider_status_updated_at=COALESCE(provider_status_updated_at, ${currentEffect?.updated_at || now})
               WHERE platform='whatsapp' AND message_id=${send.messageSid}`);
             await store.recordEvent(tx, {
               runId: run.id,

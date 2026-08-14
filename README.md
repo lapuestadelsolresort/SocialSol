@@ -97,6 +97,12 @@ business at sale.
 - `#whatsapp` is the sole human WhatsApp console. A send must be an explicit
   `!wa` command by a member of that private channel; plain Slack replies and
   the retired direct HTTP send endpoints cannot send to a guest.
+  Delivery callbacks are normalized into the CRM with their raw Twilio state,
+  failure code, evidence source, and delivered/read/failed timestamps. Run
+  `npm run reconcile:whatsapp-statuses` for a read-only provider audit; an
+  intentional CRM backfill additionally requires `-- --apply
+  --confirm-production`. Reconciliation reads existing Twilio message SIDs and
+  never sends or resends a guest message.
 - Instagram/Facebook DM replies are likewise command-only: `!dm <dm-id>
   <message>` in `#social-sol`. The retired `/api/meta-dm/reply` endpoint cannot
   bypass the durable ledger.

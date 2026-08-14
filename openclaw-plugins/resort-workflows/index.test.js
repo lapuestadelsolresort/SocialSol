@@ -83,6 +83,8 @@ test('WhatsApp status reads surface every persisted row in both WhatsApp and bus
     id: 'wa-status-run', workflow_name: 'whatsapp.status.read', status: 'completed',
     output: {
       direction: 'outbound', totalMessages: 2, displayedMessages: 2, truncated: false,
+      statusCounts: { read: 1, delivered: 0, failed: 1, unconfirmed: 0 },
+      followUpRequiredMessages: 1,
       legacyUntrackedMessages: 46,
       messages: [
         { message_id: 'SM-READ', contact_name: 'Guest One', sent_by_name: 'Jason',
@@ -90,6 +92,7 @@ test('WhatsApp status reads surface every persisted row in both WhatsApp and bus
           provider_status_updated_at: '2026-08-13T12:06:00.000Z' },
         { message_id: 'SM-FAILED', contact_name: 'Guest Two', sent_by_name: 'Sarah',
           direction: 'outbound', delivery_status: 'failed',
+          provider_delivery_status: 'undelivered', provider_error_code: '63016',
           provider_status_updated_at: '2026-08-13T12:07:00.000Z' },
       ],
       _evidence: { id: 'wa-status-evidence' },
@@ -114,9 +117,10 @@ test('WhatsApp status reads surface every persisted row in both WhatsApp and bus
       });
       const text = result.content[0].text;
       assert.match(text, /2 persisted records/);
+      assert.match(text, /1 read · 0 delivered · 1 failed\/undelivered \(follow-up required\)/);
       assert.match(text, /Guest One · read \(Twilio-confirmed\).*SM-READ/);
-      assert.match(text, /Guest Two · failed \(Twilio-confirmed\).*SM-FAILED/);
-      assert.match(text, /46 older WhatsApp records predate durable direction\/status tracking/);
+      assert.match(text, /Guest Two · undelivered \(Twilio-confirmed; follow-up required; Twilio 63016: outside the 24-hour reply window; approved template required\).*SM-FAILED/);
+      assert.match(text, /46 older WhatsApp records still lack normalized direction\/status/);
       assert.match(text, /Workflow: wa-status-run · Evidence: wa-status-evidence/);
       assert.doesNotMatch(text, /completed with verified run state/);
     }
@@ -126,6 +130,23 @@ test('WhatsApp status reads surface every persisted row in both WhatsApp and bus
     if (previousToken === undefined) delete process.env[tokenEnv];
     else process.env[tokenEnv] = previousToken;
   }
+});
+
+test('WhatsApp failure output explains a disabled or unverified business account', () => {
+  const text = formatWorkflowReply({ run: {
+    id: 'wa-disabled', workflow_name: 'whatsapp.status.read', status: 'completed',
+    output: {
+      direction: 'outbound', totalMessages: 1, displayedMessages: 1,
+      statusCounts: { read: 0, delivered: 0, failed: 1, unconfirmed: 0 },
+      messages: [{
+        message_id: 'SM-FAILED', contact_name: 'Guest', direction: 'outbound',
+        delivery_status: 'failed', provider_delivery_status: 'failed',
+        provider_error_code: '63112', provider_status_updated_at: '2026-08-10T02:18:18.000Z',
+      }],
+    },
+  } });
+  assert.match(text, /Twilio 63112: WhatsApp Business Account disabled or verification incomplete at send time/);
+  assert.match(text, /follow-up required/);
 });
 
 test('parses only explicit Meta DM mutations', () => {

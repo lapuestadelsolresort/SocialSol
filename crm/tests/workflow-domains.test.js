@@ -99,7 +99,7 @@ test('registry exposes fixed domain graphs instead of arbitrary command executio
   ]) assert.equal(definitions.has(expected), true, expected);
   assert.equal(definitions.get('business.snapshot.read').mutates, false);
   assert.equal(definitions.get('email.activity.read').capability, 'email.read');
-  assert.equal(definitions.get('whatsapp.status.read').version, 2);
+  assert.equal(definitions.get('whatsapp.status.read').version, 3);
   assert.equal(definitions.get('qbo.write').autonomous, true);
   assert.equal(definitions.has('shell.exec'), false);
 });
@@ -192,9 +192,13 @@ test('WhatsApp status reads default to outbound, resolve recipients, and disclos
     assert.equal(outbound.output.messages[0].contact_name, 'Current Guest');
     assert.equal(outbound.output.messages[0].sent_by_name, 'Jason');
     assert.equal(outbound.output.messages[0].delivery_status, 'read');
+    assert.deepEqual(outbound.output.statusCounts, {
+      read: 1, delivered: 0, failed: 0, unconfirmed: 0,
+    });
+    assert.equal(outbound.output.followUpRequiredMessages, 0);
     assert.equal(outbound.output.legacyUntrackedMessages, 1);
-    assert.match(outbound.output.legacyCoverageNote, /cannot be classified as outbound/);
-    assert.equal(outbound.output._evidence.source, 'twilio.callback_ledger');
+    assert.match(outbound.output.legacyCoverageNote, /can be recovered/);
+    assert.equal(outbound.output._evidence.source, 'twilio.delivery_ledger');
 
     const all = await startGraph(db, getDefinition('whatsapp.status.read'), {
       idempotencyKey: 'whatsapp-status-all', triggerType: 'slack',

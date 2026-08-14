@@ -16,6 +16,7 @@ const { enqueueOutbox, transitionEffect } = require('../lib/workflow-store');
 const {
   MAX_MESSAGE_LENGTH,
   loadTwilioSecrets,
+  monotonicTwilioStatus,
   normalizeTwilioEffectState,
   statusCallbackUrl,
 } = require('../lib/twilio-whatsapp');
@@ -30,16 +31,6 @@ function buildRouter(getDb, overrides = {}) {
   const router = express.Router();
   const { sql } = require('@databases/sqlite');
   const getSecrets = overrides.loadTwilioSecrets || loadTwilioSecrets;
-
-  function monotonicStatus(current, next) {
-    const rank = new Map([
-      ['accepted_by_provider', 0], ['queued', 1], ['sent', 2], ['delivered', 3], ['read', 4],
-    ]);
-    if (!current) return next;
-    if (current === 'failed' || current === 'read') return current;
-    if (next === 'failed') return ['delivered', 'read'].includes(current) ? current : 'failed';
-    return (rank.get(next) ?? 0) >= (rank.get(current) ?? 0) ? next : current;
-  }
 
   // ─── Twilio Webhook (incoming WhatsApp messages) ─────────────────────────
   router.post('/webhook', express.urlencoded({ extended: false, limit: '64kb', parameterLimit: 100 }), async (req, res) => {
@@ -106,10 +97,11 @@ function buildRouter(getDb, overrides = {}) {
         INSERT OR IGNORE INTO meta_messages (
           platform, sender_id, sender_name, message_id, message_text, received_at,
           raw_payload, direction, delivery_status, provider_status_updated_at,
-          processing_status
+          provider_delivery_status, delivery_status_source, processing_status
         ) VALUES (
           'whatsapp', ${senderPhone}, ${senderName}, ${messageSid}, ${fullText}, ${now},
-          ${JSON.stringify(safePayload)}, 'inbound', 'delivered', ${now}, 'pending'
+          ${JSON.stringify(safePayload)}, 'inbound', 'delivered', ${now},
+          'received', 'twilio_inbound_webhook', 'pending'
         )
       `);
 
@@ -182,13 +174,21 @@ function buildRouter(getDb, overrides = {}) {
         errorMessage: status === 'failed' ? (body.ErrorMessage || providerStatus) : null,
       });
       const now = new Date().toISOString();
-      const [currentMessage] = await db.query(sql`SELECT delivery_status FROM meta_messages
+      const [currentMessage] = await db.query(sql`SELECT delivery_status, provider_delivery_status FROM meta_messages
         WHERE platform='whatsapp' AND message_id=${messageSid} LIMIT 1`);
-      const mirrorStatus = monotonicStatus(currentMessage?.delivery_status, status);
+      const mirrorStatus = monotonicTwilioStatus(currentMessage?.delivery_status, status);
       const mirrorChanged = Boolean(currentMessage) && mirrorStatus !== currentMessage.delivery_status;
+      const callbackApplied = !currentMessage || mirrorChanged
+        || (currentMessage.delivery_status === status && mirrorStatus === status);
+      const providerErrorCode = mirrorStatus === 'failed' ? (body.ErrorCode || 'twilio_delivery_failed') : null;
+      const providerErrorMessage = mirrorStatus === 'failed' ? (body.ErrorMessage || providerStatus) : null;
       await db.query(sql`UPDATE meta_messages SET
           delivery_status=${mirrorStatus},
-          provider_status_updated_at=CASE WHEN ${mirrorChanged ? 1 : 0}=1 THEN ${now} ELSE provider_status_updated_at END,
+          provider_delivery_status=CASE WHEN ${callbackApplied ? 1 : 0}=1 THEN ${providerStatus} ELSE provider_delivery_status END,
+          provider_error_code=CASE WHEN ${callbackApplied ? 1 : 0}=1 THEN ${providerErrorCode} ELSE provider_error_code END,
+          provider_error_message=CASE WHEN ${callbackApplied ? 1 : 0}=1 THEN ${providerErrorMessage} ELSE provider_error_message END,
+          delivery_status_source=CASE WHEN ${callbackApplied ? 1 : 0}=1 THEN 'twilio_status_callback' ELSE delivery_status_source END,
+          provider_status_updated_at=CASE WHEN ${callbackApplied ? 1 : 0}=1 THEN ${now} ELSE provider_status_updated_at END,
           delivered_at=CASE WHEN ${mirrorStatus} IN ('delivered','read') THEN COALESCE(delivered_at, ${now}) ELSE delivered_at END,
           read_at=CASE WHEN ${mirrorStatus}='read' THEN COALESCE(read_at, ${now}) ELSE read_at END,
           failed_at=CASE WHEN ${mirrorStatus}='failed' THEN COALESCE(failed_at, ${now}) ELSE failed_at END
@@ -264,14 +264,15 @@ function buildRouter(getDb, overrides = {}) {
   }));
 
   // Deterministic status lookup. This endpoint never infers delivery from the
-  // original send response; it reports only persisted provider callbacks.
+  // original send response; it reports persisted callback or provider-readback evidence.
   router.get('/message-status/:sid', async (req, res) => {
     const db = getDb();
     if (!db) return res.status(503).json({ error: 'DB not ready' });
     const sid = String(req.params.sid || '').slice(0, 80);
     const [row] = await db.query(sql`SELECT m.message_id, m.sender_name,
         COALESCE(e.status, m.delivery_status) AS delivery_status,
-        m.provider_status_updated_at,
+        m.provider_delivery_status, m.provider_error_code, m.provider_error_message,
+        m.delivery_status_source, m.provider_status_updated_at,
         COALESCE(e.delivered_at, m.delivered_at) AS delivered_at,
         COALESCE(e.read_at, m.read_at) AS read_at,
         COALESCE(e.failed_at, m.failed_at) AS failed_at,
@@ -284,6 +285,10 @@ function buildRouter(getDb, overrides = {}) {
       message_sid: row.message_id,
       recipient: row.sender_name,
       status,
+      provider_status: row.provider_delivery_status,
+      provider_error_code: row.provider_error_code,
+      provider_error_message: row.provider_error_message,
+      status_source: row.delivery_status_source,
       delivered: Boolean(row.delivered_at || row.read_at),
       read: Boolean(row.read_at),
       failed: Boolean(row.failed_at),

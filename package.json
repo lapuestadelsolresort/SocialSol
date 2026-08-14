@@ -24,6 +24,7 @@
     "configure:paloma-monitoring": "node scripts/configure-paloma-monitoring.js",
     "reconcile:email-conversations": "node crm/scripts/reconcile-email-conversations.js",
     "reconcile:email-classifications": "node crm/scripts/reconcile-email-classifications.js",
+    "reconcile:whatsapp-statuses": "node crm/scripts/reconcile-whatsapp-statuses.js",
     "reconcile:owner-expense": "node scripts/reconcile-owner-expense-receipt.js",
     "test": "npm --workspace crm test",
     "test:prospector": "node --test prospector/lib/*.test.js",
