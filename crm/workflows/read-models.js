@@ -89,7 +89,7 @@ const businessSnapshot = evidenceReadDefinition({
           directChargesFees: { authority: 'Squarespace', queried: true, freshness: squarespaceRuns[0]?.finished_at || null },
           bankCash: { authority: 'Kapital/QBO', queried: false, reason: 'snapshot never infers live bank cash from CRM data' },
           leadsOutreach: { authority: 'CRM', queried: true, freshness: generatedAt },
-          whatsappDelivery: { authority: 'Twilio callbacks', queried: true, freshness: generatedAt },
+          whatsappDelivery: { authority: 'Twilio callbacks and provider readback', queried: true, freshness: generatedAt },
         },
         leadsByStatus: leadRows,
         outreach: outreachRows[0] || { records: 0, sent: 0, delivered: 0, bounced: 0, replied: 0 },
@@ -251,7 +251,7 @@ const emailActivityRead = evidenceReadDefinition({
 
 const whatsappStatusRead = evidenceReadDefinition({
   name: 'whatsapp.status.read',
-  version: 2,
+  version: 3,
   capability: 'whatsapp.read',
   validate: validateWhatsAppStatusInput,
   async collect({ db, input }) {
@@ -279,6 +279,8 @@ const whatsappStatusRead = evidenceReadDefinition({
       m.received_at, m.slack_thread_ts,
       COALESCE(m.direction,'legacy_untracked') AS direction,
       COALESCE(m.delivery_status,'untracked_legacy') AS delivery_status,
+      m.provider_delivery_status, m.provider_error_code, m.provider_error_message,
+      m.delivery_status_source,
       m.provider_status_updated_at, m.delivered_at, m.read_at, m.failed_at,
       m.workflow_run_id, m.workflow_effect_id
       FROM meta_messages m WHERE m.platform='whatsapp'
@@ -291,10 +293,27 @@ const whatsappStatusRead = evidenceReadDefinition({
       SUM(CASE WHEN (${messageSid} IS NULL OR message_id=${messageSid})
         AND (${threadTs} IS NULL OR slack_thread_ts=${threadTs})
         AND (${direction}='all' OR direction=${direction}) THEN 1 ELSE 0 END) AS matching_messages
+      ,SUM(CASE WHEN (${messageSid} IS NULL OR message_id=${messageSid})
+        AND (${threadTs} IS NULL OR slack_thread_ts=${threadTs})
+        AND (${direction}='all' OR direction=${direction})
+        AND delivery_status='read' THEN 1 ELSE 0 END) AS read_messages
+      ,SUM(CASE WHEN (${messageSid} IS NULL OR message_id=${messageSid})
+        AND (${threadTs} IS NULL OR slack_thread_ts=${threadTs})
+        AND (${direction}='all' OR direction=${direction})
+        AND delivery_status='delivered' THEN 1 ELSE 0 END) AS delivered_messages
+      ,SUM(CASE WHEN (${messageSid} IS NULL OR message_id=${messageSid})
+        AND (${threadTs} IS NULL OR slack_thread_ts=${threadTs})
+        AND (${direction}='all' OR direction=${direction})
+        AND delivery_status='failed' THEN 1 ELSE 0 END) AS failed_messages
+      ,SUM(CASE WHEN (${messageSid} IS NULL OR message_id=${messageSid})
+        AND (${threadTs} IS NULL OR slack_thread_ts=${threadTs})
+        AND (${direction}='all' OR direction=${direction})
+        AND COALESCE(delivery_status,'untracked_legacy') NOT IN ('read','delivered','failed')
+        THEN 1 ELSE 0 END) AS unconfirmed_messages
       FROM meta_messages WHERE platform='whatsapp'`, [{}]);
     const totalMessages = Number(summary.matching_messages || 0);
     return {
-      source: 'twilio.callback_ledger',
+      source: 'twilio.delivery_ledger',
       sourceRef: messageSid || (threadTs ? `slack-thread:${threadTs}` : `direction:${direction}`),
       payload: {
         direction,
@@ -303,8 +322,15 @@ const whatsappStatusRead = evidenceReadDefinition({
         totalMessages,
         displayedMessages: rows.length,
         truncated: totalMessages > rows.length,
+        statusCounts: {
+          read: Number(summary.read_messages || 0),
+          delivered: Number(summary.delivered_messages || 0),
+          failed: Number(summary.failed_messages || 0),
+          unconfirmed: Number(summary.unconfirmed_messages || 0),
+        },
+        followUpRequiredMessages: Number(summary.failed_messages || 0),
         legacyUntrackedMessages: Number(summary.legacy_untracked_messages || 0),
-        legacyCoverageNote: 'Legacy WhatsApp rows without durable direction or Twilio callback state cannot be classified as outbound or assigned a delivery state.',
+        legacyCoverageNote: 'Remaining legacy rows lack normalized callback state. Rows with a stored Twilio SID can be recovered with the provider-readback reconciliation.',
         messages: rows,
         statusVocabulary: ['requested','accepted_by_provider','queued','sent','delivered','read','verified_by_readback','failed','untracked_legacy'],
       },

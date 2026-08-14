@@ -182,7 +182,18 @@ function whatsappLedgerTruth(message) {
   }
   if (status === 'read') return 'read (Twilio-confirmed)';
   if (status === 'delivered') return 'delivered (Twilio-confirmed; read unconfirmed)';
-  if (status === 'failed') return 'failed (Twilio-confirmed)';
+  if (status === 'failed') {
+    const providerStatus = safeInline(message?.provider_delivery_status, 'failed', 40);
+    const label = providerStatus === 'undelivered' ? 'undelivered' : 'failed';
+    const errorCode = safeInline(message?.provider_error_code, '', 40);
+    const knownReason = errorCode === '63016'
+      ? 'outside the 24-hour reply window; approved template required'
+      : errorCode === '63112'
+        ? 'WhatsApp Business Account disabled or verification incomplete at send time'
+        : safeInline(message?.provider_error_message, '', 160);
+    const error = errorCode ? `; Twilio ${errorCode}${knownReason ? `: ${knownReason}` : ''}` : '';
+    return `${label} (Twilio-confirmed; follow-up required${error})`;
+  }
   if (status === 'verified_by_readback') return 'verified by provider readback';
   if (status === 'sent') return 'sent (delivery/read unconfirmed)';
   if (status === 'queued') return 'queued (delivery/read unconfirmed)';
@@ -199,6 +210,9 @@ function formatWhatsAppStatusReply(payload) {
   const direction = ['outbound', 'inbound', 'all'].includes(output.direction) ? output.direction : 'outbound';
   const scope = direction === 'all' ? 'message' : `${direction} message`;
   const lines = [`*WhatsApp ${scope} status:* ${total} persisted record${total === 1 ? '' : 's'}.`];
+  if (output.statusCounts) {
+    lines.push(`${Number(output.statusCounts.read || 0)} read · ${Number(output.statusCounts.delivered || 0)} delivered · ${Number(output.statusCounts.failed || 0)} failed/undelivered (follow-up required) · ${Number(output.statusCounts.unconfirmed || 0)} unconfirmed.`);
+  }
   if (!messages.length) {
     lines.push('', `No matching ${scope} records were found in the durable WhatsApp ledger.`);
   } else {
@@ -221,7 +235,7 @@ function formatWhatsAppStatusReply(payload) {
   }
   const legacyCount = Number(output.legacyUntrackedMessages || 0);
   if (legacyCount > 0) {
-    lines.push('', `Coverage note: ${legacyCount} older WhatsApp record${legacyCount === 1 ? '' : 's'} predate durable direction/status tracking. They cannot be classified as outbound or assigned a Twilio delivery state.`);
+    lines.push('', `Coverage note: ${legacyCount} older WhatsApp record${legacyCount === 1 ? '' : 's'} still lack normalized direction/status. Stored Twilio SIDs can be recovered through provider reconciliation; do not call them unknowable.`);
   }
   lines.push('', `Workflow: ${run.id}${output._evidence?.id ? ` · Evidence: ${output._evidence.id}` : ''}`);
   return lines.join('\n');

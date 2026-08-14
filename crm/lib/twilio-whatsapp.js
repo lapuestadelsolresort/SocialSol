@@ -35,6 +35,74 @@ function normalizeTwilioEffectState(providerStatus) {
   return 'accepted_by_provider';
 }
 
+function monotonicTwilioStatus(current, next) {
+  const rank = new Map([
+    ['requested', -1],
+    ['accepted_by_provider', 0],
+    ['queued', 1],
+    ['sent', 2],
+    ['delivered', 3],
+    ['read', 4],
+  ]);
+  if (!current) return next;
+  if (current === 'failed' || current === 'read') return current;
+  if (next === 'failed') return ['delivered', 'read'].includes(current) ? current : 'failed';
+  return (rank.get(next) ?? 0) >= (rank.get(current) ?? 0) ? next : current;
+}
+
+function isoTimestamp(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.valueOf()) ? null : parsed.toISOString();
+}
+
+async function readWhatsAppMessageStatus({
+  messageSid,
+  secrets = loadTwilioSecrets(),
+  fetchImpl = fetch,
+}) {
+  const sid = String(messageSid || '').trim();
+  if (!/^SM[a-zA-Z0-9]{32}$/.test(sid)) throw new Error('invalid Twilio message SID');
+  if (!secrets.account_sid || !secrets.api_key_sid || !secrets.api_key_secret) {
+    throw new Error('Twilio read credentials not configured');
+  }
+  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${secrets.account_sid}/Messages/${sid}.json`;
+  const authHeader = `Basic ${Buffer.from(`${secrets.api_key_sid}:${secrets.api_key_secret}`).toString('base64')}`;
+  let response;
+  try {
+    response = await fetchImpl(twilioUrl, {
+      method: 'GET',
+      headers: { Authorization: authHeader },
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (cause) {
+    const error = new Error(`Twilio message status lookup failed for ${sid}`);
+    error.code = 'twilio_status_lookup_unavailable';
+    error.retryable = true;
+    error.cause = cause;
+    throw error;
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.code) {
+    const error = new Error(result.message || `Twilio message status lookup returned ${response.status}`);
+    error.code = result.code ? `twilio_${result.code}` : `twilio_http_${response.status}`;
+    error.retryable = response.status === 429 || response.status >= 500;
+    throw error;
+  }
+  const providerStatus = String(result.status || '').toLowerCase();
+  if (!providerStatus) throw new Error(`Twilio returned no message status for ${sid}`);
+  return {
+    messageSid: String(result.sid || sid),
+    status: normalizeTwilioEffectState(providerStatus),
+    providerStatus,
+    sentAt: isoTimestamp(result.date_sent || result.date_created),
+    statusUpdatedAt: isoTimestamp(result.date_updated || result.date_sent || result.date_created),
+    errorCode: result.error_code === null || result.error_code === undefined
+      ? null : String(result.error_code),
+    errorMessage: result.error_message ? String(result.error_message).slice(0, 500) : null,
+  };
+}
+
 async function sendWhatsApp({
   toPhone,
   message,
@@ -97,7 +165,9 @@ module.exports = {
   MAX_MESSAGE_LENGTH,
   SECRETS_PATH,
   loadTwilioSecrets,
+  monotonicTwilioStatus,
   normalizeTwilioEffectState,
+  readWhatsAppMessageStatus,
   sendWhatsApp,
   statusCallbackUrl,
 };

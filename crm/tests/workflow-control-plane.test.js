@@ -74,7 +74,11 @@ test('workflow schema is additive and includes durable run/effect/outbox state',
     }
     const columns = await db.query(sql`PRAGMA table_info(meta_messages)`);
     const columnNames = new Set(columns.map(row => row.name));
-    for (const expected of ['slack_thread_ts', 'delivery_status', 'delivered_at', 'read_at', 'workflow_effect_id']) {
+    for (const expected of [
+      'slack_thread_ts', 'delivery_status', 'provider_delivery_status',
+      'provider_error_code', 'provider_error_message', 'delivery_status_source',
+      'delivered_at', 'read_at', 'workflow_effect_id',
+    ]) {
       assert.equal(columnNames.has(expected), true, expected);
     }
   });

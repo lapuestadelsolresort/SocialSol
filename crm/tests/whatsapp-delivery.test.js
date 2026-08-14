@@ -12,7 +12,11 @@ const createDBModule = require('@databases/sqlite');
 const createDB = createDBModule.default || createDBModule;
 const { sql } = require('@databases/sqlite');
 const { ensureSchemaAsync } = require('../lib/workflow-schema');
-const { MAX_MESSAGE_LENGTH, sendWhatsApp } = require('../lib/twilio-whatsapp');
+const {
+  MAX_MESSAGE_LENGTH,
+  readWhatsAppMessageStatus,
+  sendWhatsApp,
+} = require('../lib/twilio-whatsapp');
 const { buildRouter } = require('../routes/whatsapp');
 const { queueWhatsAppInbound } = require('../scripts/workflow-worker');
 
@@ -124,6 +128,38 @@ test('Twilio message length is rejected locally before the provider request', as
   assert.equal(providerRequests, 0);
 });
 
+test('Twilio status readback returns final provider state without creating a message', async () => {
+  let request;
+  const result = await readWhatsAppMessageStatus({
+    messageSid: 'SM1234567890abcdef1234567890abcdef',
+    secrets: {
+      account_sid: 'AC-TEST', api_key_sid: 'SK-TEST', api_key_secret: 'secret',
+    },
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          sid: 'SM1234567890abcdef1234567890abcdef',
+          status: 'undelivered',
+          date_sent: 'Mon, 10 Aug 2026 02:05:16 +0000',
+          date_updated: 'Mon, 10 Aug 2026 02:05:18 +0000',
+          error_code: 63016,
+          error_message: null,
+        }),
+      };
+    },
+  });
+  assert.equal(request.options.method, 'GET');
+  assert.equal(request.options.body, undefined);
+  assert.match(request.url, /Messages\/SM1234567890abcdef1234567890abcdef\.json$/);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.providerStatus, 'undelivered');
+  assert.equal(result.statusUpdatedAt, '2026-08-10T02:05:18.000Z');
+  assert.equal(result.errorCode, '63016');
+});
+
 test('legacy HTTP send endpoints cannot bypass the #whatsapp control plane', async () => {
   await withDb(async db => {
     const app = express();
@@ -172,8 +208,11 @@ test('signed Twilio callbacks persist monotonic delivered/read facts and queue d
       assert.equal(response.status, 200);
     }
 
-    const [row] = await db.query(sql`SELECT delivery_status, delivered_at, read_at FROM meta_messages WHERE message_id='SM-OUT'`);
+    const [row] = await db.query(sql`SELECT delivery_status, provider_delivery_status,
+      delivery_status_source, delivered_at, read_at FROM meta_messages WHERE message_id='SM-OUT'`);
     assert.equal(row.delivery_status, 'read');
+    assert.equal(row.provider_delivery_status, 'read');
+    assert.equal(row.delivery_status_source, 'twilio_status_callback');
     assert.ok(row.delivered_at);
     assert.ok(row.read_at);
     assert.equal(slack.length, 0, 'status notifications must never bypass the outbox');
