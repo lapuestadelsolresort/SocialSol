@@ -8,6 +8,7 @@ const { ROOT } = require('../../lib/runtime-paths');
 const { loadControlToken } = require('../lib/workflow-auth');
 const { loadPolicy } = require('../lib/channel-policy');
 const { workflowIsLive } = require('../lib/workflow-execution-policy');
+const { findCsvByHash } = require('../lib/accounting-slack-inbox');
 
 const INBOX = path.join(ROOT, 'accounting', 'inbox');
 const PROCESSED = path.join(INBOX, 'processed');
@@ -84,6 +85,18 @@ async function main(fetchImpl = fetch, {
   const results = [];
   for (const file of files) {
     const hash = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    const previous = findCsvByHash(hash, processedDirectory);
+    if (previous) {
+      const archived = archiveProcessedFile(file, hash, processedDirectory);
+      results.push({
+        file: path.basename(file),
+        archived: path.relative(ROOT, archived),
+        hash,
+        duplicate: true,
+        matchedProcessed: path.relative(ROOT, previous),
+      });
+      continue;
+    }
     const relative = path.relative(ROOT, file);
     const classification = await executeWorkflow(
       'accounting.classify', { csvPath: relative }, `accounting:${hash}:classify`, fetchImpl,

@@ -862,6 +862,17 @@ function reservationClaimEventFromFinalizedContext(ctx = {}) {
   };
 }
 
+export function accountingCsvSignalFromFinalizedContext(ctx = {}) {
+  const mediaTypes = [ctx.MediaType, ...(Array.isArray(ctx.MediaTypes) ? ctx.MediaTypes : [])];
+  if (mediaTypes.some(value => /^(?:text|application)\/csv(?:$|;)/i.test(String(value || '')))) {
+    return true;
+  }
+  const mediaPaths = [ctx.MediaPath, ...(Array.isArray(ctx.MediaPaths) ? ctx.MediaPaths : [])];
+  if (mediaPaths.some(value => String(value || '').toLowerCase().endsWith('.csv'))) return true;
+  return [ctx.BodyForAgent, ctx.Body, ctx.RawBody]
+    .some(value => /\[(?:media attached|Slack file):[^\]\n]*\.csv(?:[^\]\n]*)?\]/i.test(String(value || '')));
+}
+
 function normalizedTaskText(value) {
   return String(value || '')
     .normalize('NFD')
@@ -1592,36 +1603,34 @@ export function createReceiptPaymentSourceInteractionHandler({
   };
 }
 
-export function createAccountingStatementHandler({
+export function createAccountingStatementClaimHandler({
   config,
   stage = stageSlackAccountingStatement,
   logger = null,
 } = {}) {
   return async (event, ctx) => {
-    if (ctx?.channelId !== 'slack') return;
-    if (config.slackAccountId && ctx.accountId && ctx.accountId !== config.slackAccountId) return;
-    const channelId = resolveSlackConversationId(event, ctx);
-    if (!channelId || !config.accountingChannelIds.has(channelId)) return;
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
+    if (!channelId || !config.accountingChannelIds.has(channelId)) return undefined;
+    if (!event.hasCsvAttachment) return undefined;
     const workflowReady = ['accounting.classify', 'receipt.reconcile', 'qbo.write']
       .every(workflow => workflowIsLive(config, workflow));
     if (!workflowReady) {
-      logger?.info?.('resort-workflows shadow: accounting CSV intake is disabled until the full statement workflow is live');
-      return;
-    }
-    const metadata = event.metadata || {};
-    const attachmentMetadataProvided = Array.isArray(metadata.files)
-      || Array.isArray(metadata.attachments);
-    if (attachmentMetadataProvided) {
-      const fileRefs = extractFileRefs(metadata);
-      const hasCsv = fileRefs.some(file => String(file.name || '').toLowerCase().endsWith('.csv')
-        || /^(?:text|application)\/csv(?:$|;)/i.test(String(file.mimetype || '')));
-      if (!hasCsv) return;
+      logger?.info?.('resort-workflows accounting CSV intake is disabled until the full statement workflow is live');
+      return {
+        handled: true,
+        reply: { text: '⚠️ I detected the CSV, but the complete accounting workflow is not live. Nothing was staged or written to QBO. Check #ops before retrying.' },
+      };
     }
 
-    const messageId = String(ctx.messageId || event.messageId || '');
+    const messageId = trustedMessageId(event, ctx);
     if (!messageId) {
       logger?.error?.('resort-workflows accounting CSV skipped: trusted message identity unavailable');
-      return;
+      return {
+        handled: true,
+        reply: { text: '⚠️ I detected the CSV, but trusted Slack message identity was unavailable. Nothing was staged or written to QBO.' },
+      };
     }
     try {
       const result = await stage({
@@ -1630,14 +1639,80 @@ export function createAccountingStatementHandler({
         threadTs: event.threadId ? String(event.threadId) : null,
       });
       const staged = result.files?.filter(file => file.staged).length || 0;
-      logger?.info?.(`resort-workflows accounting CSV intake: staged ${staged} of ${result.files?.length || 0} file(s) from ${messageId}`);
-    } catch (error) {
-      if (error.code === 'accounting_csv_missing' && !attachmentMetadataProvided) {
-        logger?.info?.(`resort-workflows accounting CSV intake: no CSV found by Slack readback for ${messageId}`);
-        return;
+      const alreadyCaptured = result.files?.filter(file => file.alreadyCaptured).length || 0;
+      const alreadyProcessed = result.files?.filter(file => file.alreadyProcessed).length || 0;
+      const total = result.files?.length || 0;
+      logger?.info?.(`resort-workflows accounting CSV intake: staged ${staged}, already captured ${alreadyCaptured}, already processed ${alreadyProcessed} of ${total} file(s) from ${messageId}`);
+      if (alreadyProcessed === total && total > 0) {
+        return {
+          handled: true,
+          reply: { text: '✅ This exact Kapital CSV was already processed successfully. It was not queued or written to QBO again.' },
+        };
       }
+      if (alreadyCaptured === total && total > 0) {
+        return {
+          handled: true,
+          reply: { text: '✅ This exact Kapital CSV is already captured and is queued or processing. No second QBO run was created.' },
+        };
+      }
+      if (total < 1) throw new Error('Slack accounting intake returned no CSV results');
+      const status = [`${staged} newly queued`];
+      if (alreadyCaptured) status.push(`${alreadyCaptured} already queued or processing`);
+      if (alreadyProcessed) status.push(`${alreadyProcessed} already processed`);
+      return {
+        handled: true,
+        reply: {
+          text: `✅ Kapital CSV verified from this exact Slack message: ${status.join(', ')}. The deterministic classify → receipt reconcile → QBO workflow will post a separate completion notice with verified writes, deduplications, and held items. Do not re-upload while it runs.`,
+        },
+      };
+    } catch (error) {
       logger?.error?.(`resort-workflows accounting CSV intake failed: ${error.code || error.message}`);
+      return {
+        handled: true,
+        reply: {
+          text: error.code === 'accounting_csv_missing'
+            ? '⚠️ Slack showed a CSV attachment marker, but provider readback could not verify a CSV on this exact message. Nothing was staged or written to QBO; please retry the upload.'
+            : `⚠️ The Kapital CSV could not be captured (${error.code || 'accounting_intake_error'}). Nothing was written to QBO; check #ops before retrying.`,
+        },
+      };
     }
+  };
+}
+
+export function createAccountingStatementReplyDispatchHandler(options = {}) {
+  const claim = createAccountingStatementClaimHandler(options);
+  const logger = options.logger || null;
+  return async (event, ctx) => {
+    if (event?.isTailDispatch) return undefined;
+    const inboundEvent = {
+      ...reservationClaimEventFromFinalizedContext(event?.ctx),
+      hasCsvAttachment: accountingCsvSignalFromFinalizedContext(event?.ctx),
+    };
+    const result = await claim(inboundEvent, {
+      channelId: inboundEvent.channel,
+      accountId: inboundEvent.accountId,
+      conversationId: inboundEvent.conversationId,
+      messageId: inboundEvent.messageId,
+      senderId: inboundEvent.senderId,
+    });
+    if (!result?.handled) return undefined;
+
+    let queuedFinal = false;
+    if (!event.suppressUserDelivery && event.sendPolicy !== 'deny' && result.reply) {
+      try {
+        await ctx.onReplyStart?.();
+        queuedFinal = ctx.dispatcher.sendFinalReply(result.reply);
+      } catch (error) {
+        logger?.error?.(`resort-workflows deterministic accounting intake reply delivery failed: ${error.message}`);
+      }
+    }
+    ctx.recordProcessed?.('completed', { reason: 'accounting_statement_reply_dispatch' });
+    ctx.markIdle?.('message_completed');
+    return {
+      handled: true,
+      queuedFinal,
+      counts: ctx.dispatcher.getQueuedCounts(),
+    };
   };
 }
 
@@ -1658,6 +1733,7 @@ const plugin = {
     });
     // OpenClaw 2026.5 invokes inbound_claim only for plugin-bound conversations.
     // reply_dispatch is the terminal pre-model hook for ordinary Slack channels.
+    api.on('reply_dispatch', createAccountingStatementReplyDispatchHandler({ config, logger: api.logger }), { priority: 180, timeoutMs: 70_000 });
     api.on('reply_dispatch', createTaskListReplyDispatchHandler({ config, logger: api.logger }), { priority: 185, timeoutMs: 10_000 });
     api.on('reply_dispatch', createReservationReplyDispatchHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('reply_dispatch', createEmailReplyDispatchHandler({ config, logger: api.logger }), { priority: 195, timeoutMs: 70_000 });
@@ -1670,7 +1746,6 @@ const plugin = {
     api.on('inbound_claim', createMarketingConfirmClaimHandler({ config, logger: api.logger }), { priority: 207, timeoutMs: 70_000 });
     api.on('inbound_claim', createManualReviewClaimHandler({ config, logger: api.logger }), { priority: 220, timeoutMs: 35_000 });
     api.on('inbound_claim', createReceiptConfirmClaimHandler({ config, logger: api.logger }), { priority: 215, timeoutMs: 70_000 });
-    api.on('message_received', createAccountingStatementHandler({ config, logger: api.logger }), { priority: 110, timeoutMs: 70_000 });
     api.on('message_received', createReceiptHandler({ config, logger: api.logger }), { priority: 100, timeoutMs: 70_000 });
     api.on('before_agent_finalize', createFinalizeHandler({ config }), { priority: 100, timeoutMs: 5_000 });
   },

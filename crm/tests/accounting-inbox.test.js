@@ -74,6 +74,32 @@ test('accounting inbox reconciles receipt references before attempting the QBO w
   }
 });
 
+test('accounting inbox archives an exact processed retry without reusing workflow keys with a new path', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'accounting-inbox-retry-'));
+  const inbox = path.join(directory, 'inbox');
+  const processed = path.join(inbox, 'processed');
+  fs.mkdirSync(processed, { recursive: true });
+  const statement = 'date,amount\n2026-08-13,2105\n';
+  fs.writeFileSync(path.join(processed, 'original.csv'), statement);
+  fs.writeFileSync(path.join(inbox, 'retry.csv'), statement);
+  try {
+    await main(undefined, {
+      inboxDirectory: inbox,
+      processedDirectory: processed,
+      policy: {
+        shadow_mode: true,
+        live_workflows: ['accounting.classify', 'receipt.reconcile', 'qbo.write'],
+      },
+      executeWorkflow: async () => assert.fail('an archived content duplicate must not execute workflows'),
+    });
+    assert.equal(fs.existsSync(path.join(inbox, 'retry.csv')), false);
+    assert.equal(fs.existsSync(path.join(processed, 'original.csv')), true);
+    assert.equal(fs.existsSync(path.join(processed, 'retry.csv')), true);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('Slack accounting intake stages each CSV once with a stable inbox name', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'accounting-slack-intake-'));
   const downloaded = path.join(directory, 'downloaded.csv');
@@ -95,8 +121,39 @@ test('Slack accounting intake stages each CSV once with a stable inbox name', as
     assert.equal(first.files.length, 1);
     assert.equal(first.files[0].staged, true);
     assert.equal(second.files[0].staged, false);
+    assert.equal(second.files[0].alreadyCaptured, true);
+    assert.equal(second.files[0].alreadyProcessed, false);
     assert.equal(first.files[0].name, 'slack-1786640000.25-F-STATEMENT-ECta826_1.csv');
     assert.equal(fs.readFileSync(first.files[0].path, 'utf8'), 'date,amount\n2026-08-13,2105\n');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Slack accounting intake recognizes a previously processed content hash before staging', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'accounting-slack-processed-'));
+  const downloaded = path.join(directory, 'downloaded.csv');
+  const inbox = path.join(directory, 'inbox');
+  const processed = path.join(inbox, 'processed');
+  fs.mkdirSync(processed, { recursive: true });
+  const statement = 'date,amount\n2026-08-13,2105\n';
+  fs.writeFileSync(downloaded, statement);
+  fs.writeFileSync(path.join(processed, 'prior.csv'), statement);
+  try {
+    const result = await stageSlackAccountingStatement({
+      channelId: 'C-ACCOUNTING', messageId: '1786640000.99',
+    }, {
+      inboxDirectory: inbox,
+      processedDirectory: processed,
+      fetchSource: async () => ({ files: [{
+        id: 'F-RETRY', name: 'ECta826 (2).csv', mimetype: 'text/csv', localPath: downloaded,
+      }] }),
+    });
+    assert.equal(result.files[0].staged, false);
+    assert.equal(result.files[0].alreadyCaptured, false);
+    assert.equal(result.files[0].alreadyProcessed, true);
+    assert.equal(fs.readdirSync(inbox, { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith('.csv')).length, 0);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

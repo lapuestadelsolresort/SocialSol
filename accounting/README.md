@@ -91,10 +91,14 @@ runs one fixed sequence keyed by the file hash: `accounting.classify`,
 `receipt.reconcile`, and `qbo.write`. Controlled-channel tool enforcement
 blocks shell or direct-QBO bypasses, so the final notification represents the
 single durable statement run rather than a mixture of ad-hoc and workflow
-writes. If OpenClaw's inbound hook omits attachment metadata, the accounting
-handler still refetches the trusted channel/message pair from Slack and lets
-provider readback determine whether the message contains a CSV. A verified
-message without a CSV is a no-op.
+writes. Accounting attachments are claimed at OpenClaw's terminal pre-model
+dispatch boundary: finalized media metadata selects the handler, and exact
+provider readback authorizes staging. The deterministic acknowledgement stops
+the chat model from attempting direct QBO calls or inventing alternate staging
+instructions. Content hashes are checked against both the active inbox and the
+successful processed archive. An exact retry is reported as already queued or
+already processed and cannot reuse a workflow idempotency key with a different
+path or create a second QBO run.
 
 Configure the Slack user(s) who submit Kapital reimbursements. The command is
 a dry run unless `--confirm-production` is supplied and backs up the ignored
