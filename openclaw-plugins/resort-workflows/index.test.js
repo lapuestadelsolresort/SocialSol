@@ -863,26 +863,44 @@ test('reservations tool guard blocks shell bypass even when OpenClaw misses the 
 
 test('controlled-channel tool guard blocks direct accounting and receipt tool bypasses', async () => {
   const guard = createControlledChannelToolGuard({
-    config: pluginConfig({ controlledChannelIds: ['C-ACCOUNTING', 'C-RECEIPT'] }),
+    config: pluginConfig({
+      agentIds: ['resort'],
+      controlledChannelIds: ['C-ACCOUNTING', 'C-RECEIPT'],
+    }),
   });
   assert.deepEqual(await guard({ toolName: 'exec', params: {} }, {
-    channelId: 'c-accounting',
+    agentId: 'resort', channelId: 'c-accounting',
   }), {
     block: true,
     blockReason: 'This controlled resort channel is restricted to the durable resort_workflow control plane.',
   });
   assert.deepEqual(await guard({ toolName: 'qbo_push', params: {} }, {
-    channelId: 'C-RECEIPT',
+    agentId: 'resort', channelId: 'C-RECEIPT',
   }), {
     block: true,
     blockReason: 'This controlled resort channel is restricted to the durable resort_workflow control plane.',
   });
   assert.equal(await guard({ toolName: 'resort_workflow', params: {} }, {
-    channelId: 'C-ACCOUNTING',
+    agentId: 'resort', channelId: 'C-ACCOUNTING',
   }), undefined);
   assert.equal(await guard({ toolName: 'exec', params: {} }, {
-    channelId: 'C-OTHER',
+    agentId: 'resort', channelId: 'C-OTHER',
   }), undefined);
+  assert.equal(await guard({ toolName: 'exec', params: {} }, {
+    agentId: 'paloma', channelId: 'C-ACCOUNTING',
+  }), undefined);
+});
+
+test('controlled-channel tool guard remains fail-closed when agent identity is unavailable', async () => {
+  const guard = createControlledChannelToolGuard({
+    config: pluginConfig({ agentIds: ['resort'], controlledChannelIds: ['C-ACCOUNTING'] }),
+  });
+  assert.deepEqual(await guard({ toolName: 'exec', params: {} }, {
+    channelId: 'C-ACCOUNTING',
+  }), {
+    block: true,
+    blockReason: 'This controlled resort channel is restricted to the durable resort_workflow control plane.',
+  });
 });
 
 test('reservation read claim fails closed when live OwnerRez is unavailable', async () => {
