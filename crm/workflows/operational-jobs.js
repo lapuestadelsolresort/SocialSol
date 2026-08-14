@@ -484,9 +484,14 @@ async function projectBankTransactionQboWrites(db, runId, summary) {
       || (row.record_type === 'deposit' ? 'Deposit'
         : row.record_type === 'transfer' ? 'Transfer' : 'Purchase');
     const reference = row.reference || null;
+    // Overlapping Kapital exports reuse the durable transaction row. The
+    // classifier updates that row's workflow run but intentionally preserves
+    // the hash of the first source file, so an exact bank reference must be
+    // resolved across source files. Requiring one exact candidate keeps the
+    // projection fail-closed if the upstream identity is ever ambiguous.
     const candidates = reference
       ? await db.query(sql`SELECT id FROM accounting_bank_transactions
-          WHERE source_file_hash=${sourceFileHash} AND transaction_date=${String(row.date || '')}
+          WHERE transaction_date=${String(row.date || '')}
             AND amount=${Number(row.amount || 0)} AND reference=${reference}`)
       : await db.query(sql`SELECT id FROM accounting_bank_transactions
           WHERE source_file_hash=${sourceFileHash} AND transaction_date=${String(row.date || '')}

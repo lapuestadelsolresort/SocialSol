@@ -15,6 +15,7 @@ const { getDefinition, listDefinitions } = require('../workflows/registry');
 const { runVerifiedCommand } = require('../workflows/paulina-prepare');
 const { matchingPost } = require('../workflows/social-publish');
 const { _internal: readModelInternals } = require('../workflows/read-models');
+const { projectBankTransactionQboWrites } = require('../workflows/operational-jobs');
 
 async function withDb(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-domains-'));
@@ -143,6 +144,62 @@ test('accounting reconciliation read returns the latest verified QBO run and pro
     assert.equal(read.output.latest.summary.complete, true);
     assert.equal(read.output.latest.transactions[0].qbo_entity_id, '2601');
     assert.equal(read.output.latest.sourceCsv, 'latest.csv');
+  });
+});
+
+test('QBO projection resolves exact transactions retained from overlapping Kapital source files', async () => {
+  await withDb(async db => {
+    const qboRunId = 'qbo-overlap-projection';
+    await db.query(sql`INSERT INTO workflow_runs (
+      id, workflow_name, workflow_version, idempotency_key, status,
+      trigger_type, input_json, state_json
+    ) VALUES (
+      ${qboRunId}, 'qbo.write', 2, 'seed:qbo-overlap-projection', 'running',
+      'system', '{}', '{}'
+    )`);
+    for (const [id, reference, sourceFileHash] of [
+      ['bank-old', 'Clave: 136-06/08/2026/old', 'older-file-hash'],
+      ['bank-new', 'Clave: 136-06/08/2026/new', 'current-file-hash'],
+    ]) {
+      await db.query(sql`INSERT INTO accounting_bank_transactions (
+        id, source_key, transaction_date, description, reference, direction,
+        currency, amount, category_key, category_name, classification_tier,
+        source_file_hash, workflow_run_id, status
+      ) VALUES (
+        ${id}, ${`source-${id}`}, '2026-08-06', 'Sergio payment', ${reference}, 'debit',
+        'MXN', 2105, 'maintenance', 'Maintenance', 'auto',
+        ${sourceFileHash}, ${qboRunId}, 'classified'
+      )`);
+    }
+    const projected = await projectBankTransactionQboWrites(db, qboRunId, {
+      source_file_hash: 'current-file-hash',
+      dedup_details: [{
+        date: '2026-08-06', amount: 2105,
+        reference: 'Clave: 136-06/08/2026/old', status: 'EXISTING',
+        qbo_id: '2522', qbo_entity_type: 'Purchase',
+        category_key: 'maintenance', category: 'Maintenance',
+      }],
+      details: [{
+        date: '2026-08-06', amount: 2105,
+        reference: 'Clave: 136-06/08/2026/new', status: 'PUSHED',
+        qbo_id: '2523', record_type: 'expense', request_id: 'request-2523',
+        category_key: 'uncategorized_expense', category: 'Uncategorized Expense',
+        requires_review: true,
+      }],
+    });
+    assert.equal(projected, true);
+    const rows = await db.query(sql`SELECT id, source_file_hash, status, qbo_entity_id,
+      qbo_category_key, review_required FROM accounting_bank_transactions ORDER BY id`);
+    assert.deepEqual(rows, [
+      {
+        id: 'bank-new', source_file_hash: 'current-file-hash', status: 'posted_review',
+        qbo_entity_id: '2523', qbo_category_key: 'uncategorized_expense', review_required: 1,
+      },
+      {
+        id: 'bank-old', source_file_hash: 'older-file-hash', status: 'already_recorded',
+        qbo_entity_id: '2522', qbo_category_key: 'maintenance', review_required: 0,
+      },
+    ]);
   });
 });
 
