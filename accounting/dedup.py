@@ -7,7 +7,11 @@ when overlapping CSVs are uploaded.
 """
 
 import re
+from collections import defaultdict
 from typing import Callable, Dict, List, Tuple
+
+
+QBO_PAGE_SIZE = 1000
 
 
 def check_for_duplicates(
@@ -18,7 +22,10 @@ def check_for_duplicates(
     Split transactions into (new, already_exists).
 
     Matches on Kapital Clave reference embedded in QBO memo.
-    Falls back to date + amount + vendor if no Clave.
+    Falls back to entity type + date + amount + vendor (when available) only
+    for integration-owned QBO records. Candidate records are consumed as a
+    multiset so one existing QBO entity can never suppress two incoming
+    Kapital transactions.
 
     Args:
         transactions: classified transactions with fx applied
@@ -39,32 +46,36 @@ def check_for_duplicates(
     min_date = min(dates)
     max_date = max(dates)
 
-    # Pull existing QBO purchases in that date range
-    sql = (
+    # Pull every relevant QBO entity. Pagination is mandatory: a full or
+    # overlapping statement can exceed QBO's per-query result limit.
+    purchase_sql = (
         f"SELECT Id, TxnDate, TotalAmt, EntityRef, PrivateNote "
         f"FROM Purchase "
         f"WHERE TxnDate >= '{min_date.isoformat()}' "
-        f"AND TxnDate <= '{max_date.isoformat()}' "
-        f"MAXRESULTS 500"
+        f"AND TxnDate <= '{max_date.isoformat()}'"
     )
-    existing = [dict(row, _entity_type='Purchase') for row in _qbo_query(query_qbo, sql)]
+    existing = [dict(row, _entity_type='Purchase') for row in query_all_qbo(
+        query_qbo, purchase_sql, 'Purchase'
+    )]
 
     # Also check deposits and transfers
     for entity_type in ('Deposit', 'Transfer'):
         amount_field = 'Amount' if entity_type == 'Transfer' else 'TotalAmt'
-        sql2 = (
+        entity_sql = (
             f"SELECT Id, TxnDate, {amount_field}, PrivateNote "
             f"FROM {entity_type} "
             f"WHERE TxnDate >= '{min_date.isoformat()}' "
-            f"AND TxnDate <= '{max_date.isoformat()}' "
-            f"MAXRESULTS 200"
+            f"AND TxnDate <= '{max_date.isoformat()}'"
         )
-        existing.extend(dict(row, _entity_type=entity_type) for row in _qbo_query(query_qbo, sql2))
+        existing.extend(dict(row, _entity_type=entity_type) for row in query_all_qbo(
+            query_qbo, entity_sql, entity_type
+        ))
 
     # Build set of existing Kapital references (Clave)
-    existing_refs: Dict[str, Dict] = {}
-    existing_mxn_fingerprints: Dict[str, Dict] = {}
-    existing_fingerprints: Dict[str, Dict] = {}
+    existing_tokens: Dict[Tuple[str, str], List[Dict]] = defaultdict(list)
+    existing_refs: Dict[Tuple[str, str], List[Dict]] = defaultdict(list)
+    existing_mxn_fingerprints: Dict[Tuple[str, str], List[Dict]] = defaultdict(list)
+    existing_fingerprints: Dict[Tuple[str, str], List[Dict]] = defaultdict(list)
 
     for e in existing:
         note = e.get('PrivateNote', '')
@@ -73,10 +84,24 @@ def check_for_duplicates(
         # principal deduplication by Clave, MXN amount, or converted amount.
         if re.match(r'^SPEI\s+(?:Commission|IVA)\s+on transfer\b', note, re.IGNORECASE):
             continue
+        entity_type = e.get('_entity_type')
+        integration_owned = bool(re.search(
+            r'Kapital txn:|Kapital:|\bClave:\s*136-|\borig(?:inal)?\s*:?\s*\$?[\d,]+(?:\.\d+)?\s*MXN\b|'
+            r'REVIEW REQUIRED:.*Kapital|Jason funding Kapital',
+            note,
+            re.IGNORECASE,
+        ))
+
+        token_match = re.search(r'Kapital txn:\s*([a-f0-9]{24})', note, re.IGNORECASE)
+        if token_match:
+            existing_tokens[(entity_type, token_match.group(1).lower())].append(e)
         # Extract Kapital Clave reference
         ref_match = re.search(r'Clave:\s*(136-[\d/\-]+)', note)
         if ref_match:
-            existing_refs.setdefault(ref_match.group(1), e)
+            existing_refs[(entity_type, ref_match.group(1))].append(e)
+
+        if not integration_owned:
+            continue
 
         # Prefer the original MXN amount embedded by SocialSol. This remains
         # stable even if an old QBO entity used a different cached FX rate.
@@ -87,28 +112,58 @@ def check_for_duplicates(
         )
         if original_mxn_match:
             original_mxn = float(original_mxn_match.group(1).replace(',', ''))
-            existing_mxn_fingerprints.setdefault(
-                f"{e.get('TxnDate', '')}|{original_mxn:.2f}", e
-            )
+            fingerprint = f"{e.get('TxnDate', '')}|{original_mxn:.2f}"
+            existing_mxn_fingerprints[(entity_type, fingerprint)].append(e)
 
         # Also build date+amount fingerprint as fallback
         txn_date = e.get('TxnDate', '')
         amount = e.get('TotalAmt') or e.get('Amount', 0)
-        existing_fingerprints.setdefault(f"{txn_date}|{float(amount):.2f}", e)
+        existing_fingerprints[(entity_type, f"{txn_date}|{float(amount):.2f}")].append(e)
 
     # Check each incoming transaction
     new_txns = []
     dupes = []
+    used_ids = set()
+
+    def consume(pool, key, expected_vendor_id=None):
+        for candidate in pool.get(key, []):
+            candidate_id = f"{candidate.get('_entity_type')}:{candidate.get('Id')}"
+            entity_ref = candidate.get('EntityRef') or {}
+            candidate_vendor_id = str(entity_ref.get('value') or '')
+            if expected_vendor_id and candidate_vendor_id != str(expected_vendor_id):
+                continue
+            if candidate_id in used_ids:
+                continue
+            used_ids.add(candidate_id)
+            return candidate
+        return None
 
     for txn in transactions:
         # Extract Clave from the transaction's reference
         ref = txn.get('reference', '')
         clave_match = re.search(r'(136-[\d/\-]+)', ref)
         clave = clave_match.group(1) if clave_match else None
+        entity_type = txn.get('_expected_qbo_entity_type')
+        expected_vendor_id = txn.get('_expected_qbo_vendor_id') if entity_type == 'Purchase' else None
+        if entity_type not in ('Purchase', 'Deposit', 'Transfer'):
+            new_txns.append(txn)
+            continue
 
-        if clave and clave in existing_refs:
-            matched = existing_refs[clave]
-            txn['_dedup_reason'] = f'Clave {clave} already in QBO'
+        matched = None
+        reason = None
+        token = str(txn.get('_kapital_transaction_token') or '').lower()
+        if token:
+            matched = consume(existing_tokens, (entity_type, token))
+            if matched:
+                reason = f'Kapital transaction identity {token} already in QBO'
+
+        if not matched and clave:
+            matched = consume(existing_refs, (entity_type, clave))
+            if matched:
+                reason = f'Clave {clave} already in QBO'
+
+        if matched:
+            txn['_dedup_reason'] = reason
             txn['_dedup_qbo_id'] = str(matched.get('Id') or '') or None
             txn['_dedup_entity_type'] = matched.get('_entity_type')
             if re.search(
@@ -136,8 +191,18 @@ def check_for_duplicates(
         # workflow, such as an owner-liability repayment.
         if txn.get('date') and txn.get('amount'):
             mxn_fp = f"{txn['date'].isoformat()}|{float(txn['amount']):.2f}"
-            if mxn_fp in existing_mxn_fingerprints:
-                matched = existing_mxn_fingerprints[mxn_fp]
+            matched = consume(
+                existing_mxn_fingerprints, (entity_type, mxn_fp), expected_vendor_id
+            )
+            if matched:
+                if entity_type == 'Transfer':
+                    qbo_amount = float(matched.get('Amount') or matched.get('TotalAmt') or 0)
+                    expected_amount = float(txn.get('transfer_amount_usd') or 0)
+                    if expected_amount > 0 and abs(qbo_amount - expected_amount) > 0.01:
+                        raise RuntimeError(
+                            f"Existing QBO Transfer {matched.get('Id')} has amount {qbo_amount:.2f}; "
+                            f"Kapital requires exact USD amount {expected_amount:.2f}"
+                        )
                 txn['_dedup_reason'] = f'Date+MXN fingerprint already in QBO: {mxn_fp}'
                 txn['_dedup_qbo_id'] = str(matched.get('Id') or '') or None
                 txn['_dedup_entity_type'] = matched.get('_entity_type')
@@ -146,8 +211,8 @@ def check_for_duplicates(
 
         if txn.get('date') and txn.get('amount_usd'):
             fp = f"{txn['date'].isoformat()}|{txn['amount_usd']:.2f}"
-            if fp in existing_fingerprints:
-                matched = existing_fingerprints[fp]
+            matched = consume(existing_fingerprints, (entity_type, fp), expected_vendor_id)
+            if matched:
                 txn['_dedup_reason'] = f'Date+amount fingerprint already in QBO: {fp}'
                 txn['_dedup_qbo_id'] = str(matched.get('Id') or '') or None
                 txn['_dedup_entity_type'] = matched.get('_entity_type')
@@ -159,7 +224,34 @@ def check_for_duplicates(
     return new_txns, dupes
 
 
-def _qbo_query(query_qbo: Callable[[str], dict], sql: str) -> list:
+def query_all_qbo(
+    query_qbo: Callable[[str], dict],
+    base_sql: str,
+    entity_type: str,
+    page_size: int = QBO_PAGE_SIZE,
+) -> List[Dict]:
+    """Read all QBO query pages and fail closed on malformed pagination."""
+    start = 1
+    rows = []
+    page_signatures = set()
+    while True:
+        page_sql = f"{base_sql} STARTPOSITION {start} MAXRESULTS {page_size}"
+        page = _qbo_query(query_qbo, page_sql, expected_entity=entity_type)
+        signature = tuple(str(row.get('Id') or '') for row in page)
+        if page and signature in page_signatures:
+            raise RuntimeError(f'QBO {entity_type} pagination repeated a result page')
+        page_signatures.add(signature)
+        rows.extend(page)
+        if len(page) < page_size:
+            return rows
+        start += len(page)
+
+
+def _qbo_query(
+    query_qbo: Callable[[str], dict],
+    sql: str,
+    expected_entity: str = None,
+) -> list:
     """Query through the refresh-aware client and reject unverifiable reads."""
     data = query_qbo(sql)
     if not isinstance(data, dict):
@@ -169,7 +261,8 @@ def _qbo_query(query_qbo: Callable[[str], dict], sql: str) -> list:
     response = data.get('QueryResponse')
     if not isinstance(response, dict):
         raise RuntimeError('QBO duplicate query returned no QueryResponse')
-    for key in ('Purchase', 'Deposit', 'Transfer'):
+    keys = (expected_entity,) if expected_entity else ('Purchase', 'Deposit', 'Transfer')
+    for key in keys:
         rows = response.get(key)
         if rows is not None:
             if not isinstance(rows, list):

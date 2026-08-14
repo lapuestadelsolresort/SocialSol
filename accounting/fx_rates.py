@@ -1,9 +1,9 @@
 """
 MXN → USD Exchange Rate Lookup
 
-Fetches the daily exchange rate for a given date. Uses Banxico
-(Bank of Mexico) official rate, with exchangerate-api fallback.
-Caches results locally to avoid repeated API calls.
+Fetches the daily exchange rate for a given date from Banxico
+(Bank of Mexico). Official FIX results are cached locally; unverified
+intraday spot quotes are never used for accounting.
 """
 
 import json
@@ -35,24 +35,24 @@ def get_usd_rate(txn_date: date) -> float:
         _save_cache(txn_date, rate)
         return rate
 
-    # Fallback: exchangerate-api (free tier)
-    rate = _fetch_exchangerate_api(txn_date)
-    if rate:
-        _save_cache(txn_date, rate)
-        return rate
+    # Do not use or persist an intraday spot quote for a business-day
+    # transaction. The official FIX may not be published yet; accounting must
+    # wait and retry instead of permanently recording a provisional rate.
+    if txn_date >= date.today() and txn_date.weekday() < 5:
+        raise ValueError(f"Official Banxico FIX is not yet available for {txn_date}")
 
     # Last resort: try previous business days
     for days_back in range(1, 5):
         prev_date = txn_date - timedelta(days=days_back)
         cached = _load_cache(prev_date)
         if cached:
-            _save_cache(txn_date, cached)  # Cache for the requested date too
+            _save_cache(txn_date, cached, source='previous_fix')
             return cached
 
         rate = _fetch_banxico(prev_date)
         if rate:
-            _save_cache(txn_date, rate)
-            _save_cache(prev_date, rate)
+            _save_cache(txn_date, rate, source='previous_fix')
+            _save_cache(prev_date, rate, source='banxico_fix')
             return rate
 
     raise ValueError(f"Could not fetch exchange rate for {txn_date}")
@@ -64,6 +64,37 @@ def convert_mxn_to_usd(amount_mxn: float, txn_date: date) -> float:
     return round(amount_mxn / rate, 2)
 
 
+def apply_transaction_fx(transaction: dict) -> dict:
+    """Attach FIX valuation while preserving an exact bank-executed USD transfer."""
+    txn_date = transaction.get('date')
+    if not txn_date:
+        raise ValueError('transaction date is required for FX conversion')
+
+    if transaction.get('category') == 'fx_conversion':
+        exact_amount = float(transaction.get('transfer_amount_usd') or 0)
+        executed_rate = float(transaction.get('transfer_exchange_rate') or 0)
+        if exact_amount <= 0 or executed_rate <= 0:
+            raise ValueError('FX conversion is missing the exact USD amount or executed rate from Kapital')
+        transaction['fx_rate'] = executed_rate
+        transaction['amount_usd'] = round(exact_amount, 2)
+        transaction['fix_amount_usd'] = None
+        return transaction
+
+    rate = get_usd_rate(txn_date)
+    fix_amount = round(float(transaction.get('amount') or 0) / rate, 2)
+    transaction['fx_rate'] = rate
+    transaction['fix_amount_usd'] = fix_amount
+    transaction['amount_usd'] = fix_amount
+
+    for fee in transaction.get('spei_fees') or []:
+        fee['amount_usd'] = round(float(fee.get('amount') or 0) / rate, 2)
+    if transaction.get('total_with_fees') is not None:
+        transaction['total_with_fees_usd'] = round(
+            float(transaction['total_with_fees']) / rate, 2
+        )
+    return transaction
+
+
 def _load_cache(d: date) -> Optional[float]:
     """Load cached rate for a date."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -71,16 +102,38 @@ def _load_cache(d: date) -> Optional[float]:
     if cache_file.exists():
         with open(cache_file) as f:
             data = json.load(f)
+            if d >= date.today() and data.get('source') not in ('banxico_fix', 'previous_fix'):
+                return None
             return data.get('rate')
     return None
 
 
-def _save_cache(d: date, rate: float):
+def _save_cache(d: date, rate: float, source: str = 'banxico_fix'):
     """Cache a rate for a date."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_file = CACHE_DIR / f"{d.isoformat()}.json"
     with open(cache_file, 'w') as f:
-        json.dump({'date': d.isoformat(), 'rate': rate, 'currency_pair': 'MXN/USD'}, f)
+        json.dump({
+            'date': d.isoformat(),
+            'rate': rate,
+            'currency_pair': 'MXN/USD',
+            'source': source,
+        }, f)
+
+
+def _banxico_token() -> Optional[str]:
+    token = str(os.environ.get('BANXICO_API_TOKEN') or '').strip()
+    if token:
+        return token
+    secrets_dir = Path(os.environ.get(
+        'SOCIALSOL_SECRETS_DIR', Path(__file__).parent.parent / 'secrets'
+    ))
+    secret_path = secrets_dir / 'banxico.json'
+    try:
+        data = json.loads(secret_path.read_text())
+    except (OSError, ValueError, TypeError):
+        return None
+    return str(data.get('api_token') or data.get('token') or '').strip() or None
 
 
 def _fetch_banxico(d: date) -> Optional[float]:
@@ -89,10 +142,13 @@ def _fetch_banxico(d: date) -> Optional[float]:
     Series SF43718 = USD/MXN FIX rate.
     """
     try:
+        token = _banxico_token()
+        if not token:
+            return None
         date_str = d.strftime('%Y-%m-%d')
         url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF43718/datos/{date_str}/{date_str}"
         req = urllib.request.Request(url, headers={
-            'Bmx-Token': 'e12d492aa02858efbcc82e4ce54bf0da34e4c70828b4eab1a3b4ec81cebb217e',
+            'Bmx-Token': token,
             'Accept': 'application/json',
         })
         with urllib.request.urlopen(req, timeout=10) as resp:

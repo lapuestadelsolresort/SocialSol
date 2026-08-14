@@ -73,6 +73,7 @@ class KapitalClassifier:
             'confidence': 'unknown',
             'reason': '',
             'note': '',
+            'expense_refund': False,
             'needs_channel_check': [],
         }
 
@@ -154,6 +155,7 @@ class KapitalClassifier:
             result['confidence'] = 'auto'
             result['reason'] = 'Internal transfer from BofA'
             result['note'] = 'Jason funding Kapital from BofA'
+            result['exact_transfer_required'] = True
             return result
 
         # FX conversion
@@ -166,7 +168,11 @@ class KapitalClassifier:
             usd_match = re.search(r'(\d[\d, ]*\.?\d*)\s*USD', desc_upper)
             rate_match = re.search(r'TIPO DE CAMBIO DE\s+(\d+\.\d+)', desc_upper)
             if usd_match and rate_match:
-                result['note'] = f"USD {usd_match.group(1).replace(' ', '')} @ {rate_match.group(1)}"
+                exact_usd = float(usd_match.group(1).replace(' ', '').replace(',', ''))
+                exact_rate = float(rate_match.group(1))
+                result['transfer_amount_usd'] = exact_usd
+                result['transfer_exchange_rate'] = exact_rate
+                result['note'] = f"USD {exact_usd:,.2f} @ {exact_rate:.4f}"
             return result
 
         # Bank interest
@@ -187,6 +193,7 @@ class KapitalClassifier:
             result['vendor_name'] = 'Kapital Mexico'
             result['confidence'] = 'auto'
             result['reason'] = 'Fiscal stamp discount'
+            result['expense_refund'] = True
             return result
 
         # MercadoLibre refund
@@ -195,6 +202,7 @@ class KapitalClassifier:
             result['category_name'] = 'Supplies (refund)'
             result['confidence'] = 'auto'
             result['reason'] = 'MercadoLibre refund/credit'
+            result['expense_refund'] = True
             return result
 
         # Unknown income

@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from kapital_parser import parse_kapital_csv
 from classifier import KapitalClassifier, format_classification_report
-from fx_rates import convert_mxn_to_usd, get_usd_rate
+from fx_rates import apply_transaction_fx
 
 
 def main():
@@ -61,15 +61,7 @@ def main():
             for txn in results[bucket]:
                 if txn.get('date'):
                     try:
-                        rate = get_usd_rate(txn['date'])
-                        txn['fx_rate'] = rate
-                        txn['amount_usd'] = convert_mxn_to_usd(txn['amount'], txn['date'])
-                        # Also convert fees if present
-                        if txn.get('spei_fees'):
-                            for fee in txn['spei_fees']:
-                                fee['amount_usd'] = convert_mxn_to_usd(fee['amount'], txn['date'])
-                        if txn.get('total_with_fees'):
-                            txn['total_with_fees_usd'] = convert_mxn_to_usd(txn['total_with_fees'], txn['date'])
+                        apply_transaction_fx(txn)
                     except Exception as e:
                         fx_errors.append(f"  ⚠️ {txn['date']}: {e}")
                         txn['fx_rate'] = None

@@ -150,6 +150,37 @@ class ReceiptLedgerTests(unittest.TestCase):
         )
         self.assertIn('Possible duplicate', held['reason'])
 
+    def test_duplicate_hint_uses_a_coded_reimbursement_from_an_earlier_statement(self):
+        connection = sqlite3.connect(self.database)
+        connection.execute(
+            """INSERT INTO accounting_bank_transactions VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                'bank-coded-sergio', '2026-08-13',
+                'Envio SPEI BANCOPPEL | SERGIO GRACIA Dato no verificado | 123 | CODE | KAPITAL |',
+                'Clave: 136-13/08/2026/13-1', 'MXN', 2105,
+            ),
+        )
+        connection.execute(
+            "UPDATE accounting_reconciliations SET bank_reference='bank-coded-sergio' WHERE receipt_id='receipt-1'"
+        )
+        connection.commit()
+        connection.close()
+
+        uncoded = {
+            'date': '2026-08-06', 'amount': 2105, 'currency': 'MXN',
+            'description': 'REIMBURSEMENT PETTY CASH SERGIO', 'reference': '',
+            'spei': {'payee': 'SERGIO GRACIA'},
+            'confidence': 'guess', 'category': 'maintenance',
+        }
+        results = apply_receipt_ledger(
+            {'auto': [], 'guess': [uncoded], 'unknown': []}, str(self.database)
+        )
+        self.assertEqual(len(results['unknown']), 1)
+        self.assertEqual(
+            results['unknown'][0]['possible_duplicate_payment_reference'],
+            'LPDSRA1B2C3D4E5F60718',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

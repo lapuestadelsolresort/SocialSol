@@ -478,7 +478,12 @@ def test_uncategorized_expenses(token: str, base: str) -> dict:
     c) Have no vendor assigned
     """
     config = _load_config()
-    uncategorized_id = '2'  # QBO default Uncategorized Expense
+    uncategorized_id = str(
+        config.get('qbo_accounts', {}).get('expenses', {})
+        .get('uncategorized_expense', {}).get('id') or ''
+    )
+    if not uncategorized_id:
+        raise ValueError('Uncategorized Expense account is not configured')
 
     sql = (
         f"SELECT Id, TxnDate, TotalAmt, EntityRef, PrivateNote, Line "

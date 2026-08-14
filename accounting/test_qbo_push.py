@@ -11,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from qbo_push import (  # noqa: E402
     QBOClient, allocate_receipt_item_usd, find_missing_spei_fees,
-    push_classified_to_qbo, qbo_request_id, verify_receipt_purchase_readback,
+    kapital_transaction_token, push_classified_to_qbo, qbo_record_type,
+    qbo_request_id, verify_principal_readback, verify_receipt_purchase_readback,
 )
 
 
@@ -47,6 +48,23 @@ class QBOIntegrityTests(unittest.TestCase):
         self.assertNotIn('CLAVE', first)
         self.assertNotEqual(first, qbo_request_id(txn, 'expense', 'spei-1'))
 
+    def test_transaction_time_and_code_disambiguate_request_identity(self):
+        base = {
+            'date': '2026-08-10', 'time': '10:00:00', 'operation': 'OP-1',
+            'transaction_code': '000001', 'reference': '', 'amount': 53.40,
+            'direction': 'credit', 'category': 'bank_interest',
+        }
+        other = {**base, 'transaction_code': '000002'}
+        self.assertNotEqual(kapital_transaction_token(base), kapital_transaction_token(other))
+        self.assertNotEqual(qbo_request_id(base, 'deposit'), qbo_request_id(other, 'deposit'))
+
+    def test_record_type_refuses_a_credit_purchase(self):
+        record_type, reason = qbo_record_type({
+            'direction': 'credit', 'category': 'supplies', 'expense_refund': False,
+        })
+        self.assertIsNone(record_type)
+        self.assertIn('not configured', reason)
+
     def test_receipt_split_allocates_exact_parent_total(self):
         items = [{'amount': amount} for amount in [340, 30, 220, 815, 700]]
         allocated = allocate_receipt_item_usd(118.53, items)
@@ -59,6 +77,7 @@ class QBOIntegrityTests(unittest.TestCase):
             'maintenance': '10', 'cleaning_services': '11',
         }.get(key)
         client._resolve_vendor_id = lambda _key: '20'
+        client._resolve_bank_account_id = lambda _key: '115'
         seen = []
         client._api_call = lambda method, endpoint, body, request_id=None: (
             seen.append((method, endpoint, body, request_id)) or {'Purchase': {'Id': '42'}}
@@ -189,10 +208,12 @@ class QBOIntegrityTests(unittest.TestCase):
             'auto': [],
             'guess': [{
                 'date': date(2026, 8, 6), 'amount': 2105, 'amount_usd': 122.17, 'currency': 'MXN',
+                'direction': 'debit',
                 'reason': 'duplicate reimbursement requires review',
             }],
             'unknown': [{
                 'date': date(2026, 8, 10), 'amount': 2499, 'amount_usd': 146.48, 'currency': 'MXN',
+                'direction': 'debit',
                 'reason': 'manual classification required',
             }],
         }
@@ -207,6 +228,82 @@ class QBOIntegrityTests(unittest.TestCase):
         self.assertEqual([row['amount'] for row in recorded['review_details']], [2105, 2499])
         self.assertTrue(all(row['category_key'] == 'uncategorized_expense'
                             for row in recorded['review_details']))
+
+    def test_mercadolibre_credit_dry_run_is_a_deposit_not_an_expense(self):
+        client = Mock()
+        client.query.return_value = {'QueryResponse': {}}
+        transaction = {
+            'date': date(2026, 6, 4), 'time': '09:40:00',
+            'operation': '0642431832000', 'transaction_code': '000066',
+            'description': 'ABONO', 'reference': 'MERPAGO MERCADOLIBRE',
+            'direction': 'credit', 'amount': 490, 'amount_usd': 28.44,
+            'currency': 'MXN', 'category': 'supplies',
+            'category_name': 'Supplies (refund)', 'expense_refund': True,
+        }
+        with patch('qbo_push.QBOClient', return_value=client):
+            summary = push_classified_to_qbo(
+                {'auto': [transaction], 'guess': [], 'unknown': []}, dry_run=True,
+            )
+        self.assertEqual(summary['income_pushed'], 1)
+        self.assertEqual(summary['expenses_pushed'], 0)
+        self.assertEqual(summary['details'][0]['record_type'], 'deposit')
+        self.assertTrue(summary['complete'])
+
+    def test_unmarked_credit_is_held_instead_of_written_as_a_purchase(self):
+        client = Mock()
+        client.query.return_value = {'QueryResponse': {}}
+        transaction = {
+            'date': date(2026, 6, 4), 'description': 'ABONO', 'reference': '',
+            'direction': 'credit', 'amount': 490, 'amount_usd': 28.44,
+            'currency': 'MXN', 'category': 'supplies', 'expense_refund': False,
+        }
+        with patch('qbo_push.QBOClient', return_value=client):
+            summary = push_classified_to_qbo(
+                {'auto': [transaction], 'guess': [], 'unknown': []}, dry_run=True,
+            )
+        self.assertEqual(summary['expenses_pushed'], 0)
+        self.assertEqual(summary['income_pushed'], 0)
+        self.assertEqual(summary['held'], 1)
+        self.assertFalse(summary['complete'])
+
+    def test_month_end_timbrado_pair_is_counted_as_an_intentional_subcent_skip(self):
+        client = Mock()
+        client.query.return_value = {'QueryResponse': {}}
+        base = {
+            'date': date(2026, 6, 30), 'time': '22:46:00',
+            'operation': '0652451075000', 'amount': 0.01, 'amount_usd': 0.0,
+            'currency': 'MXN', 'category': 'bank_fee',
+        }
+        transactions = [
+            {**base, 'description': 'Comisión por timbrado fiscal',
+             'direction': 'debit', 'transaction_code': '000054'},
+            {**base, 'description': 'Descuento por timbrado fiscal',
+             'direction': 'credit', 'transaction_code': '000055', 'expense_refund': True},
+        ]
+        with patch('qbo_push.QBOClient', return_value=client):
+            summary = push_classified_to_qbo(
+                {'auto': transactions, 'guess': [], 'unknown': []}, dry_run=True,
+            )
+        self.assertEqual(summary['intentional_skipped'], 2)
+        self.assertEqual(summary['held'], 0)
+        self.assertEqual(summary['principal_recorded'], 2)
+        self.assertTrue(summary['complete'])
+
+    def test_owner_transfer_without_exact_bofa_amount_is_held(self):
+        client = Mock()
+        client.query.return_value = {'QueryResponse': {}}
+        transaction = {
+            'date': date(2026, 7, 22), 'description': '(NB) RECEPCION DE CUENTA',
+            'reference': '', 'direction': 'credit', 'amount': 850,
+            'amount_usd': 49.33, 'currency': 'MXN', 'category': 'owner_transfer',
+        }
+        with patch('qbo_push.QBOClient', return_value=client):
+            summary = push_classified_to_qbo(
+                {'auto': [transaction], 'guess': [], 'unknown': []}, dry_run=True,
+            )
+        self.assertEqual(summary['transfers_pushed'], 0)
+        self.assertEqual(summary['held'], 1)
+        self.assertIn('Exact USD transfer amount', summary['held_details'][0]['review_reason'])
 
     def test_spei_fee_reconciliation_consumes_legacy_lines_as_a_multiset(self):
         parents = [
@@ -249,6 +346,8 @@ class QBOIntegrityTests(unittest.TestCase):
     def test_new_spei_fee_memo_is_bound_to_exact_parent_reference(self):
         client = self.client()
         client._resolve_account_id = lambda _key: '1150040012'
+        client._resolve_vendor_id = lambda _key: '16'
+        client._resolve_bank_account_id = lambda _key: '115'
         seen = []
         client._api_call = lambda method, endpoint, body, request_id=None: (
             seen.append(body) or {'Purchase': {'Id': '42'}}
@@ -263,6 +362,63 @@ class QBOIntegrityTests(unittest.TestCase):
         )
         self.assertIn(parent['reference'], seen[0]['PrivateNote'])
         self.assertIn('Parent orig $7,500.00 MXN', seen[0]['PrivateNote'])
+
+    def test_expense_refund_deposit_posts_back_to_the_expense_account(self):
+        client = self.client()
+        client._resolve_bank_account_id = lambda key: {'kapital': '115'}[key]
+        client._resolve_account_id = lambda key: {'supplies': '42'}[key]
+        client._resolve_income_account_id = Mock(side_effect=AssertionError('income account not expected'))
+        seen = []
+        client._api_call = lambda method, endpoint, body, request_id=None: (
+            seen.append(body) or {'Deposit': {'Id': '500'}}
+        )
+        transaction = {
+            'date': date(2026, 6, 4), 'time': '09:40:00', 'operation': 'OP-1',
+            'transaction_code': '000066', 'direction': 'credit', 'amount': 490,
+            'amount_usd': 28.44, 'category': 'supplies', 'expense_refund': True,
+            'description': 'ABONO', 'reference': 'MERPAGO MERCADOLIBRE',
+        }
+        client.create_deposit(transaction)
+        deposit = seen[0]
+        self.assertEqual(deposit['DepositToAccountRef']['value'], '115')
+        self.assertEqual(deposit['Line'][0]['DepositLineDetail']['AccountRef']['value'], '42')
+        self.assertIn('MERPAGO MERCADOLIBRE', deposit['PrivateNote'])
+        self.assertIn('Kapital txn:', deposit['PrivateNote'])
+
+    def test_fx_transfer_uses_the_exact_executed_usd_amount(self):
+        client = self.client()
+        client._resolve_bank_account_id = lambda key: {'bofa': '9', 'kapital': '115'}[key]
+        seen = []
+        client._api_call = lambda method, endpoint, body, request_id=None: (
+            seen.append(body) or {'Transfer': {'Id': '501'}}
+        )
+        client.create_transfer({
+            'date': date(2026, 7, 30), 'direction': 'credit', 'amount': 127800,
+            'transfer_amount_usd': 7500, 'fx_rate': 17.04,
+            'category': 'fx_conversion', 'transaction_code': '000100',
+        })
+        self.assertEqual(seen[0]['Amount'], 7500)
+        self.assertEqual(seen[0]['FromAccountRef']['value'], '9')
+        self.assertEqual(seen[0]['ToAccountRef']['value'], '115')
+
+    def test_purchase_readback_verifies_the_expense_posting_account(self):
+        client = self.client()
+        client._resolve_bank_account_id = lambda _key: '115'
+        client._resolve_account_id = lambda _key: '42'
+        transaction = {
+            'date': date(2026, 8, 10), 'direction': 'debit', 'amount': 100,
+            'amount_usd': 5.80, 'category': 'supplies',
+        }
+        purchase = {
+            'TotalAmt': 5.80, 'AccountRef': {'value': '115'},
+            'PrivateNote': f"Kapital txn: {kapital_transaction_token(transaction)}",
+            'Line': [{
+                'DetailType': 'AccountBasedExpenseLineDetail', 'Amount': 5.80,
+                'AccountBasedExpenseLineDetail': {'AccountRef': {'value': '99'}},
+            }],
+        }
+        with self.assertRaisesRegex(RuntimeError, 'posting account'):
+            verify_principal_readback(client, transaction, 'expense', purchase)
 
     def test_journal_entry_create_and_readback_use_canonical_endpoints(self):
         seen = []
@@ -308,6 +464,26 @@ class QBOIntegrityTests(unittest.TestCase):
             client = QBOClient(str(secret))
             self.assertEqual(client.client_id, 'client')
             self.assertIn('sandbox-quickbooks', client.base_url)
+
+    def test_refresh_reuses_a_token_rotated_by_another_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            secret = Path(directory) / 'quickbooks.json'
+            secret.write_text(json.dumps({
+                'realmId': 'realm', 'access_token': 'stale-access',
+                'refresh_token': 'stale-refresh', 'env': 'sandbox',
+            }))
+            (Path(directory) / 'quickbooks-dev.json').write_text(json.dumps({
+                'client_id': 'client', 'client_secret': 'secret',
+            }))
+            client = QBOClient(str(secret))
+            secret.write_text(json.dumps({
+                'realmId': 'realm', 'access_token': 'fresh-access',
+                'refresh_token': 'fresh-refresh', 'env': 'sandbox',
+            }))
+            with patch('urllib.request.urlopen') as urlopen:
+                self.assertTrue(client.refresh_auth())
+            urlopen.assert_not_called()
+            self.assertEqual(client.access_token, 'fresh-access')
 
 
 if __name__ == '__main__':
