@@ -42,15 +42,16 @@ const WORKFLOW_SCHEMA = {
         'qbo.report.read',
         'squarespace.summary.read',
         'crm.pipeline.read',
+        'crm.contacts.read',
         'paulina.performance.read',
         'guest.reply.draft',
         'ownerrez.mutation.propose',
       ],
-      description: 'Versioned workflow to execute.',
+      description: 'Versioned workflow to execute. Use crm.contacts.read for contact or POC lookups in #whatsapp; do not defer those requests to another channel.',
     },
     input: {
       type: 'object',
-      description: 'Workflow input. For whatsapp.status.read use direction (outbound by default, inbound, or all), optional limit (1-100), and optional messageSid; a trusted current Slack thread is applied automatically. For whatsapp.reply pass message and optionally dmId; the trusted Slack thread is supplied by the plugin.',
+      description: 'Workflow input. For crm.contacts.read use query for one contact, queries for multiple names/numbers/emails, and optional limit (1-100); it returns authorized full CRM contact details. For whatsapp.status.read use direction (outbound by default, inbound, or all), optional limit (1-100), and optional messageSid; a trusted current Slack thread is applied automatically. WhatsApp sends are command-only and cannot be invoked through this tool.',
       additionalProperties: true,
     },
   },
@@ -241,6 +242,60 @@ function formatWhatsAppStatusReply(payload) {
   return lines.join('\n');
 }
 
+function formatCrmContactsReply(payload) {
+  const run = payload?.run;
+  const output = run?.output || {};
+  const contacts = Array.isArray(output.contacts) ? output.contacts : [];
+  const total = Number(output.totalMatches ?? contacts.length);
+  const lines = [`*CRM contact lookup:* ${total} matching contact${total === 1 ? '' : 's'}.`];
+  if (Array.isArray(output.queries) && output.queries.length) {
+    lines.push(`Search: ${output.queries.map(query => safeInline(query, 'unknown', 120)).join(' · ')}`);
+  }
+  if (!contacts.length) {
+    lines.push('', 'No matching contact was found across CRM contacts, leads, Squarespace customers, or historical WhatsApp senders.');
+  } else {
+    lines.push('');
+    for (const contact of contacts) {
+      const name = safeInline(contact.name, 'Unnamed contact', 80);
+      const phone = safeInline(contact.phone, 'no phone', 40);
+      const email = safeInline(contact.email, 'no email', 120);
+      const ref = safeInline(contact.contactRef, 'no CRM reference', 80);
+      lines.push(`• *${name}* — ${phone} · ${email} · ${ref}`);
+      const sources = Array.isArray(contact.sources) && contact.sources.length
+        ? contact.sources.map(source => safeInline(String(source).replaceAll('_', ' '), 'unknown', 80)).join(', ')
+        : 'unknown';
+      const statuses = Array.isArray(contact.statuses) && contact.statuses.length
+        ? contact.statuses.map(status => safeInline(status, 'unknown', 40)).join(', ')
+        : 'not recorded';
+      lines.push(`  Sources: ${sources} · CRM status: ${statuses}`);
+      if (contact.doNotContact) {
+        lines.push(`  ⚠️ Do not contact${contact.doNotContactReason ? `: ${safeInline(contact.doNotContactReason, 'suppressed', 100)}` : '.'}`);
+      }
+      const whatsapp = contact.whatsapp || {};
+      if (whatsapp.knownInbound) {
+        lines.push(`  WhatsApp: prior inbound ${safeInline(whatsapp.lastInboundAt, 'unknown time', 40)} · 24-hour window ${whatsapp.serviceWindowOpen ? 'open' : 'closed'}${whatsapp.dmId ? ` · WA ID ${whatsapp.dmId}` : ''}`);
+      } else if (contact.phone) {
+        const eligibility = whatsapp.eligibility === 'blocked_do_not_contact'
+          ? 'blocked by do-not-contact status'
+          : whatsapp.eligibility === 'preferred_whatsapp_consent_not_verified'
+            ? 'preferred channel is WhatsApp; consent evidence is not recorded'
+            : whatsapp.eligibility === 'no_e164_whatsapp_number'
+              ? 'number is not stored in E.164 format'
+              : 'no prior WhatsApp inbound or consent evidence recorded';
+        lines.push(`  WhatsApp: ${eligibility}`);
+      }
+    }
+  }
+  if (Array.isArray(output.unmatchedQueries) && output.unmatchedQueries.length) {
+    lines.push('', `No match for: ${output.unmatchedQueries.map(query => safeInline(query, 'unknown', 120)).join(' · ')}`);
+  }
+  if (output.truncated) {
+    lines.push('', `${Number(output.displayedContacts || contacts.length)} of ${total} matches are shown; narrow the search or increase limit up to 100.`);
+  }
+  lines.push('', `Workflow: ${run.id}${output._evidence?.id ? ` · Evidence: ${output._evidence.id}` : ''}`);
+  return lines.join('\n');
+}
+
 function ownerRezDateLabel(value) {
   const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return String(value || 'unknown date');
@@ -343,6 +398,9 @@ export function formatWorkflowReply(payload) {
   }
   if (run.workflow_name === 'whatsapp.status.read') {
     return formatWhatsAppStatusReply(payload);
+  }
+  if (run.workflow_name === 'crm.contacts.read') {
+    return formatCrmContactsReply(payload);
   }
   if (run.workflow_name === 'meta.dm.reply') {
     const output = run.output || {};
@@ -540,7 +598,8 @@ export function createWorkflowTool({ config, ctx, fetchImpl = fetch }) {
       if (!channelId || !ctx.requesterSenderId) throw new Error('trusted Slack channel/user context is unavailable');
       const input = {
         ...rawInput,
-        ...(ctx.deliveryContext?.threadId ? { threadTs: String(ctx.deliveryContext.threadId) } : {}),
+        ...(workflow === 'whatsapp.status.read' && ctx.deliveryContext?.threadId
+          ? { threadTs: String(ctx.deliveryContext.threadId) } : {}),
       };
       const digest = crypto.createHash('sha256')
         .update(JSON.stringify({ workflow, input, toolCallId }))
@@ -898,15 +957,7 @@ export function createInboundClaimHandler({ config, execute = callControlPlane, 
     if (!config.whatsappChannelIds.has(channelId)) return undefined;
     const text = event.bodyForAgent || event.body || event.content || '';
     const command = parseWhatsAppCommand(text, { hasThread: Boolean(event.threadId) });
-    if (!command) {
-      if (event.threadId && !config.shadowMode) {
-        return {
-          handled: true,
-          reply: { text: 'Not sent. Prefix a guest-facing reply with `!wa ` so an ordinary channel question cannot accidentally message the guest.' },
-        };
-      }
-      return undefined;
-    }
+    if (!command) return undefined;
     if (!workflowIsLive(config, 'whatsapp.reply')) {
       logger?.info?.(`resort-workflows shadow: would handle WhatsApp command ${event.messageId || '<no-id>'}`);
       return undefined;

@@ -75,6 +75,10 @@ are durably queued into that channel before acknowledgement, and only explicit
 `!wa` messages in the matching Slack thread may invoke `whatsapp.reply`. Twilio
 callbacks update and post the exact queued/sent/delivered/read/failed state;
 neither the model nor initial send acceptance can infer delivery or viewing.
+Read-only contact and POC questions use `crm.contacts.read` in the same channel,
+which consolidates CRM contacts, leads, Squarespace customers, and historical
+WhatsApp senders without granting a database or shell bypass. Ordinary Slack
+thread discussion can invoke reads but cannot invoke the command-only send graph.
 
 `SOCIALSOL_ROOT`, `SOCIALSOL_SECRETS_DIR`, and `DB_PATH` define the deployment
 location. Source code must not assume a username, home directory, Slack ID, or

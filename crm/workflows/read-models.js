@@ -130,6 +130,169 @@ function validateWhatsAppStatusInput(input) {
   }
 }
 
+function normalizeContactQueries(input = {}) {
+  const raw = [];
+  if (input.query !== undefined) raw.push(input.query);
+  if (input.queries !== undefined) {
+    if (!Array.isArray(input.queries)) throw new Error('queries must be an array of search terms');
+    raw.push(...input.queries);
+  }
+  const queries = [];
+  for (const value of raw) {
+    if (typeof value !== 'string') throw new Error('contact search terms must be strings');
+    for (const part of value.split(/[,;\n]+/)) {
+      const normalized = part.trim();
+      if (!normalized) continue;
+      if (normalized.length > 120) throw new Error('contact search terms must be 120 characters or fewer');
+      if (!queries.some(query => query.toLowerCase() === normalized.toLowerCase())) queries.push(normalized);
+    }
+  }
+  if (queries.length > 25) throw new Error('contact lookup accepts at most 25 search terms');
+  return queries;
+}
+
+function validateCrmContactsInput(input) {
+  validateLimit(input);
+  const unsupported = Object.keys(input).filter(key => !['query', 'queries', 'limit'].includes(key));
+  if (unsupported.length) {
+    throw new Error(`unsupported crm.contacts.read input: ${unsupported.join(', ')}; use query, queries, or limit`);
+  }
+  normalizeContactQueries(input);
+}
+
+function digitsOnly(value) {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function normalizedText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function contactSearchCondition(queries, haystack, phone = sql`phone`) {
+  if (!queries.length) return sql`1=1`;
+  return sql.join(queries.map(query => {
+    const lowered = `%${query.toLowerCase()}%`;
+    const digits = digitsOnly(query);
+    const phoneMatch = digits.length >= 7
+      ? sql` OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(${phone},''), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '') LIKE ${`%${digits}%`}`
+      : sql``;
+    return sql`(LOWER(${haystack}) LIKE ${lowered}${phoneMatch})`;
+  }), sql` OR `);
+}
+
+function contactMatchQueries(record, queries) {
+  if (!queries.length) return [];
+  const text = normalizedText([
+    record.name, record.email, record.phone, record.company, record.source,
+    record.relationshipType, record.preferredChannel,
+  ].filter(Boolean).join(' '));
+  const phoneDigits = digitsOnly(record.phone);
+  return queries.filter(query => {
+    const normalized = normalizedText(query);
+    const queryDigits = digitsOnly(query);
+    return text.includes(normalized) || (queryDigits.length >= 7 && phoneDigits.includes(queryDigits));
+  });
+}
+
+function contactMergeKey(record) {
+  const phone = digitsOnly(record.phone);
+  if (phone.length >= 7) return `phone:${phone}`;
+  const email = normalizedText(record.email);
+  if (email) return `email:${email}`;
+  return record.contactRef;
+}
+
+function sourcePriority(type) {
+  return { contact: 4, lead: 3, squarespace_customer: 2, whatsapp: 1 }[type] || 0;
+}
+
+function mergeContactRecords(records, queries, observedAt) {
+  const merged = new Map();
+  for (const record of records) {
+    const key = contactMergeKey(record);
+    const existing = merged.get(key);
+    const priority = sourcePriority(record.recordType);
+    if (!existing) {
+      merged.set(key, {
+        ...record,
+        _priority: priority,
+        recordRefs: [record.contactRef],
+        sources: [record.source].filter(Boolean),
+        statuses: [record.status].filter(Boolean),
+        matchingQueries: contactMatchQueries(record, queries),
+      });
+      continue;
+    }
+
+    existing.recordRefs = [...new Set([...existing.recordRefs, record.contactRef])];
+    existing.sources = [...new Set([...existing.sources, record.source].filter(Boolean))];
+    existing.statuses = [...new Set([...existing.statuses, record.status].filter(Boolean))];
+    existing.matchingQueries = [...new Set([
+      ...existing.matchingQueries,
+      ...contactMatchQueries(record, queries),
+    ])];
+    existing.doNotContact = Boolean(existing.doNotContact || record.doNotContact);
+    existing.doNotContactReason ||= record.doNotContactReason || null;
+
+    if (priority > existing._priority) {
+      for (const field of [
+        'contactRef', 'recordType', 'recordId', 'name', 'phone', 'email', 'company',
+        'status', 'relationshipType', 'preferredChannel', 'addressable', 'updatedAt',
+      ]) {
+        if (record[field] !== null && record[field] !== undefined && record[field] !== '') {
+          existing[field] = record[field];
+        }
+      }
+      existing._priority = priority;
+    } else {
+      for (const field of ['name', 'phone', 'email', 'company', 'relationshipType', 'preferredChannel', 'updatedAt']) {
+        if (!existing[field] && record[field]) existing[field] = record[field];
+      }
+    }
+
+    if (record.lastWhatsAppInboundAt && (
+      !existing.lastWhatsAppInboundAt || record.lastWhatsAppInboundAt > existing.lastWhatsAppInboundAt
+    )) {
+      existing.lastWhatsAppInboundAt = record.lastWhatsAppInboundAt;
+      existing.whatsappMessageId = record.whatsappMessageId;
+      existing.whatsappDmId = record.whatsappDmId;
+      existing.slackThreadTs = record.slackThreadTs;
+    }
+  }
+
+  const now = new Date(observedAt).valueOf();
+  return [...merged.values()].map(record => {
+    const inboundAt = record.lastWhatsAppInboundAt ? new Date(record.lastWhatsAppInboundAt).valueOf() : NaN;
+    const serviceWindowOpen = Number.isFinite(inboundAt) && inboundAt <= now && now - inboundAt <= 24 * 60 * 60 * 1000;
+    const hasWhatsAppPhone = /^\+\d{7,15}$/.test(String(record.phone || ''));
+    const whatsappEligibility = record.doNotContact
+      ? 'blocked_do_not_contact'
+      : !hasWhatsAppPhone
+        ? 'no_e164_whatsapp_number'
+        : record.lastWhatsAppInboundAt
+          ? 'known_whatsapp_contact'
+          : normalizedText(record.preferredChannel) === 'whatsapp'
+            ? 'preferred_whatsapp_consent_not_verified'
+            : 'consent_not_recorded';
+    const updated = [record.updatedAt, record.lastWhatsAppInboundAt]
+      .filter(Boolean).sort().at(-1) || null;
+    const { _priority, ...publicRecord } = record;
+    return {
+      ...publicRecord,
+      updatedAt: updated,
+      whatsapp: {
+        eligibility: whatsappEligibility,
+        knownInbound: Boolean(record.lastWhatsAppInboundAt),
+        lastInboundAt: record.lastWhatsAppInboundAt || null,
+        serviceWindowOpen,
+        dmId: record.whatsappDmId || null,
+        slackThreadTs: record.slackThreadTs || null,
+        messageId: record.whatsappMessageId || null,
+      },
+    };
+  });
+}
+
 const BUSINESS_TIME_ZONE = 'America/Los_Angeles';
 
 function addCalendarDays(value, days) {
@@ -545,6 +708,136 @@ const crmPipelineRead = evidenceReadDefinition({
   },
 });
 
+const crmContactsRead = evidenceReadDefinition({
+  name: 'crm.contacts.read',
+  version: 1,
+  capability: 'crm.read',
+  validate: validateCrmContactsInput,
+  async collect({ db, input }) {
+    const observedAt = new Date().toISOString();
+    const queries = normalizeContactQueries(input);
+    const limit = Number(input.limit || 25);
+    const sourceLimit = Math.min(100, Math.max(limit * 4, 25));
+    const contactWhere = contactSearchCondition(queries, sql`
+      COALESCE(name,'') || ' ' || COALESCE(email,'') || ' ' || COALESCE(phone,'')
+        || ' ' || COALESCE(company,'') || ' ' || COALESCE(source,'')
+    `);
+    const leadWhere = contactSearchCondition(queries, sql`
+      COALESCE(name,'') || ' ' || COALESCE(email,'') || ' ' || COALESCE(phone,'')
+        || ' ' || COALESCE(source,'')
+    `);
+    const squarespaceWhere = contactSearchCondition(queries, sql`
+      COALESCE(first_name,'') || ' ' || COALESCE(last_name,'') || ' '
+        || COALESCE(email,'') || ' ' || COALESCE(phone,'')
+    `);
+    const whatsappWhere = contactSearchCondition(queries, sql`
+      COALESCE(sender_name,'') || ' ' || COALESCE(sender_id,'')
+    `, sql`sender_id`);
+
+    const [contacts, leads, squarespaceCustomers, whatsappSenders] = await Promise.all([
+      queryIfTable(db, 'contacts', sql`SELECT
+        id, name, email, phone, company, source, status, relationship_type,
+        preferred_channel, do_not_contact, do_not_contact_reason, addressable, updated_at
+        FROM contacts WHERE ${contactWhere}
+        ORDER BY updated_at DESC, id DESC LIMIT ${sourceLimit}`, []),
+      queryIfTable(db, 'leads', sql`SELECT
+        id, name, email, phone, source, status, updated_at
+        FROM leads WHERE ${leadWhere}
+        ORDER BY updated_at DESC, id DESC LIMIT ${sourceLimit}`, []),
+      queryIfTable(db, 'squarespace_customers', sql`SELECT
+        squarespace_customer_id, contact_id, first_name, last_name, email, phone,
+        accepts_marketing, created_on, synced_at
+        FROM squarespace_customers WHERE ${squarespaceWhere}
+        ORDER BY synced_at DESC, squarespace_customer_id DESC LIMIT ${sourceLimit}`, []),
+      queryIfTable(db, 'meta_messages', sql`SELECT
+        id, sender_id, sender_name, message_id, received_at, slack_thread_ts
+        FROM meta_messages
+        WHERE platform='whatsapp' AND sender_id!='outbound'
+          AND (direction='inbound' OR direction IS NULL)
+          AND ${whatsappWhere}
+        ORDER BY received_at DESC, id DESC LIMIT ${sourceLimit}`, []),
+    ]);
+
+    const records = [
+      ...contacts.map(row => ({
+        contactRef: `contact:${row.id}`, recordType: 'contact', recordId: row.id,
+        name: row.name || null, email: row.email || null, phone: row.phone || null,
+        company: row.company || null, source: row.source ? `contacts:${row.source}` : 'contacts',
+        status: row.status || null, relationshipType: row.relationship_type || null,
+        preferredChannel: row.preferred_channel || null,
+        doNotContact: Number(row.do_not_contact || 0) === 1,
+        doNotContactReason: row.do_not_contact_reason || null,
+        addressable: row.addressable === null || row.addressable === undefined
+          ? null : Number(row.addressable) === 1,
+        updatedAt: row.updated_at || null,
+      })),
+      ...leads.map(row => ({
+        contactRef: `lead:${row.id}`, recordType: 'lead', recordId: row.id,
+        name: row.name || null, email: row.email || null, phone: row.phone || null,
+        company: null, source: row.source ? `leads:${row.source}` : 'leads',
+        status: row.status || null, relationshipType: null, preferredChannel: null,
+        doNotContact: false, doNotContactReason: null, addressable: null,
+        updatedAt: row.updated_at || null,
+      })),
+      ...squarespaceCustomers.map(row => ({
+        contactRef: row.contact_id
+          ? `contact:${row.contact_id}` : `squarespace:${row.squarespace_customer_id}`,
+        recordType: 'squarespace_customer', recordId: row.squarespace_customer_id,
+        name: [row.first_name, row.last_name].filter(Boolean).join(' ') || null,
+        email: row.email || null, phone: row.phone || null, company: null,
+        source: 'squarespace_customers', status: null, relationshipType: null,
+        preferredChannel: null, doNotContact: false, doNotContactReason: null,
+        addressable: Boolean(row.email || row.phone), updatedAt: row.synced_at || row.created_on || null,
+      })),
+      ...whatsappSenders.map(row => ({
+        contactRef: `whatsapp:${row.id}`, recordType: 'whatsapp', recordId: row.id,
+        name: row.sender_name || null, email: null, phone: row.sender_id || null,
+        company: null, source: 'whatsapp_inbound', status: null, relationshipType: null,
+        preferredChannel: 'whatsapp', doNotContact: false, doNotContactReason: null,
+        addressable: true, updatedAt: row.received_at || null,
+        lastWhatsAppInboundAt: row.received_at || null, whatsappMessageId: row.message_id || null,
+        whatsappDmId: row.id, slackThreadTs: row.slack_thread_ts || null,
+      })),
+    ];
+    const allContacts = mergeContactRecords(records, queries, observedAt)
+      .filter(contact => !queries.length || contact.matchingQueries.length > 0)
+      .sort((left, right) => {
+        const leftIndex = queries.length
+          ? Math.min(...left.matchingQueries.map(query => queries.indexOf(query))) : 0;
+        const rightIndex = queries.length
+          ? Math.min(...right.matchingQueries.map(query => queries.indexOf(query))) : 0;
+        return leftIndex - rightIndex
+          || String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))
+          || String(left.name || '').localeCompare(String(right.name || ''));
+      });
+    const displayed = allContacts.slice(0, limit);
+    const matchedQueries = new Set(allContacts.flatMap(contact => contact.matchingQueries));
+
+    return {
+      source: 'crm.contacts+leads+meta_messages+squarespace_customers',
+      sourceRef: queries.length ? queries.join('|').slice(0, 500) : 'recent',
+      observedAt,
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+      payload: {
+        authority: 'CRM consolidated contact ledger',
+        queries,
+        unmatchedQueries: queries.filter(query => !matchedQueries.has(query)),
+        totalMatches: allContacts.length,
+        displayedContacts: displayed.length,
+        truncated: allContacts.length > displayed.length,
+        contacts: displayed,
+        sourceCoverage: {
+          contacts: contacts.length,
+          leads: leads.length,
+          squarespaceCustomers: squarespaceCustomers.length,
+          whatsappSenders: whatsappSenders.length,
+        },
+        generatedAt: observedAt,
+      },
+    };
+  },
+});
+
 const paulinaPerformanceRead = evidenceReadDefinition({
   name: 'paulina.performance.read',
   capability: 'paulina.read',
@@ -570,6 +863,7 @@ module.exports = {
   ownerrezOccupancyRead,
   qboBankBalancesRead,
   qboReportRead,
+  crmContactsRead,
   crmPipelineRead,
   paulinaPerformanceRead,
   receiptsRead,
@@ -580,6 +874,8 @@ module.exports = {
   _internal: {
     addCalendarDays,
     bodyPreview,
+    normalizeContactQueries,
+    validateCrmContactsInput,
     validateEmailActivityInput,
     validateWhatsAppStatusInput,
     zonedMidnightUtc,

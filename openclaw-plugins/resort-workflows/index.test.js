@@ -46,12 +46,45 @@ test('parses only explicit WhatsApp mutations', () => {
   assert.deepEqual(parseWhatsAppCommand('!wa Welcome', { hasThread: false }), { error: 'dm_id_required' });
 });
 
-test('workflow tool exposes live email activity as a model-callable read', () => {
+test('workflow tool exposes email activity and full CRM contact lookup as model-callable reads', () => {
   const tool = createWorkflowTool({
     config: pluginConfig({}),
     ctx: { deliveryContext: { to: 'channel:CEMAIL' }, requesterSenderId: 'U-JASON' },
   });
   assert.ok(tool.parameters.properties.workflow.enum.includes('email.activity.read'));
+  assert.ok(tool.parameters.properties.workflow.enum.includes('crm.contacts.read'));
+  assert.match(tool.parameters.properties.workflow.description, /do not defer those requests to another channel/);
+});
+
+test('CRM contact lookup works inside a WhatsApp thread without receiving unsupported thread input', async () => {
+  const tokenEnv = 'TEST_CRM_CONTACT_CONTROL_TOKEN';
+  const prior = process.env[tokenEnv];
+  process.env[tokenEnv] = 'c'.repeat(40);
+  let request;
+  try {
+    const tool = createWorkflowTool({
+      config: pluginConfig({ controlPlaneTokenEnv: tokenEnv }),
+      ctx: {
+        sessionId: 'contact-thread-session', requesterSenderId: 'U-JASON',
+        deliveryContext: { to: 'channel:CWA', threadId: '123.456' },
+      },
+      fetchImpl: async (_url, options) => {
+        request = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ run: {
+          id: 'crm-contact-thread-run', workflow_name: 'crm.contacts.read', status: 'completed',
+          output: { queries: ['Bethany'], totalMatches: 0, displayedContacts: 0, contacts: [] },
+        } }) };
+      },
+    });
+    await tool.execute('contact-thread-call', {
+      workflow: 'crm.contacts.read', input: { queries: ['Bethany'] },
+    });
+    assert.deepEqual(request.input, { queries: ['Bethany'] });
+    assert.equal(request.context.channel_id, 'CWA');
+  } finally {
+    if (prior === undefined) delete process.env[tokenEnv];
+    else process.env[tokenEnv] = prior;
+  }
 });
 
 test('formats live Gmail activity with unread and ledger coverage facts', () => {
@@ -147,6 +180,32 @@ test('WhatsApp failure output explains a disabled or unverified business account
   } });
   assert.match(text, /Twilio 63112: WhatsApp Business Account disabled or verification incomplete at send time/);
   assert.match(text, /follow-up required/);
+});
+
+test('CRM contact lookup formats full POCs and WhatsApp context in the requesting channel', () => {
+  const text = formatWorkflowReply({ run: {
+    id: 'crm-contacts-run', workflow_name: 'crm.contacts.read', status: 'completed',
+    output: {
+      queries: ['Bethany', 'Missing Person'], totalMatches: 1, displayedContacts: 1,
+      unmatchedQueries: ['Missing Person'], truncated: false,
+      contacts: [{
+        contactRef: 'contact:42', name: 'Bethany Guest', phone: '+14155550101',
+        email: 'bethany@example.com', sources: ['contacts:ownerrez', 'whatsapp_inbound'],
+        statuses: ['inquiry'], doNotContact: false,
+        whatsapp: {
+          eligibility: 'known_whatsapp_contact', knownInbound: true,
+          lastInboundAt: '2026-08-14T12:00:00.000Z', serviceWindowOpen: true, dmId: 17,
+        },
+      }],
+      _evidence: { id: 'crm-contacts-evidence' },
+    },
+  } });
+  assert.match(text, /CRM contact lookup:.*1 matching contact/);
+  assert.match(text, /Bethany Guest.*\+14155550101.*bethany@example\.com.*contact:42/);
+  assert.match(text, /contacts:ownerrez, whatsapp inbound/);
+  assert.match(text, /24-hour window open · WA ID 17/);
+  assert.match(text, /No match for: Missing Person/);
+  assert.match(text, /Workflow: crm-contacts-run · Evidence: crm-contacts-evidence/);
 });
 
 test('parses only explicit Meta DM mutations', () => {
@@ -870,13 +929,12 @@ test('OwnerRez confirmation binds trusted Slack identity and ignores model-like 
   assert.match(result.reply.text, /verified by readback/);
 });
 
-test('live WhatsApp thread refuses ambiguous plain replies', async () => {
+test('plain WhatsApp thread questions reach the model while sends remain explicit commands', async () => {
   const config = pluginConfig({ whatsappChannelIds: ['C-WA'], shadowMode: false });
   const result = await createInboundClaimHandler({ config })({
     channel: 'slack', conversationId: 'C-WA', threadId: '123.456', bodyForAgent: 'Is this available?',
   }, {});
-  assert.equal(result.handled, true);
-  assert.match(result.reply.text, /Not sent/);
+  assert.equal(result, undefined);
 });
 
 test('model-facing tool cannot invoke command-only WhatsApp sends', async () => {
