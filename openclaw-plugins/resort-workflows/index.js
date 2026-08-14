@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+const Database = require('better-sqlite3');
 const { stageSlackAccountingStatement } = require('../../crm/lib/accounting-slack-inbox.js');
+const { buildTaskReport, loadUsers } = require('../../paloma/lib/task-report.js');
 
 const WORKFLOW_SCHEMA = {
   type: 'object',
@@ -87,6 +89,11 @@ function pluginConfig(value = {}) {
     ownerExpenseChannelIds: new Set(Array.isArray(parsed.ownerExpenseChannelIds) ? parsed.ownerExpenseChannelIds.filter(Boolean) : []),
     accountingChannelIds: new Set(Array.isArray(parsed.accountingChannelIds) ? parsed.accountingChannelIds.filter(Boolean) : []),
     controlledChannelIds: new Set(Array.isArray(parsed.controlledChannelIds) ? parsed.controlledChannelIds.filter(Boolean) : []),
+    taskTrackerAgentIds: new Set(Array.isArray(parsed.taskTrackerAgentIds) ? parsed.taskTrackerAgentIds.filter(Boolean) : []),
+    taskTrackerAccountIds: new Set(Array.isArray(parsed.taskTrackerAccountIds) ? parsed.taskTrackerAccountIds.filter(Boolean) : []),
+    taskTrackerChannelIds: new Set(Array.isArray(parsed.taskTrackerChannelIds) ? parsed.taskTrackerChannelIds.filter(Boolean) : []),
+    taskTrackerDatabasePath: String(parsed.taskTrackerDatabasePath || ''),
+    taskTrackerConfigPath: String(parsed.taskTrackerConfigPath || ''),
     controlPlaneTokenEnv: String(parsed.controlPlaneTokenEnv || 'RESORT_WORKFLOW_CONTROL_TOKEN'),
     controlPlaneTokenFile: String(parsed.controlPlaneTokenFile || ''),
     shadowMode: parsed.shadowMode !== false,
@@ -849,8 +856,164 @@ function reservationClaimEventFromFinalizedContext(ctx = {}) {
     senderId: ctx.SenderId,
     senderName: ctx.SenderName,
     senderUsername: ctx.SenderUsername,
+    mentionedUserIds: Array.isArray(ctx.MentionedUserIds) ? ctx.MentionedUserIds : [],
     threadId: ctx.MessageThreadId,
     bodyForAgent: ctx.BodyForCommands || ctx.CommandBody || ctx.RawBody || ctx.Body || ctx.BodyForAgent || '',
+  };
+}
+
+function normalizedTaskText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[“”]/g, '"')
+    .replace(/[’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function escapedPattern(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function containsTaskAlias(body, alias) {
+  const normalized = normalizedTaskText(alias);
+  if (!normalized) return false;
+  return new RegExp(`(?:^|[^a-z0-9])${escapedPattern(normalized)}(?:$|[^a-z0-9])`, 'i').test(body);
+}
+
+export function parseTaskListRequest(bodyValue, {
+  senderId = '',
+  senderName = '',
+  mentionedUserIds = [],
+  users = {},
+} = {}) {
+  const rawBody = String(bodyValue || '');
+  const body = normalizedTaskText(rawBody);
+  if (!body) return null;
+
+  const hasTaskTerm = /\b(?:tasks?|task list|to-?dos?|assignments?|tareas?|pendientes?|asignaciones?)\b/.test(body);
+  const hasCompletionTerm = /\b(?:completed?|done|finished|completad[ao]s?|terminad[ao]s?|hech[ao]s?)\b/.test(body);
+  const hasImplicitTaskQuestion = /\b(?:what (?:do|does) .{0,60}(?:need to|have to|supposed to) do|what should .{0,60} do|what (?:am i|is .{1,60}) assigned|que (?:tengo|tiene|debo|debe|necesito|necesita) (?:que )?hacer|que (?:me|le) toca)\b/.test(body);
+  const hasQueryIntent = rawBody.includes('?')
+    || /\b(?:what|which|show|list|tell|give|how many|my|mine|have|has|assigned|que|cual(?:es)?|muestra|lista|dime|cuant[ao]s?|mis|mias|tengo|tiene|hay)\b/.test(body);
+  const aliases = Object.entries(users || {}).filter(([, userId]) => String(userId || '').trim());
+  const configuredUserIds = new Set(aliases.map(([, userId]) => String(userId)));
+  const bodyMentions = [...rawBody.matchAll(/<@([A-Z][A-Z0-9]{2,63})>/gi)].map(match => match[1]);
+  const targetMention = [...bodyMentions, ...mentionedUserIds.map(String)]
+    .find(userId => configuredUserIds.has(userId));
+  const matchedAlias = aliases
+    .sort(([left], [right]) => right.length - left.length)
+    .find(([alias]) => containsTaskAlias(body, alias));
+  if ((!hasTaskTerm && !hasImplicitTaskQuestion
+      && !(hasCompletionTerm && (targetMention || matchedAlias || senderId)))
+      || !hasQueryIntent) return null;
+
+  let status = 'active';
+  if (/\b(?:task history|full history|historial(?: de)? tareas|incluyendo completad[ao]s?|including completed|active and completed|pendientes y completad[ao]s?)\b/.test(body)) {
+    status = 'all';
+  } else if (hasCompletionTerm) {
+    status = 'completed';
+  } else if (/\b(?:cancelled|canceled|cancelad[ao]s?)\b/.test(body)) {
+    status = 'cancelled';
+  } else if (/\b(?:in progress|en progreso)\b/.test(body)) {
+    status = 'in_progress';
+  }
+
+  if (targetMention) return { status, userId: targetMention };
+  if (matchedAlias) return { status, userId: String(matchedAlias[1]), selectorLabel: matchedAlias[0] };
+  if (/\b(?:everyone|everybody|all staff|todo el personal|todas las personas|de todos|para todos)\b/.test(body)) {
+    return { status, all: true };
+  }
+  if (!senderId) return { status, error: 'trusted_sender_unavailable' };
+  return { status, userId: String(senderId), selectorLabel: String(senderName || '').trim() || undefined };
+}
+
+function agentIdFromSessionKey(sessionKey) {
+  return String(sessionKey || '').match(/^agent:([^:]+):/)?.[1] || '';
+}
+
+function readTaskReport(config, request) {
+  if (!config.taskTrackerDatabasePath || !config.taskTrackerConfigPath) {
+    throw new Error('task tracker paths are not configured');
+  }
+  const users = loadUsers(config.taskTrackerConfigPath);
+  const database = new Database(config.taskTrackerDatabasePath, { readonly: true, fileMustExist: true });
+  try {
+    return buildTaskReport(database, { ...request, users }).text;
+  } finally {
+    database.close();
+  }
+}
+
+export function createTaskListClaimHandler({ config, report = readTaskReport, logger = null } = {}) {
+  return async (event) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (!config.taskTrackerAgentIds.has(String(event.agentId || ''))) return undefined;
+    if (!config.taskTrackerAccountIds.has(String(event.accountId || ''))) return undefined;
+    const channelId = String(event.conversationId || '').replace(/^channel:/, '');
+    if (!config.taskTrackerChannelIds.has(channelId)) return undefined;
+
+    let users = {};
+    try {
+      users = loadUsers(config.taskTrackerConfigPath);
+    } catch (error) {
+      logger?.error?.(`resort-workflows Paloma user alias read failed: ${error.message}`);
+    }
+    const request = parseTaskListRequest(event.bodyForAgent, {
+      senderId: event.senderId,
+      senderName: event.senderName,
+      mentionedUserIds: event.mentionedUserIds,
+      users,
+    });
+    if (!request) return undefined;
+    if (request.error === 'trusted_sender_unavailable') {
+      return {
+        handled: true,
+        reply: { text: 'No pude identificar de forma segura quién pidió la lista de tareas. Menciona a la persona por nombre e inténtalo de nuevo.\n\n───\n\nI could not securely identify who requested the task list. Name the assignee and try again.' },
+      };
+    }
+    try {
+      return { handled: true, reply: { text: await report(config, request) } };
+    } catch (error) {
+      logger?.error?.(`resort-workflows Paloma task report failed: ${error.message}`);
+      return {
+        handled: true,
+        reply: { text: `No pude consultar la base de tareas de Paloma en este momento (${error.code || 'task_report_error'}). No generé una lista desde memoria. Inténtalo de nuevo.\n\n───\n\nI could not query Paloma's task database right now (${error.code || 'task_report_error'}). I did not generate a list from memory. Please try again.` },
+      };
+    }
+  };
+}
+
+export function createTaskListReplyDispatchHandler(options = {}) {
+  const claim = createTaskListClaimHandler(options);
+  const logger = options.logger || null;
+  return async (event, ctx) => {
+    if (event?.isTailDispatch) return undefined;
+    const inboundEvent = {
+      ...reservationClaimEventFromFinalizedContext(event?.ctx),
+      agentId: agentIdFromSessionKey(event?.sessionKey),
+    };
+    const result = await claim(inboundEvent);
+    if (!result?.handled) return undefined;
+
+    let queuedFinal = false;
+    if (!event.suppressUserDelivery && event.sendPolicy !== 'deny' && result.reply) {
+      try {
+        await ctx.onReplyStart?.();
+        queuedFinal = ctx.dispatcher.sendFinalReply(result.reply);
+      } catch (error) {
+        logger?.error?.(`resort-workflows deterministic Paloma task reply delivery failed: ${error.message}`);
+      }
+    }
+    ctx.recordProcessed?.('completed', { reason: 'paloma_task_reply_dispatch' });
+    ctx.markIdle?.('message_completed');
+    return {
+      handled: true,
+      queuedFinal,
+      counts: ctx.dispatcher.getQueuedCounts(),
+    };
   };
 }
 
@@ -1479,6 +1642,7 @@ const plugin = {
     });
     // OpenClaw 2026.5 invokes inbound_claim only for plugin-bound conversations.
     // reply_dispatch is the terminal pre-model hook for ordinary Slack channels.
+    api.on('reply_dispatch', createTaskListReplyDispatchHandler({ config, logger: api.logger }), { priority: 185, timeoutMs: 10_000 });
     api.on('reply_dispatch', createReservationReplyDispatchHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('reply_dispatch', createEmailReplyDispatchHandler({ config, logger: api.logger }), { priority: 195, timeoutMs: 70_000 });
     api.on('before_tool_call', createControlledChannelToolGuard({ config }), { priority: 50, timeoutMs: 5_000 });

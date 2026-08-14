@@ -145,6 +145,16 @@ function render({ policy, currentConfig, pluginIds = [] }) {
   const reservationsChannelIds = Object.entries(policy.channels || {})
     .filter(([, channel]) => channel.name === 'reservations')
     .map(([id]) => id);
+  const currentWorkflowConfig = currentConfig.plugins?.entries?.['resort-workflows']?.config || {};
+  const taskTrackerConfig = {};
+  for (const key of ['taskTrackerAgentIds', 'taskTrackerAccountIds', 'taskTrackerChannelIds']) {
+    if (Array.isArray(currentWorkflowConfig[key])) taskTrackerConfig[key] = currentWorkflowConfig[key];
+  }
+  for (const key of ['taskTrackerDatabasePath', 'taskTrackerConfigPath']) {
+    if (typeof currentWorkflowConfig[key] === 'string' && currentWorkflowConfig[key]) {
+      taskTrackerConfig[key] = currentWorkflowConfig[key];
+    }
+  }
   return {
     channels: {
       slack: {
@@ -182,6 +192,7 @@ function render({ policy, currentConfig, pluginIds = [] }) {
             ownerExpenseChannelIds,
             accountingChannelIds,
             controlledChannelIds: Object.keys(policy.channels || {}),
+            ...taskTrackerConfig,
             controlPlaneTokenEnv: 'RESORT_WORKFLOW_CONTROL_TOKEN',
             controlPlaneTokenFile: path.join(
               process.env.SOCIALSOL_SECRETS_DIR || path.join(ROOT, 'secrets'),

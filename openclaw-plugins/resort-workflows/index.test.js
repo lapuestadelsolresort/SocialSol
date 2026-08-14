@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   createAccountingStatementHandler,
   createControlledChannelToolGuard,
@@ -14,6 +17,8 @@ import {
   createReceiptConfirmClaimHandler,
   createReservationReadClaimHandler,
   createReservationReplyDispatchHandler,
+  createTaskListClaimHandler,
+  createTaskListReplyDispatchHandler,
   createReservationToolGuard,
   createReceiptHandler,
   createReceiptPaymentSourceInteractionHandler,
@@ -29,6 +34,7 @@ import {
   parseReceiptConfirmCommand,
   parseReceiptPaymentSourceAction,
   parseReservationReadRequest,
+  parseTaskListRequest,
   pluginConfig,
 } from './index.js';
 
@@ -841,6 +847,123 @@ test('reservation reply dispatch claims an ordinary Slack turn before the model 
   assert.equal(finalized.outcome, 'completed');
   assert.equal(finalized.details.reason, 'reservation_workflow_reply_dispatch');
   assert.equal(idleReason, 'message_completed');
+});
+
+test('task-list parser handles self, named, completed, and all-staff requests without claiming assignments', () => {
+  const users = { sergio: 'U-SERGIO', mayela: 'U-MAYELA' };
+  assert.deepEqual(parseTaskListRequest('¿Cuáles son mis tareas pendientes?', {
+    senderId: 'U-ASKER', senderName: 'Ana', users,
+  }), { status: 'active', userId: 'U-ASKER', selectorLabel: 'Ana' });
+  assert.deepEqual(parseTaskListRequest('What tasks does Sergio have?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest('¿Qué ha completado Sergio?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'completed', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.deepEqual(parseTaskListRequest('Show active tasks for everyone', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'active', all: true });
+  assert.deepEqual(parseTaskListRequest('Show my task history including completed', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'all', userId: 'U-ASKER', selectorLabel: undefined });
+  assert.deepEqual(parseTaskListRequest('¿Qué tengo que hacer?', {
+    senderId: 'U-ASKER', senderName: 'Ana', users,
+  }), { status: 'active', userId: 'U-ASKER', selectorLabel: 'Ana' });
+  assert.deepEqual(parseTaskListRequest('What does Sergio need to do?', {
+    senderId: 'U-ASKER', users,
+  }), { status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' });
+  assert.equal(parseTaskListRequest('Tarea para Sergio: pegar etiquetas en el intercomunicador.', {
+    senderId: 'U-ASKER', users,
+  }), null);
+});
+
+test('Paloma task claim is scoped to its configured agent, account, and joined channels', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'paloma-task-claim-'));
+  const configPath = path.join(directory, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify({ users: { sergio: 'U-SERGIO' } }));
+  const config = pluginConfig({
+    taskTrackerAgentIds: ['paloma'],
+    taskTrackerAccountIds: ['paloma-resort'],
+    taskTrackerChannelIds: ['C-MAINT'],
+    taskTrackerDatabasePath: path.join(directory, 'tasks.db'),
+    taskTrackerConfigPath: configPath,
+  });
+  const calls = [];
+  const claim = createTaskListClaimHandler({
+    config,
+    report: async (_config, request) => { calls.push(request); return 'REPORTE BILINGÜE EXACTO'; },
+  });
+  try {
+    assert.equal(await claim({
+      channel: 'slack', agentId: 'resort', accountId: 'paloma-resort',
+      conversationId: 'C-MAINT', senderId: 'U-MAYELA',
+      bodyForAgent: '¿Cuáles son las tareas de Sergio?',
+    }), undefined);
+    assert.equal(await claim({
+      channel: 'slack', agentId: 'paloma', accountId: 'other',
+      conversationId: 'C-MAINT', senderId: 'U-MAYELA',
+      bodyForAgent: '¿Cuáles son las tareas de Sergio?',
+    }), undefined);
+    const result = await claim({
+      channel: 'slack', agentId: 'paloma', accountId: 'paloma-resort',
+      conversationId: 'C-MAINT', senderId: 'U-MAYELA',
+      bodyForAgent: '¿Cuáles son las tareas de Sergio?',
+    });
+    assert.equal(result.handled, true);
+    assert.equal(result.reply.text, 'REPORTE BILINGÜE EXACTO');
+    assert.deepEqual(calls, [{ status: 'active', userId: 'U-SERGIO', selectorLabel: 'sergio' }]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Paloma task reply dispatch sends the deterministic report before the model runs', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'paloma-task-dispatch-'));
+  const configPath = path.join(directory, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify({ users: { sergio: 'U-SERGIO' } }));
+  const config = pluginConfig({
+    taskTrackerAgentIds: ['paloma'],
+    taskTrackerAccountIds: ['paloma-resort'],
+    taskTrackerChannelIds: ['C-MAINT'],
+    taskTrackerDatabasePath: path.join(directory, 'tasks.db'),
+    taskTrackerConfigPath: configPath,
+  });
+  const sent = [];
+  let finalized = null;
+  let idleReason = null;
+  const handler = createTaskListReplyDispatchHandler({
+    config,
+    report: async () => 'ESPAÑOL\n\n───\n\nENGLISH',
+  });
+  try {
+    const result = await handler({
+      sessionKey: 'agent:paloma:slack:channel:C-MAINT',
+      ctx: {
+        Provider: 'slack', Surface: 'slack', AccountId: 'paloma-resort',
+        OriginatingChannel: 'slack', OriginatingTo: 'channel:C-MAINT',
+        MessageSidFull: '1786566667.700001', SenderId: 'U-MAYELA', SenderName: 'Mayela',
+        BodyForCommands: 'What tasks does Sergio have?', CommandAuthorized: true,
+      },
+      inboundAudio: false, shouldRouteToOriginating: false,
+      shouldSendToolSummaries: true, sendPolicy: 'allow',
+    }, {
+      dispatcher: {
+        sendFinalReply(payload) { sent.push(payload); return true; },
+        getQueuedCounts() { return { tool: 0, block: 0, final: sent.length }; },
+      },
+      recordProcessed(outcome, details) { finalized = { outcome, details }; },
+      markIdle(reason) { idleReason = reason; },
+    });
+    assert.equal(result.handled, true);
+    assert.equal(result.queuedFinal, true);
+    assert.deepEqual(sent, [{ text: 'ESPAÑOL\n\n───\n\nENGLISH' }]);
+    assert.deepEqual(finalized, {
+      outcome: 'completed', details: { reason: 'paloma_task_reply_dispatch' },
+    });
+    assert.equal(idleReason, 'message_completed');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('reservations tool guard blocks shell bypass even when OpenClaw misses the channel allowlist', async () => {

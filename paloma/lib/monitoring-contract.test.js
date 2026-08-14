@@ -17,6 +17,8 @@ const {
   cronFailureAlertArgs,
   cronWriteArgs,
   planMonitoring,
+  taskTrackerConfigMatches,
+  taskTrackerPluginConfig,
 } = require('../../scripts/configure-paloma-monitoring');
 
 const groups = [
@@ -138,6 +140,31 @@ test('cutover plan targets the requested agent without replacing its Slack accou
   assert.equal(plan.monitorCron.delivery.to, 'channel:CPALOMA01');
   assert.equal(plan.cronChanged, true);
   assert.deepEqual(plan.missingCheckpointGuards, []);
+  assert.equal(plan.taskTrackerConfigChanged, true);
+  assert.deepEqual(plan.taskTrackerConfig, {
+    taskTrackerAgentIds: ['paloma'],
+    taskTrackerAccountIds: ['paloma-test'],
+    taskTrackerChannelIds: ['CJOINED01', 'CJOINED02'],
+    taskTrackerDatabasePath: '/tmp/socialsol/paloma/data/tasks.db',
+    taskTrackerConfigPath: '/tmp/socialsol/paloma/config.json',
+  });
   assert.equal(accountChannelPath('paloma-test', 'CJOINED02'),
     'channels.slack.accounts["paloma-test"].channels["CJOINED02"]');
+});
+
+test('task reply configuration is identity-driven and compares only its owned fields', () => {
+  const expected = taskTrackerPluginConfig({
+    root: '/srv/socialsol', configPath: '/runtime/paloma.json',
+    settings: { agentId: 'tracker-agent', accountId: 'tracker-account' },
+    joined: [{ id: 'C-TWO' }, { id: 'C-ONE' }],
+  });
+  assert.deepEqual(expected, {
+    taskTrackerAgentIds: ['tracker-agent'],
+    taskTrackerAccountIds: ['tracker-account'],
+    taskTrackerChannelIds: ['C-ONE', 'C-TWO'],
+    taskTrackerDatabasePath: '/srv/socialsol/paloma/data/tasks.db',
+    taskTrackerConfigPath: '/runtime/paloma.json',
+  });
+  assert.equal(taskTrackerConfigMatches({ ...expected, unrelated: true }, expected), true);
+  assert.equal(taskTrackerConfigMatches({ ...expected, taskTrackerAgentIds: ['other'] }, expected), false);
 });

@@ -22,7 +22,19 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
     },
     currentConfig: {
       channels: { slack: { accounts: { 'test-account': {} } } },
-      plugins: { entries: { slack: { enabled: true } }, load: { paths: ['/existing'] } },
+      plugins: {
+        entries: {
+          slack: { enabled: true },
+          'resort-workflows': { config: {
+            taskTrackerAgentIds: ['tracker-agent'],
+            taskTrackerAccountIds: ['tracker-account'],
+            taskTrackerChannelIds: ['C-MAINT'],
+            taskTrackerDatabasePath: '/srv/paloma/tasks.db',
+            taskTrackerConfigPath: '/srv/paloma/config.json',
+          } },
+        },
+        load: { paths: ['/existing'] },
+      },
     },
     pluginIds: ['slack'],
   });
@@ -40,6 +52,11 @@ test('OpenClaw renderer uses stable Slack IDs, allowlist routing, and workflow-o
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.receiptChannelIds, ['CRECEIPT1', 'COWNER1']);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.ownerExpenseChannelIds, ['COWNER1']);
   assert.deepEqual(patch.plugins.entries['resort-workflows'].config.accountingChannelIds, ['CACCT1']);
+  assert.deepEqual(patch.plugins.entries['resort-workflows'].config.taskTrackerAgentIds, ['tracker-agent']);
+  assert.deepEqual(patch.plugins.entries['resort-workflows'].config.taskTrackerAccountIds, ['tracker-account']);
+  assert.deepEqual(patch.plugins.entries['resort-workflows'].config.taskTrackerChannelIds, ['C-MAINT']);
+  assert.equal(patch.plugins.entries['resort-workflows'].config.taskTrackerDatabasePath, '/srv/paloma/tasks.db');
+  assert.equal(patch.plugins.entries['resort-workflows'].config.taskTrackerConfigPath, '/srv/paloma/config.json');
   assert.match(account.channels.CRECEIPT1.systemPrompt, /Every top-level expense post.*must be documented/);
   assert.match(account.channels.CRECEIPT1.systemPrompt, /Reembolso personal, Pagado con Kapital, or Ya reembolsado/);
   assert.match(account.channels.CRECEIPT1.systemPrompt, /No Kapital-safe LPDSR reference.*before that selection/);
