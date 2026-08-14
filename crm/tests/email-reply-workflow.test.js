@@ -309,6 +309,57 @@ test('Slack link markup becomes readable plain-text email content', () => {
   ].join('\n'));
 });
 
+test('confirmation normalizes Slack markup saved by a legacy proposal', async () => {
+  await withDb(async db => {
+    const proposed = await startGraph(db, proposeDefinition, {
+      idempotencyKey: 'slack:CPAULINA:legacy-markup:email.reply.propose',
+      triggerType: 'slack_email_reply_command', triggerRef: 'legacy-markup-propose',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: { threadTs: '1786549495.693669', message: 'Legacy placeholder' },
+    });
+    const legacyBody = [
+      'Watch <https://www.youtube.com/watch?v=LmQ4tUf1K9U|youtube.com/watch?v=…>',
+      'Call <tel:+18313458082|+1 831-345-8082>',
+    ].join('\n');
+    const deliveryBody = [
+      'Watch https://www.youtube.com/watch?v=LmQ4tUf1K9U',
+      'Call +1 831-345-8082',
+    ].join('\n');
+    await db.query(sql`UPDATE email_reply_proposals SET body_text=${legacyBody}
+      WHERE id=${proposed.output.proposalId}`);
+
+    const confirmed = await startGraph(db, confirmDefinition, {
+      idempotencyKey: 'slack:CPAULINA:legacy-markup:email.reply.confirm',
+      triggerType: 'slack_email_confirm_command', triggerRef: 'legacy-markup-confirm',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: {
+        proposalId: proposed.output.proposalId,
+        acceptanceHash: proposed.output.confirmationCommand.split(' ').at(-1),
+        threadTs: '1786549495.693669',
+      },
+    }, {
+      sendEmail: async input => {
+        assert.equal(input.body, deliveryBody);
+        return { id: 'gmail-out-legacy-markup', threadId: 'gmail-thread-1', labelIds: ['SENT'] };
+      },
+      readEmail: async id => ({
+        id, threadId: 'gmail-thread-1', labelIds: ['SENT'],
+        messageId: '<out-legacy-markup@example.com>', from: { address: 'sarah@example.com' },
+        to: 'Gretel <gretel@example.com>', subject: 'Re: A planner partnership',
+        text: deliveryBody, internalDate: '2026-08-13T04:30:00.000Z',
+        inReplyTo: '<reply-1@example.com>', references: '<original@example.com> <reply-1@example.com>',
+      }),
+    });
+    assert.equal(confirmed.status, 'completed', confirmed.error_message);
+    const [proposal] = await db.query(sql`SELECT body_text FROM email_reply_proposals
+      WHERE id=${proposed.output.proposalId}`);
+    assert.equal(proposal.body_text, deliveryBody);
+    const [projection] = await db.query(sql`SELECT body_text FROM email_threads
+      WHERE provider_message_id='gmail-out-legacy-markup'`);
+    assert.equal(projection.body_text, deliveryBody);
+  });
+});
+
 test('reply proposals use the original outreach subject instead of inbound mojibake', async () => {
   await withDb(async db => {
     await db.query(sql`UPDATE outreach_sends SET

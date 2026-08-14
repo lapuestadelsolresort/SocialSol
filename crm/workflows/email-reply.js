@@ -460,14 +460,16 @@ const confirmDefinition = {
         if (proposal.slack_channel_id !== run.channel_id) throw new Error('email confirmation came from the wrong Slack channel');
         if (proposal.slack_thread_ts !== String(input.threadTs || '')) throw new Error('email confirmation came from the wrong Slack thread');
         if (proposal.acceptance_hash !== String(input.acceptanceHash).toLowerCase()) throw new Error('email acceptance hash does not match');
+        const deliveryBody = emailBodyFromSlack(proposal.body_text);
         await db.query(sql`UPDATE email_reply_proposals SET status='confirmed', confirmed_by=${run.actor_user_id},
-          confirmation_run_id=${run.id}, confirmed_at=datetime('now'), updated_at=datetime('now')
+          body_text=${deliveryBody}, confirmation_run_id=${run.id},
+          confirmed_at=datetime('now'), updated_at=datetime('now')
           WHERE id=${proposal.id} AND status='pending'`);
         const [confirmed] = await db.query(sql`SELECT * FROM email_reply_proposals WHERE id=${proposal.id}`);
         if (confirmed.status !== 'confirmed' || confirmed.confirmation_run_id !== run.id) {
           throw new Error('email reply proposal was confirmed concurrently by another workflow');
         }
-        return proposal;
+        return { ...proposal, body_text: deliveryBody };
       },
     },
     {
