@@ -34,7 +34,7 @@ None. Open D-rows: D-004, D-006, D-007 (validator), D-009, D-010 (confirm), D-00
 **Exact next command** (start ritual, §8, real repo root):
 
 ```
-git -C /Users/jasonmini/.openclaw/SocialSol status
+git -C ~/.openclaw/SocialSol status
 ```
 
 then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §QC-2, and execute QC-2a. Deployed baseline remains `2983ed0` unless a newer deployment record says otherwise.

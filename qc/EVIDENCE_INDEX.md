@@ -73,3 +73,5 @@ Raw artifacts live in `~/qc-evidence/<CHECK-ID>/` (dir 700, files 600). Never co
 | E-QC1B-12 | abc7ddef24da229b27150cbe9ebf2c5d179a07986d0aa909ae2872b10474e6e6 | `QC1B/12-processes-fresh.txt` — daemon start times, newest deploy record, paloma tasks.db freshness |
 | E-QC1B-13 | 58d8b1e80ec2fd0880960c99b0025ef521bfcd33e286e57a2f341edf7becbd6c | `QC1B/13-release-vs-installer.txt` — production-release.js step list (no install step) + installer 3-label NAMES |
 | E-QC1B-14 | 66c9935a7536c4c3d8020b7d300187c94d6a98d237d92d1d0dd51fac0e0b8664 | `QC1B/14-paloma-rendered.txt` — rendered paloma trio programs/schedules |
+| E-QC1B-15 | 83b54992325b2f1d2593dc1597fd7b15e62194cfb337d68f510365e640eb98de | `QC1B/15-pr-preflight-diffstat.txt` — merge-base, diff stat, only-non-qc-file disposition (owner: include) |
+| E-QC1B-16 | 93fedb1ae1beb5c3e77c4d0bba9d7cfd51d997813e85fc6a1a574a3bcb8fa77a | `QC1B/16-pr-preflight-secrets.txt` — check:secrets before/after ~-path fix (1→0) + §4.1 diff sweep CLEAN |

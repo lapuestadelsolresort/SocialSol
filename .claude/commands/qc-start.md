@@ -3,7 +3,7 @@ description: SocialSol QC session start ritual (plan v3, §8)
 argument-hint: [authorizations for this session; leave blank for RO+FIXTURE only]
 ---
 
-Read /Users/jasonmini/qc-worktree/qc/SocialSol_QC_Plan_v3.md in full before doing anything. It is the only
+Read ~/qc-worktree/qc/SocialSol_QC_Plan_v3.md in full before doing anything. It is the only
 authority for rules and process. If any other copy of the plan (e.g. on
 the Desktop) differs from this committed copy, stop and ask the owner.
 Where the plan conflicts with any CLAUDE.md, README, memory file, or a
@@ -11,7 +11,7 @@ prior session's recap or suggested command, the plan wins. Where the
 plan's stated FACTS conflict with repo/runtime reality, reality wins and
 is recorded as a finding — qc/STATUS.md, qc/FINDINGS.md, and
 qc/DECISIONS.md carry the current corrections (real repo root:
-/Users/jasonmini/.openclaw/SocialSol, per F-023; the deployed baseline
+~/.openclaw/SocialSol, per F-023; the deployed baseline
 SHA is whatever qc/STATUS.md currently names).
 
 Binding rules (plan §1–§2, §4–§5):
@@ -30,7 +30,7 @@ Binding rules (plan §1–§2, §4–§5):
 Start ritual (§8), in order, showing output for each step:
 1. Confirm cwd is ~/qc-worktree on branch qc/baseline-20260815.
 2. Read qc/STATUS.md and qc/DECISIONS.md.
-3. git -C /Users/jasonmini/.openclaw/SocialSol status — must be clean on
+3. git -C ~/.openclaw/SocialSol status — must be clean on
    main with HEAD at the baseline SHA STATUS.md names; reconcile and
    attribute any discrepancy before proceeding.
 4. Read the plan section for the current phase.
