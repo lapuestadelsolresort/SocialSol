@@ -7,6 +7,18 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { ROOT, OPENCLAW_BIN } = require('../lib/runtime-paths');
 
+// Owner quarantine (F-020, qc/DECISIONS.md D-002, 2026-08-15): these workflows
+// must never be armed as live in a rendered production config.
+const QUARANTINED_LIVE_WORKFLOWS = ['meta.dm.reply'];
+
+function assertNoQuarantinedLiveWorkflows(patch) {
+  const live = patch?.plugins?.entries?.['resort-workflows']?.config?.liveWorkflowNames;
+  const armed = QUARANTINED_LIVE_WORKFLOWS.filter(name => Array.isArray(live) && live.includes(name));
+  if (armed.length > 0) {
+    throw new Error(`refusing quarantined live workflow(s): ${armed.join(', ')} (F-020)`);
+  }
+}
+
 function merge(left, right) {
   if (!right || typeof right !== 'object' || Array.isArray(right)) return right;
   const output = left && typeof left === 'object' && !Array.isArray(left) ? { ...left } : {};
@@ -29,6 +41,7 @@ function main() {
   if (patch.plugins?.entries?.['resort-workflows']?.config?.shadowMode !== true) {
     throw new Error('refusing validation because the rendered plugin is not in shadow mode');
   }
+  assertNoQuarantinedLiveWorkflows(patch);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'socialsol-openclaw-validate-'));
   const mergedPath = path.join(directory, 'openclaw.json');
   try {
@@ -48,4 +61,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { merge };
+module.exports = { QUARANTINED_LIVE_WORKFLOWS, assertNoQuarantinedLiveWorkflows, merge };
