@@ -30,20 +30,21 @@ Seeded from QC Plan v3 §11. D-001 and D-002 block QC-0 exit; D-011 blocks part 
 - Sarah email automation (the outbound email surface Paulina and Regina send through) — **authorized**; auto-send intended.
 - Squarespace commerce — **authorized**; intent is full integration with maximum read/write capability. Authority boundaries in QC-5 still apply: Squarespace never creates or edits OwnerRez bookings and never represents Airbnb/Vrbo payouts.
 - Meta DM path — **owner does not recognize this as a feature**; if QC-1 T7 finds any Meta DM send path, open F-020, quarantine, and stop for an owner decision.
+- **Meta DM disposition recorded 2026-08-15 (owner, after T7 evidence): QUARANTINE.** Intended state = disabled. Remove `meta.dm.reply` from `live_workflows` via the config/release path in a dedicated fix session and verify `!dm` receives the shadow-mode refusal. Inbound DM forwarding to Slack may remain. (F-020 closure path.)
 
 **Still open:** owner cash-flow command (read-model surface).
 
-## D-003 — Max plan tier and usable session length — OPEN
+## D-003 — Max plan tier and usable session length — RECORDED 2026-08-15
 
-Calibrates session sizing and phase splits (single vs double sessions).
+**Owner:** Max 20x; long sessions OK (2+ hours fine). Phases may run as single large sessions; the a/b splits remain available as fallbacks, and the ~70%-budget guardrail (§8) still applies.
 
 ## D-004 — Blackout windows — OPEN
 
 Live campaigns, warmup ramps, guest quiet hours; days/times when CANARY/OUTAGE/BUSINESS actions are forbidden.
 
-## D-005 — Reconciliation month for QC-4 — OPEN
+## D-005 — Reconciliation month for QC-4 — RECORDED 2026-08-15
 
-One complete closed period.
+**Owner:** July 2026 (most recent fully closed month).
 
 ## D-006 — Restore-drill and offsite-retrieval approval — OPEN
 
@@ -65,6 +66,6 @@ Proposed: P0 contained immediately with explicit authorization; P1 fixed in a de
 
 Boundary/no-leakage check only; content audited separately under privileged controls.
 
-## D-011 — Paulina email-reply confirmation semantics — OPEN (blocks part of QC-7a)
+## D-011 — Paulina email-reply confirmation semantics — RECORDED 2026-08-15
 
-15-minute same-thread (per one command doc) vs non-expiring same-channel (per reported implementation). Pick one; spec updated through the release path, then tested.
+**Owner:** Non-expiring, anywhere in channel — the current implementation is the intended behavior. The stale 15-minute/same-thread doc gets corrected through the release path; QC-7a then tests the ratified contract.
