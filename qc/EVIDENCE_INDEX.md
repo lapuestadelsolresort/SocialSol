@@ -75,3 +75,4 @@ Raw artifacts live in `~/qc-evidence/<CHECK-ID>/` (dir 700, files 600). Never co
 | E-QC1B-14 | 66c9935a7536c4c3d8020b7d300187c94d6a98d237d92d1d0dd51fac0e0b8664 | `QC1B/14-paloma-rendered.txt` — rendered paloma trio programs/schedules |
 | E-QC1B-15 | 83b54992325b2f1d2593dc1597fd7b15e62194cfb337d68f510365e640eb98de | `QC1B/15-pr-preflight-diffstat.txt` — merge-base, diff stat, only-non-qc-file disposition (owner: include) |
 | E-QC1B-16 | 93fedb1ae1beb5c3e77c4d0bba9d7cfd51d997813e85fc6a1a574a3bcb8fa77a | `QC1B/16-pr-preflight-secrets.txt` — check:secrets before/after ~-path fix (1→0) + §4.1 diff sweep CLEAN |
+| E-QC1B-17 | eaf99d92fa17126dec97962c43cccb8bc8404127c1280ce813aee30ff0f45902 | `QC1B/17-postmerge-ff.txt` — fetch, ff-ancestry proof, incoming-files docs-only check, ff output, clean status, empty code diff, deploy record |

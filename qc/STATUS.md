@@ -4,6 +4,8 @@ Updated: 2026-08-15 (PDT) — session 4 (QC-1b). **QC-1 phase COMPLETE.**
 
 Authorizations this session (owner, 2026-08-15, recorded verbatim in scope): session began blank (RO/FIXTURE only); mid-session the owner authorized (1) `gh pr create` for ONE docs-only PR `qc/baseline-20260815` → `main` covering the QC-0 + QC-1 qc/ commits — the combined PR is the approved remediation for the missed QC-0 boundary merge; from QC-2 on, one PR per phase boundary — and (2) after the owner merges it themselves, a docs-only fast-forward of the production checkout (no release:check/deploy per Amendment 3). Pre-flight required before PR create: commit artifacts; prove branch diff vs main touches only `qc/**` (stop and ask otherwise) with diff stat saved as evidence; run the repo secret scanner + §4.1 hygiene over the full PR diff.
 
+**Executed (QC1B-09/10, 2026-08-15):** pre-flight passed (one non-qc file `.claude/commands/qc-start.md` — owner: include; check:secrets 1→0 after ~-path fix; §4.1 sweep clean). Owner ran the push (harness blocks agent push); agent ran `gh pr create` → **PR #70**; CI `verify` pass; owner merged; agent ran the authorized docs-only ff: production `main` 2983ed0 → **`4b251ff85d82fba254e82acc9390180a1eec35af`**, clean tree, code diff vs 2983ed0 outside qc/+.claude EMPTY, newest deploy record still targets 2983ed0. **Deployed runtime SHA remains `2983ed0`** (deploy-record authority); `4b251ff` is docs-only over it.
+
 ## QC-0 — COMPLETE (see session-1 record; exit criteria met; baseline then d1a119e)
 
 ## QC-1a — COMPLETE: tripwire 7/7 CONFIRMED; F-020 quarantine verified-fixed (owner-authorized fix session); generated inventory at deployed 2983ed0 (`qc/INVENTORY.md`)
@@ -27,9 +29,7 @@ None. Open D-rows: D-004, D-006, D-007 (validator), D-009, D-010 (confirm), D-00
 
 ## Next
 
-**Immediate (this session, owner-authorized):** phase-boundary PR pre-flight → `gh pr create` (docs-only, QC-0+QC-1, remediation note for the missed QC-0 merge) → owner merges via `! gh pr merge <N>` → then docs-only ff of production checkout, confirm clean main, and record here that the deployed runtime SHA remains 2983ed0 (code diff vs 2983ed0 empty outside qc/).
-
-**Then: QC-2a — control plane, authorization, negative fixtures, durable boundary** (plan §QC-2 first split): stack check + `npm audit --omit=dev` + `git diff --check` + full test inventory in the worktree; registered-graph-only execution; trusted Slack identity binding; channel/restricted-user capabilities; negative FIXTURE tests (wrong user/channel, spoofed identity, prose, edited/replayed command, duplicate Slack event, reused idempotency key with changed input, unsupported method/URL/tool); durable-boundary verification (hashes, provider idempotency, worker-only execution, lease fencing, retry classes, serialized guest sends, outbox/dead-letter, manual review atomicity). Inputs from QC-1: F-024 policy invariant; secrets mode 644 file + stray .bak (QC-2 mode audit); shared-gateway identity isolation. All RO/FIXTURE unless a new authorization line says otherwise.
+**QC-2a — control plane, authorization, negative fixtures, durable boundary** (plan §QC-2 first split): stack check + `npm audit --omit=dev` + `git diff --check` + full test inventory in the worktree; registered-graph-only execution; trusted Slack identity binding; channel/restricted-user capabilities; negative FIXTURE tests (wrong user/channel, spoofed identity, prose, edited/replayed command, duplicate Slack event, reused idempotency key with changed input, unsupported method/URL/tool); durable-boundary verification (hashes, provider idempotency, worker-only execution, lease fencing, retry classes, serialized guest sends, outbox/dead-letter, manual review atomicity). Inputs from QC-1: F-024 policy invariant; secrets mode 644 file + stray .bak (QC-2 mode audit); shared-gateway identity isolation. All RO/FIXTURE unless a new authorization line says otherwise.
 
 **Exact next command** (start ritual, §8, real repo root):
 
@@ -37,4 +37,4 @@ None. Open D-rows: D-004, D-006, D-007 (validator), D-009, D-010 (confirm), D-00
 git -C ~/.openclaw/SocialSol status
 ```
 
-then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §QC-2, and execute QC-2a. Deployed baseline remains `2983ed0` unless a newer deployment record says otherwise.
+Expected: clean `main` @ `4b251ff` (docs-only over the runtime baseline). Then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §QC-2, and execute QC-2a. **Deployed runtime baseline remains `2983ed0`** (newest deploy record) unless a newer deployment record says otherwise; code at `4b251ff` is byte-identical outside qc/+.claude.
