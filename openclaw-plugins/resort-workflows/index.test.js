@@ -1581,6 +1581,23 @@ test('Meta DM command binds trusted Slack identity and remains command-only', as
   assert.match(result.reply.text, /Delivery\/read is not confirmed/);
 });
 
+test('Meta DM command is refused while meta.dm.reply is quarantined from live workflows', async () => {
+  const config = pluginConfig({
+    socialChannelIds: ['C-SOCIAL'], shadowMode: true,
+    liveWorkflowNames: ['whatsapp.reply', 'marketing.change.confirm'],
+  });
+  const calls = [];
+  const result = await createMetaDmClaimHandler({
+    config, execute: async (_config, request) => { calls.push(request); return {}; },
+  })({
+    channel: 'slack', conversationId: 'C-SOCIAL', messageId: '2000.2', senderId: 'U-JASON',
+    senderName: 'Jason', bodyForAgent: '!dm 42 Welcome',
+  }, {});
+  assert.equal(result.handled, true);
+  assert.equal(result.reply.text, 'Not sent. Meta DM replies are still in shadow mode.');
+  assert.equal(calls.length, 0);
+});
+
 test('paid-media confirmation binds trusted Slack identity and remains command-only', async () => {
   const proposalId = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
   const config = pluginConfig({

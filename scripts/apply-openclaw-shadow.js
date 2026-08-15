@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { ROOT, OPENCLAW_BIN } = require('../lib/runtime-paths');
-const { merge } = require('./validate-openclaw-shadow');
+const { assertNoQuarantinedLiveWorkflows, merge } = require('./validate-openclaw-shadow');
 
 function main() {
   if (!process.argv.includes('--confirm-shadow')) {
@@ -20,6 +20,7 @@ function main() {
   if (patch.plugins?.entries?.['resort-workflows']?.config?.shadowMode !== true) {
     throw new Error('patch is not in shadow mode');
   }
+  assertNoQuarantinedLiveWorkflows(patch);
   const next = merge(current, patch);
   const configDirectory = path.dirname(configPath);
   const backupDirectory = path.join(configDirectory, 'config-backups');
