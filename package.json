@@ -30,7 +30,7 @@
     "test:prospector": "node --test prospector/lib/*.test.js",
     "test:regina": "node --test regina/lib/*.test.js",
     "test:paloma": "node --test paloma/lib/*.test.js",
-    "test:openclaw-plugins": "node --test openclaw-plugins/*/*.test.js scripts/render-openclaw-workflow-policy.test.js scripts/configure-receipt-channel.test.js scripts/configure-receipt-payments.test.js scripts/configure-owner-expense-channel.test.js scripts/configure-social-autonomy.test.js scripts/cutover-social-autonomy.test.js scripts/configure-email-replies.test.js scripts/cutover-email-replies.test.js scripts/configure-sarah-email.test.js scripts/cutover-sarah-email.test.js scripts/reconcile-owner-expense-receipt.test.js",
+    "test:openclaw-plugins": "node --test openclaw-plugins/*/*.test.js scripts/render-openclaw-workflow-policy.test.js scripts/validate-openclaw-shadow.test.js scripts/configure-receipt-channel.test.js scripts/configure-receipt-payments.test.js scripts/configure-owner-expense-channel.test.js scripts/configure-social-autonomy.test.js scripts/cutover-social-autonomy.test.js scripts/configure-email-replies.test.js scripts/cutover-email-replies.test.js scripts/configure-sarah-email.test.js scripts/cutover-sarah-email.test.js scripts/reconcile-owner-expense-receipt.test.js",
     "test:automation": "PYTHONPATH=automation python3 -m unittest discover -s automation/tests -p 'test_*.py'",
     "test:accounting": "python3 -m unittest discover -s accounting -p 'test_*.py'",
     "test:evals": "node --test evals/*.test.js && node evals/run.js --responses evals/responses.fixture.json",
