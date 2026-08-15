@@ -1,0 +1,77 @@
+# Evidence index — evidence ID → SHA-256 of raw artifact + one-line redacted summary
+
+Raw artifacts live in `~/qc-evidence/<CHECK-ID>/` (dir 700, files 600). Never committed.
+
+| Evidence ID | SHA-256 | Summary |
+|---|---|---|
+| E-QC0-01 | 91a09e37d9f2172bc2eb653f3abe8ad6c8d9b02b8fdad9507fc70263e0683d5b | `QC0-01/start-ritual.txt` — git status of outer repo (dirty) + SocialSol repo (clean, main @ d1a119e) |
+| E-QC0-02 | fbc48a7afa5b27eea62b493fec3c531f5997ed5b68351ed84e8fe3e20e77a3ed | `QC0-02/sha-agreement.txt` — local HEAD == origin/main, remote URL |
+| E-QC0-03 | 781e89107700d14bf8dc87c086051dbc9c585f1bb7eb869406920052037debc4 | `QC0-03/ci-verify.txt` — gh run list: CI success on main @ d1a119e |
+| E-QC0-04 | 95ee66c48c71056c4ae909c5399b41bbd8c3e8cc311a25e4381c486654210a36 | `QC0-04/deployment-record.txt` — latest deployment record summary (completed @ d1a119e) |
+| E-QC0-04b | a018f2d009a994746da516bd205b1bd9012e333339c5332d0ab2e8ca5be5d994 | `QC0-04/latest-deployment-record.json` — full record copy (mode 600) |
+| E-QC0-05 | 39acc75b144d8e863035861c4508fd6e4cb76c44c491be34faca0a77b475f8f4 | `QC0-05/loaded-services.txt` — launchctl list + process source paths |
+| E-QC0-06 | 5a1471e54457eafcc0425816e23331442b535d58eede1714a86a60b8257c1340 | `QC0-06/policy-fingerprint.txt` — policy.json sha256/mode/mtime (no contents) |
+| E-QC0-07 | 41f021d94746bc5615e4995d5f7ccecb607f2afb6d69ab9d5cf86083a9c41da1 | `QC0-07/db-identity.txt` — plist env grep + lsof open DB files for crm/worker |
+| E-QC0-08a | 4284a9ff72daafbb8d5568829caefe85bc2f1224153c77f8e18bc940d9b938a0 | `QC0-08/tables.txt` — live DB table list (RO) |
+| E-QC0-08b | 03386feabf16846f957908eaeb5e5a44d861cbe445c6dbb4d778f7e024f80887 | `QC0-08/columns.txt` — column names for sweep tables |
+| E-QC0-08c | 71a850281b56836c2abc6bb0ecc0f8b0b25d13388c97547dbe1c2be94e1309cd | `QC0-08/stalled-runs.txt` — run status aggregates; 0 non-terminal |
+| E-QC0-09 | 2b175abb0f8b88682f3a44a1e83eff211deede04c90dd682afe23c72cc5aa994 | `QC0-09/outbox.txt` — failed-run recency + outbox aggregates; 0 dead |
+| E-QC0-10 | 16491af8e9d8795dadbc261427eecbc097be4210ea633be34684034e56746cba | `QC0-11/effects-reviews.txt` — effect status aggregates, deadline check, qbo.write trace |
+| E-QC0-11 | 6a993f7fa671c733248f1bd662c17cb645f590c02c6a44389a630cc24872e15e | `QC0-11/manual-review-effects.txt` — manual_review/failed effects ↔ resolved review rows |
+| E-QC0-12 | d796c54eb69343c993ae30d01bb91147f5ead24bf31f887ca1864f6f9d3e02dd | `QC0-12/meta-spend.txt` — budget_ledger empty; registry active=7; Meta effects 30d; 0 change requests |
+| E-QC0-13 | fc1dce480cccd4a08fc3c9e61b279c7e16b241bf11399c421429b75a6a1236aa | `QC0-13/outreach-due.txt` — outreach status aggregates; 0 due-now |
+| E-QC0-14 | dd619f252b1605ce8635fef20133e66ed110f427381f2c6403268c7a6799d163 | `QC0-14/qbo-failures.txt` — quickbooks effects 14d all verified; 0 failed lifetime; reconciliations matched |
+| E-QC0-15 | 78ac91aecf7f7631218c78b7b2e6dd6093c805d4872642bfea5956a9da0861a6 | `QC0-15/repo-conventions.txt` — CI workflow, npm scripts, secret scanner, repo layout |
+| E-QC1-T1 | e962054f159ee9ce74b57812e39de3777ce2d5313358314fa8c17170f021759c | `QC1-T1/registry.txt` — workflows dir listing, registry structure, 53-name count |
+| E-QC1-T2 | 780e2bcaa6d71a786fcfa65d795880acd76489de75d2307eabbaf32f0d3fc859 | `QC1-T2/migrations.txt` — migrations 001–020 + schema-builder files |
+| E-QC1-T3 | 01d4fbf031dadd84095491fec398814e24aef19fc414ac46c56a07b19e9a1f19 | `QC1-T3/db-path-contract.txt` — DB_PATH/CRM_DB_PATH code lines, plist env keys, inode agreement |
+| E-QC1-T4 | 15f8c833c24424efeecdbcacd5f12838b1c6434d089e14d538ad68d5ea5b5df9 | `QC1-T4/failing-jobs.txt` — launchctl print last-exit for 3 failing jobs + watchdog; watchdog EXPECTED set |
+| E-QC1-T5 | d9a02d34472496ee9fda8b6563da107c388a576fae98d7dac4e69f0a485f4c99 | `QC1-T5/paulina-gate.txt` — email_status gate hits; realness_score zero hits |
+| E-QC1-T7a | 27dc9c84c2fcb10434cea665c09f971bbc47d5b92b375105c9f74fbd1fcef522 | `QC1-T7/meta-dm.txt` — `!dm` handler + Meta DM adapter grep results |
+| E-QC1-T7b | e1b0d19e777c76eb2b5d97c2a475d169afe5d7d226887957d6ff34fd6d9531f3 | `QC1-T7/dm-activity.txt` — 0 meta.dm runs; meta effects; meta_messages aggregates |
+| E-QC1-T7c | 6a3e93a54a13d3188df6db8028f1c0eb7e64057ae04bf3cd23042017b1f83789 | `QC1-T7/dm-send-provenance.txt` — outbound rows all whatsapp; cutover commit 4cad390; Graph v21.0 endpoint |
+| E-QC1-T7d | 702fcfaa74a952447dcfc6750a3b1a21493c0d4abde17afc0f95d8cc6bfe99e7 | `QC1-T7/policy-shadow-state.txt` — policy.json shadow_mode true + live_workflows incl. meta.dm.reply (33 entries) |
+| E-QC1-T7e | fef9ba7b5b333a91997364a089d306f41fb93b60a3c2b300d02583a26b17b15f | `QC1-T7/loaded-gateway-config.txt` — loaded openclaw.json plugin config matches policy; gateway/config freshness |
+| E-F020-01 | 316d2d369f4172635565a253cdc57b1099805501b76248bdc668132e0259c5b4 | `F020-FIX/check-stack-worktree.log` — full check:stack in fix worktree @ ac06896, exit 0, 591 passes |
+| E-F020-02 | 8913213d02b831c99cb66125c214f65d78bd59e336d14d6bf47d73d4d5e83d4d | `F020-FIX/release-check.log` — release:check exit 0 at merged main |
+| E-F020-03 | b0e4f56de6b1f263328ccd14e52027f0ea698e65c31ba0ea6f7cc9efddf45cfe | `F020-FIX/release-deploy.log` — release:deploy exit 0, record 2026-08-15T21-39-17Z @ 2983ed0, 9/9 steps completed |
+| E-F020-04 | 95138587c535b170d78386ff4c3924fee8df63e7769d429d5187c0755e5c04e9 | `F020-FIX/policy.json.pre-quarantine` — pre-change runtime policy copy (hash equals QC0-06 fingerprint) |
+| E-F020-05 | 901fa4e51fbc3f5d62c31863872e7c8d9285210fd6ec1213590f8c0a4f662fb2 | `F020-FIX/validate-armed-refusal.log` — validate:openclaw-shadow exit 1 on still-armed patch: "refusing quarantined live workflow(s): meta.dm.reply (F-020)" |
+| E-F020-06 | 059b499338234fef27355e805415a4ce4af85b2238e87bfab10b2df9fb0615f7 | `F020-FIX/validate-quarantined-pass.log` — validate exit 0 on quarantined patch (plugins inspect + doctor clean) |
+| E-F020-07 | 85d39182b524f52841972949de0746ec5c55ad53365ff3e8a1891ad961cb1324 | `F020-FIX/apply-shadow.log` — apply exit 0; openclaw.json written with backup config-backups/openclaw.pre-socialsol-shadow.2026-08-15T21-41-55Z |
+| E-QC1INV-01 | 95a23327f224dddd30a4ddd02c8df55a27333ce4c44fa908a13297d4b4315dd3 | `QC1-INV/01-registry-definitions.json` — listDefinitions() dump: 53 workflows w/ capability, mutates, autonomous, triggers, step effect classes |
+| E-QC1INV-02 | 32c2bdfe1edefe48c9c8ad4016411d5e440c04bc7bf1ea20e24727d4b48b761f | `QC1-INV/02-policy.json` — byte copy of runtime workflow/policy.json (hash == live fingerprint; contains channel IDs, never committed) |
+| E-QC1INV-03 | 5859bca7a5580ff03c5b5ada1fa5aceac02bb81e2ccfe5715de8a0a01a7ddef4 | `QC1-INV/03-registry-policy-sets.txt` — registry↔policy set differences; live⊆registry; email.message.observe drift |
+| E-QC1INV-04 | 604b1e9e951b6ce5f966718b6369e678d6830a69c7549ec47049ab812693c108 | `QC1-INV/04-routes.txt` — generated route/mount inventory of crm/server.js + 10 routers (111 lines) |
+| E-QC1INV-05 | ba4d67b8b41ebc5c5e3e7b91cdb5ae8094c02ab4f2ef630b8b9a678f07cf7d3c | `QC1-INV/05-external-hosts.txt` — per-file external HTTPS host extraction (provider endpoint map) |
+| E-QC1INV-06 | a9f5602b975cdab2cbe52b52f55ef8c303a4e385b1897dcf5e05b743c8959e6e | `QC1-INV/06-npm-scripts.txt` — all 49 package.json scripts with exact command lines |
+| E-QC1INV-07 | f462189e64cdd899b0acdf544d808bf106aee1aec77e71e11e935b77271f29ee | `QC1-INV/07-cli-entrypoints.txt` — per-directory CLI entrypoint listing (~150 files across 9 dirs) |
+| E-QC1INV-08 | 3c988f503df70f6d4b3af2881fb08620f806151cf1df23c1246604d5214e4234 | `QC1-INV/08-render-stdout.txt` — fresh render of 50 templates to evidence dir (exit 0); templates list `0339b366…`; per-plist hashes in 08b `c3434808…` |
+| E-QC1INV-09 | 3f8cb4466800f514161924300dc286613eb005a96eb5e22999acd16a1ac4771e | `QC1-INV/09-installed-plists.txt` — ~/Library/LaunchAgents listing (49 resort + 2 .disabled + socialsol-backups/) |
+| E-QC1INV-10 | ef69491c6ceb50619f3db6a766b7c4b923fafb9f465c6e7d1e64a96a92cf204e | `QC1-INV/10-launchctl-list.txt` — loaded jobs w/ pid + last exit (43 resort + gateway) |
+| E-QC1INV-11 | c433535e93f664bd478265ece5923363fe14162a2b23f6b92f0e7150f3fed473 | `QC1-INV/11-schedule-table.tsv` — plistlib-generated label/schedule/RunAtLoad/program table from installed plists |
+| E-QC1INV-12 | 08398bbeefc3ed7734eb531e14d458eec7ef3e9efea16f2f2ea3bbebddd36753 | `QC1-INV/12-processes.txt` — process snapshot w/ start times (server/worker/gateway/chroma/tunnels) |
+| E-QC1INV-13 | e55f5bb683b9b4ebb6f47fadfd723d6b60c08f0c33670d0a0a8fd4cb50fcadfe | `QC1-INV/13-databases.txt` — all *.db under production root (excl. worktrees) + WAL/SHM state |
+| E-QC1INV-14 | 01074aa1739bd97878374ad1f6bece118a3ef06fce03760592f1551a14751ecc | `QC1-INV/14-chroma-collections.txt` — loopback API collection list (contacts, media_corpus, sarah_voice_corpus) |
+| E-QC1INV-15 | 89317d1c43ea4732f853c7de2fef20d1d04ec73b297282b6eae73638c8d078be | `QC1-INV/15-slack-commands.txt` — bang-token sweep of resort-workflows plugin (parser locations cited in INVENTORY §4) |
+| E-QC1INV-16 | 48d05bb17f7884e0437c287754a9b061062a99df98af82e1f0f6d3367d5fdd73 | `QC1-INV/16-runtime-configs.txt` — runtime config fingerprints (mode/size/sha16); campaigns/registry.json absent |
+| E-QC1INV-17 | 0429e5b2abd1ee27a99f1536ec495531b195c3e1f22045680518cf58db134f4f | `QC1-INV/17-secrets-locations.txt` — secrets/ names+modes only (26 files; one 644 flag) |
+| E-QC1INV-18 | a5f083dd46d1c889cc7206f58f91484f795a35319bda4173009bd555f0fca88b | `QC1-INV/18-healthcheck-wiring.txt` — scripts wiring healthcheck pings (17) |
+| E-QC1INV-19 | bdfda01c4429de391ab530e0d48b314f2dee8a1e1941777335686880a134eeb3 | `QC1-INV/19-installed-not-loaded.txt` — 6 dormant legacy producers + 2 .plist.disabled remnants |
+| E-QC1B-01 | 0531fe93e7a9d0534308321db0c5003393b99ab424ecc3c97f2e4a3b761cf7e4 | `QC1B/01-launchctl-list-fresh.txt` — fresh launchctl list, 44 jobs, last exits (F-015 trio = 1; crm = −15) |
+| E-QC1B-02 | 22524e78777b719a7a55bb46b2ed10951c59e27ad30c6a0b24a50ab869a972f5 | `QC1B/02-installed-ls-fresh.txt` — full ~/Library/LaunchAgents listing incl. co-tenants + 2 outer-repo symlinks |
+| E-QC1B-03 | 058fd27044bee9261203c38dd108868107761d5d21d80bc9089ff2ea0bac3b2f | `QC1B/03-launchctl-print-all.txt` — launchctl print per loaded job (state, program, args, last exit) |
+| E-QC1B-04 | 4769682d501463d438642edb0dc820073546f45c22f081907e58c80be9a97c92 | `QC1B/04-media-symlink-plists.txt` — symlinked media plists: definitions in outer workspace-resort, scripts nested-repo |
+| E-QC1B-05 | ee830d3a8cb2c54cbff318a7d6e5584c8b4351b5a2b81d58a86721ba51466885 | `QC1B/05-set-diff-summary.txt` — 4-way label set diff, every delta named |
+| E-QC1B-05b | d4289ed37ca25d85bd27e3004907b46211523c38aa90d0876a5146059ecbc802 | `QC1B/05b-set-hashes.txt` — SHA-256 of the six raw layer label lists (set-*.txt) |
+| E-QC1B-06 | 4364d30800aad7ba17044ce9b7d5b83792e31f22c4b292fba63adbe2b8a201ab | `QC1B/06-content-diff.txt` — byte diff generated vs installed per label: 39 identical, 8 differ (full diffs; raw channel IDs stay here) |
+| E-QC1B-07 | d477bb0403b575c21217b4c06a17cb918ee7bd61b2d3b1f848ac4c598ca3baa3 | `QC1B/07-f016a-plists.txt` — kapital-tests + qbo-keepalive plists (no template; /tmp logs; birth 2026-08-06/07) |
+| E-QC1B-08 | f1aff9eee33cd884c6e40a76711cb558abe71ae48e26d0e0a529a7640f80e25d | `QC1B/08-service-manifest.tsv` — raw generated manifest, 55 rows incl. env values (channel IDs; committed copy is sanitized) |
+| E-QC1B-09 | cadb1d7e89fd06535be681eea2e3e84c8d4eb1700e8aeb3bd9c0861a8a184ec7 | `QC1B/09-f015-log-tails.txt` — failure log tails: require-path error, 3 cold-start tracker failures, MEDIA_SHOOT_SLUG error |
+| E-QC1B-10 | c285edee680b5ef029dc3cb16a8cb66761eee6dee113335c315acef8c25a8ba4 | `QC1B/10-watchdog-cutover.txt` — watchdog EXPECTED 8-slug dict + CUTOVER §3 replacement table |
+| E-QC1B-11 | 693b8bed50748b1e3e47248b9e15cf8359081dc8ff7e99c003cafd130e36e8fe | `QC1B/11-email-observe-drift.txt` — policy jq membership checks + registry definition excerpt (F-024) |
+| E-QC1B-12 | abc7ddef24da229b27150cbe9ebf2c5d179a07986d0aa909ae2872b10474e6e6 | `QC1B/12-processes-fresh.txt` — daemon start times, newest deploy record, paloma tasks.db freshness |
+| E-QC1B-13 | 58d8b1e80ec2fd0880960c99b0025ef521bfcd33e286e57a2f341edf7becbd6c | `QC1B/13-release-vs-installer.txt` — production-release.js step list (no install step) + installer 3-label NAMES |
+| E-QC1B-14 | 66c9935a7536c4c3d8020b7d300187c94d6a98d237d92d1d0dd51fac0e0b8664 | `QC1B/14-paloma-rendered.txt` — rendered paloma trio programs/schedules |
+| E-QC1B-15 | 83b54992325b2f1d2593dc1597fd7b15e62194cfb337d68f510365e640eb98de | `QC1B/15-pr-preflight-diffstat.txt` — merge-base, diff stat, only-non-qc-file disposition (owner: include) |
+| E-QC1B-16 | 93fedb1ae1beb5c3e77c4d0bba9d7cfd51d997813e85fc6a1a574a3bcb8fa77a | `QC1B/16-pr-preflight-secrets.txt` — check:secrets before/after ~-path fix (1→0) + §4.1 diff sweep CLEAN |
