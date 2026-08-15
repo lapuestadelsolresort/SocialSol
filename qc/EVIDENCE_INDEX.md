@@ -22,3 +22,13 @@ Raw artifacts live in `~/qc-evidence/<CHECK-ID>/` (dir 700, files 600). Never co
 | E-QC0-13 | fc1dce480cccd4a08fc3c9e61b279c7e16b241bf11399c421429b75a6a1236aa | `QC0-13/outreach-due.txt` — outreach status aggregates; 0 due-now |
 | E-QC0-14 | dd619f252b1605ce8635fef20133e66ed110f427381f2c6403268c7a6799d163 | `QC0-14/qbo-failures.txt` — quickbooks effects 14d all verified; 0 failed lifetime; reconciliations matched |
 | E-QC0-15 | 78ac91aecf7f7631218c78b7b2e6dd6093c805d4872642bfea5956a9da0861a6 | `QC0-15/repo-conventions.txt` — CI workflow, npm scripts, secret scanner, repo layout |
+| E-QC1-T1 | e962054f159ee9ce74b57812e39de3777ce2d5313358314fa8c17170f021759c | `QC1-T1/registry.txt` — workflows dir listing, registry structure, 53-name count |
+| E-QC1-T2 | 780e2bcaa6d71a786fcfa65d795880acd76489de75d2307eabbaf32f0d3fc859 | `QC1-T2/migrations.txt` — migrations 001–020 + schema-builder files |
+| E-QC1-T3 | 01d4fbf031dadd84095491fec398814e24aef19fc414ac46c56a07b19e9a1f19 | `QC1-T3/db-path-contract.txt` — DB_PATH/CRM_DB_PATH code lines, plist env keys, inode agreement |
+| E-QC1-T4 | 15f8c833c24424efeecdbcacd5f12838b1c6434d089e14d538ad68d5ea5b5df9 | `QC1-T4/failing-jobs.txt` — launchctl print last-exit for 3 failing jobs + watchdog; watchdog EXPECTED set |
+| E-QC1-T5 | d9a02d34472496ee9fda8b6563da107c388a576fae98d7dac4e69f0a485f4c99 | `QC1-T5/paulina-gate.txt` — email_status gate hits; realness_score zero hits |
+| E-QC1-T7a | 27dc9c84c2fcb10434cea665c09f971bbc47d5b92b375105c9f74fbd1fcef522 | `QC1-T7/meta-dm.txt` — `!dm` handler + Meta DM adapter grep results |
+| E-QC1-T7b | e1b0d19e777c76eb2b5d97c2a475d169afe5d7d226887957d6ff34fd6d9531f3 | `QC1-T7/dm-activity.txt` — 0 meta.dm runs; meta effects; meta_messages aggregates |
+| E-QC1-T7c | 6a3e93a54a13d3188df6db8028f1c0eb7e64057ae04bf3cd23042017b1f83789 | `QC1-T7/dm-send-provenance.txt` — outbound rows all whatsapp; cutover commit 4cad390; Graph v21.0 endpoint |
+| E-QC1-T7d | 702fcfaa74a952447dcfc6750a3b1a21493c0d4abde17afc0f95d8cc6bfe99e7 | `QC1-T7/policy-shadow-state.txt` — policy.json shadow_mode true + live_workflows incl. meta.dm.reply (33 entries) |
+| E-QC1-T7e | fef9ba7b5b333a91997364a089d306f41fb93b60a3c2b300d02583a26b17b15f | `QC1-T7/loaded-gateway-config.txt` — loaded openclaw.json plugin config matches policy; gateway/config freshness |

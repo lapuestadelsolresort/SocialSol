@@ -15,11 +15,11 @@ Seeded from QC Plan v3 §10. Validate with current evidence before assigning inc
 | F-011 | Slack helper consolidation incomplete | Re-derive current callers; severity depends on outbox/readback bypass vs formatting duplication (QC-2/7) |
 | F-012 | VIP/feedback campaigns inert | Product/backlog decision unless an enabled requirement exists; not a baseline blocker (QC-7) |
 | F-013 | Single-machine SPOF | P2 operational risk; closes only with defined off-host recovery + RPO/RTO, not a reboot (QC-3/10) |
-| F-015 | Nonzero last exits on daily-tests / tracker-liveness / media-rescan; watchdog blind | Validate in QC-1 T4; expected P1 service-manifest finding. 2026-08-15 pre-signal: `launchctl list` shows last exit 1 for all three (E-QC0-05) |
+| F-015 | Nonzero last exits on daily-tests / tracker-liveness / media-rescan; watchdog blind | **VALIDATED 2026-08-15 (QC-1 T4) → moved to FINDINGS.md as P1** |
 | F-016 | Accounting test/keepalive jobs outside canonical template set; committed Paloma services not installed | Validate in QC-1; service-manifest convergence |
 | F-017 | Daily runner can hide test/build/Slack-post failure and is not the full stack | QC-2/3 |
 | F-018 | Backup path may diverge from CRM path; offsite retrieval untested; non-CRM state (Paloma tasks.db, policy, registry) lacks demonstrated coverage | QC-3 |
 | F-019 | Tracker liveness tests the endpoint, not deployed page JS; cold-start can misread ad creation as delivery | QC-6 |
-| F-020 | (Conditional) Any transport the owner did not knowingly authorize. Active candidate: Meta DM send path — owner does not recognize it (2026-08-15); opens if QC-1 T7 finds one | Opened on any "no"/"unknown" in D-002 confirmed against inventory; quarantine per QC-8 |
+| F-020 | (Conditional) Any transport the owner did not knowingly authorize. Active candidate: Meta DM send path — owner does not recognize it (2026-08-15); opens if QC-1 T7 finds one | **OPENED 2026-08-15 (QC-1 T7 found a live-armed path) → moved to FINDINGS.md as P1; owner decision pending** |
 | F-021 | Private runtime overlays contain stale paths / mutation guidance; terminal tool guard is a compensating control, not a resolution | QC-2; fix via private-runtime change path |
 | F-022 | Recent fixes (accounting, OwnerRez retry, WhatsApp status, email confirmation, Paloma query, redaction, deployment integrity) lack regression rows | Mandatory regression rows in their phases |
