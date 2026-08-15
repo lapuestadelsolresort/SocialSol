@@ -58,3 +58,18 @@ Raw artifacts live in `~/qc-evidence/<CHECK-ID>/` (dir 700, files 600). Never co
 | E-QC1INV-17 | 0429e5b2abd1ee27a99f1536ec495531b195c3e1f22045680518cf58db134f4f | `QC1-INV/17-secrets-locations.txt` — secrets/ names+modes only (26 files; one 644 flag) |
 | E-QC1INV-18 | a5f083dd46d1c889cc7206f58f91484f795a35319bda4173009bd555f0fca88b | `QC1-INV/18-healthcheck-wiring.txt` — scripts wiring healthcheck pings (17) |
 | E-QC1INV-19 | bdfda01c4429de391ab530e0d48b314f2dee8a1e1941777335686880a134eeb3 | `QC1-INV/19-installed-not-loaded.txt` — 6 dormant legacy producers + 2 .plist.disabled remnants |
+| E-QC1B-01 | 0531fe93e7a9d0534308321db0c5003393b99ab424ecc3c97f2e4a3b761cf7e4 | `QC1B/01-launchctl-list-fresh.txt` — fresh launchctl list, 44 jobs, last exits (F-015 trio = 1; crm = −15) |
+| E-QC1B-02 | 22524e78777b719a7a55bb46b2ed10951c59e27ad30c6a0b24a50ab869a972f5 | `QC1B/02-installed-ls-fresh.txt` — full ~/Library/LaunchAgents listing incl. co-tenants + 2 outer-repo symlinks |
+| E-QC1B-03 | 058fd27044bee9261203c38dd108868107761d5d21d80bc9089ff2ea0bac3b2f | `QC1B/03-launchctl-print-all.txt` — launchctl print per loaded job (state, program, args, last exit) |
+| E-QC1B-04 | 4769682d501463d438642edb0dc820073546f45c22f081907e58c80be9a97c92 | `QC1B/04-media-symlink-plists.txt` — symlinked media plists: definitions in outer workspace-resort, scripts nested-repo |
+| E-QC1B-05 | ee830d3a8cb2c54cbff318a7d6e5584c8b4351b5a2b81d58a86721ba51466885 | `QC1B/05-set-diff-summary.txt` — 4-way label set diff, every delta named |
+| E-QC1B-05b | d4289ed37ca25d85bd27e3004907b46211523c38aa90d0876a5146059ecbc802 | `QC1B/05b-set-hashes.txt` — SHA-256 of the six raw layer label lists (set-*.txt) |
+| E-QC1B-06 | 4364d30800aad7ba17044ce9b7d5b83792e31f22c4b292fba63adbe2b8a201ab | `QC1B/06-content-diff.txt` — byte diff generated vs installed per label: 39 identical, 8 differ (full diffs; raw channel IDs stay here) |
+| E-QC1B-07 | d477bb0403b575c21217b4c06a17cb918ee7bd61b2d3b1f848ac4c598ca3baa3 | `QC1B/07-f016a-plists.txt` — kapital-tests + qbo-keepalive plists (no template; /tmp logs; birth 2026-08-06/07) |
+| E-QC1B-08 | f1aff9eee33cd884c6e40a76711cb558abe71ae48e26d0e0a529a7640f80e25d | `QC1B/08-service-manifest.tsv` — raw generated manifest, 55 rows incl. env values (channel IDs; committed copy is sanitized) |
+| E-QC1B-09 | cadb1d7e89fd06535be681eea2e3e84c8d4eb1700e8aeb3bd9c0861a8a184ec7 | `QC1B/09-f015-log-tails.txt` — failure log tails: require-path error, 3 cold-start tracker failures, MEDIA_SHOOT_SLUG error |
+| E-QC1B-10 | c285edee680b5ef029dc3cb16a8cb66761eee6dee113335c315acef8c25a8ba4 | `QC1B/10-watchdog-cutover.txt` — watchdog EXPECTED 8-slug dict + CUTOVER §3 replacement table |
+| E-QC1B-11 | 693b8bed50748b1e3e47248b9e15cf8359081dc8ff7e99c003cafd130e36e8fe | `QC1B/11-email-observe-drift.txt` — policy jq membership checks + registry definition excerpt (F-024) |
+| E-QC1B-12 | abc7ddef24da229b27150cbe9ebf2c5d179a07986d0aa909ae2872b10474e6e6 | `QC1B/12-processes-fresh.txt` — daemon start times, newest deploy record, paloma tasks.db freshness |
+| E-QC1B-13 | 58d8b1e80ec2fd0880960c99b0025ef521bfcd33e286e57a2f341edf7becbd6c | `QC1B/13-release-vs-installer.txt` — production-release.js step list (no install step) + installer 3-label NAMES |
+| E-QC1B-14 | 66c9935a7536c4c3d8020b7d300187c94d6a98d237d92d1d0dd51fac0e0b8664 | `QC1B/14-paloma-rendered.txt` — rendered paloma trio programs/schedules |

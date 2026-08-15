@@ -1,63 +1,40 @@
 # QC status
 
-Updated: 2026-08-15 (PDT) — session 3 (QC-1a generated inventory).
+Updated: 2026-08-15 (PDT) — session 4 (QC-1b). **QC-1 phase COMPLETE.**
 
-## QC-0 — COMPLETE
+Authorizations this session (owner, 2026-08-15, recorded verbatim in scope): session began blank (RO/FIXTURE only); mid-session the owner authorized (1) `gh pr create` for ONE docs-only PR `qc/baseline-20260815` → `main` covering the QC-0 + QC-1 qc/ commits — the combined PR is the approved remediation for the missed QC-0 boundary merge; from QC-2 on, one PR per phase boundary — and (2) after the owner merges it themselves, a docs-only fast-forward of the production checkout (no release:check/deploy per Amendment 3). Pre-flight required before PR create: commit artifacts; prove branch diff vs main touches only `qc/**` (stop and ask otherwise) with diff stat saved as evidence; run the repo secret scanner + §4.1 hygiene over the full PR diff.
 
-Exit criteria: **met.**
+## QC-0 — COMPLETE (see session-1 record; exit criteria met; baseline then d1a119e)
 
-- No uncontained P0: harm sweep (QC0-08…QC0-14) found zero stalled runs, zero dead outbox rows, zero overdue effects, zero unresolved manual reviews, no unknown spend-affecting Meta mutations in the durable plane, zero due-outreach backlog, zero failing financial writers.
-- D-001/D-002: owner answers of 2026-08-15 recorded in `DECISIONS.md` (remaining open sub-rows listed there; they gate QC-7/QC-6, not QC-0).
-- Baseline recorded: production = `~/.openclaw/SocialSol`, clean `main`; QC-0 baseline SHA `d1a119e579dc4f072dffb6483e701ec01cb1c8f6`; CI `verify` success @ that SHA (2026-08-14T23:43Z); deployment record completed @ that SHA (23:44Z, all steps green).
-- qc/ skeleton committed on `qc/baseline-20260815`.
-- New finding: F-023 (P2) — nested dirty outer repo `~/.openclaw` (which is the OpenClaw agent home); see FINDINGS.md.
+## QC-1a — COMPLETE: tripwire 7/7 CONFIRMED; F-020 quarantine verified-fixed (owner-authorized fix session); generated inventory at deployed 2983ed0 (`qc/INVENTORY.md`)
 
-## QC-1a tripwire — COMPLETE. Scorecard: 7/7 CONFIRMED
+Deployed baseline SHA since the F-020 fix: **`2983ed00646611a6a2b59d294af71ce49e08ad3a`** (deploy record 2026-08-15T21:39Z, 9/9 steps).
 
-| # | Claim under test | Verdict | Key evidence |
-|---|---|---|---|
-| T1 | `crm/workflows/registry.js`, ~53 definitions | CONFIRMED (exactly 53) | E-QC1-T1 |
-| T2 | Migrations through 020 + runtime schema builders | CONFIRMED | E-QC1-T2 |
-| T3 | `DB_PATH` vs `CRM_DB_PATH` split | CONFIRMED (single inode in practice) | E-QC1-T3 |
-| T4 | daily-tests / tracker-liveness / media-rescan exit 1; watchdog blind | CONFIRMED → F-015 validated P1 | E-QC1-T4 |
-| T5 | `email_status='verified'` gate; `realness_score` absent | CONFIRMED | E-QC1-T5 |
-| T6 | check:stack / CI `verify` / release:check / release:deploy / policy.json / CUTOVER.md | CONFIRMED | E-QC0-15, E-QC0-04 |
-| T7 | Exact `!dm` handler + retired HTTP sender exist | CONFIRMED → F-020 opened P1 | E-QC1-T7a–e |
+## QC-1b — COMPLETE (session 4, 2026-08-15). Artifact: `qc/SERVICE_MANIFEST.md`
 
-**Consequence applied (≥6 confirmed):** proceed on v2's factual frame, evidence-first everywhere. v1/docs claims remain hypotheses.
+All RO (writes only to `~/qc-evidence/QC1B/` and qc/ on this branch). Rows QC1B-01…08; evidence E-QC1B-01…14. Fresh state re-captured; baseline unchanged at 2983ed0; production clean.
 
-## F-020 quarantine fix — COMPLETE (session 2, 2026-08-15). Status: verified-fixed
-
-Owner authorized BUSINESS (release-path deploy) + OUTAGE (gateway reload) scoped to F-020; D-008 confirmed as proposed (both in DECISIONS.md). Executed:
-
-- PR #69 `fix/f020-quarantine-meta-dm` @ ac06896: `meta.dm.reply` removed from `workflow/policy.example.json`; machine-enforced quarantine guard (`QUARANTINED_LIVE_WORKFLOWS`) in `validate:openclaw-shadow` + `apply:openclaw-shadow`; regression tests (guard, example policy, `!dm` shadow refusal). Local check:stack exit 0; CI `verify` pass; merged @ `2983ed0` (owner-run merge — the harness blocks `gh pr merge` for the agent; owner runs it via `!`); production ff'd; release:check + release:deploy completed 9/9 @ 2983ed0.
-- Runtime: `workflow/policy.json` de-armed (95138587…c04e9 → 32c2bdfe…8b761f, mode 600); guard proven by attempted violation on the still-armed patch (validate exit 1); quarantined patch validated + applied (openclaw.json backup taken); gateway kickstarted (PID 27738 → 89734, start 14:42:13 > config mtime 14:41:55).
-- Verification: owner typed `!dm 1 qc quarantine check` in the social channel → exact reply "Not sent. Meta DM replies are still in shadow mode." Zero side effects (handler short-circuits before the control plane).
-- Rows QCF20-01…05; evidence E-F020-01…07 (`~/qc-evidence/F020-FIX/`). Production `main` now @ `2983ed0` — the current deployed baseline SHA for subsequent phases.
-
-## QC-1a generated inventory — COMPLETE (session 3, 2026-08-15). Artifact: `qc/INVENTORY.md`
-
-All RO (the only writes: raw evidence into `~/qc-evidence/QC1-INV/` and the sanctioned fresh plist render into that same dir; render script code-traced first — writes confined to `--output`). Every table script-generated; no handwritten lists. Rows QC1-INV-01…08; evidence E-QC1INV-01…19.
-
-- 53 registry workflows dumped via `listDefinitions()` at worktree==deployed 2983ed0 (empty code diff proven); policy: 32 live, 17 autonomous, shadow_mode=true, sha == post-quarantine `32c2bdfe…`; live ⊆ registry; `meta.dm.reply` still absent (F-020 holds).
-- Launchd 5 layers: 50 templates → 50 fresh-rendered → 51 deploy-generated → 49+2`.disabled` installed → 43+gateway loaded → processes started after the 2026-08-15T21:39Z deploy record @ 2983ed0. Six legacy producers dormant exactly per CUTOVER map (not failures); graph replacements all loaded.
-- F-016 inputs made concrete: `kapital-tests` + `qbo-keepalive` installed with **no template**; `paloma-followup/scan/summary` templated + deploy-rendered but **not installed**.
-- Data stores: live crm.db + paloma tasks.db; **stray 0-byte `crm/data/resort-crm.db` created deploy day** → QC-3; snapshot with stale WAL/SHM siblings → QC-3; chroma 3 collections; encrypted backups fresh, offsite = gog drive.
-- Secrets: 26 files, all 600 except `anthropic_vocabgen.json` 644 (+ stray healthchecks .bak) → QC-2. Gateway: SocialSol agents bind Slack-only; enabled telegram channel belongs to another venture's agent (no SocialSol refs) — QC-2 boundary input, no new transport finding.
-- Drift notes parked for QC-1b: `email.message.observe` (policy-autonomous, not live, registry non-autonomous); `marketing.report.daily` mutates under `marketing.read` (QC-6).
+- **4-way convergence diff formalized, every delta named** (QC1B-02/03): 50(+1 disabled) templates → 50 rendered → 51 generated → 49+2disabled installed → 43+gateway loaded. 6 installed-not-loaded == CUTOVER dormant map exactly (no duplicate live producer). 39/47 installed==rendered; **8 differ** — crm + squarespace-report installed AHEAD of template (reinstall would regress: WhatsApp-channel env / Slack enable+channels); 6 template-ahead never installed (incl. two F-015 jobs); NODE_BIN Cellar-path fragility; media pair definitions symlinked from the dirty outer repo.
+- **Versioned service manifest committed** (`qc/SERVICE_MANIFEST.md`, QC1B-07): 55 script-generated rows — schedule/TZ, script, env contract, expected vs actual, convergence, alert owner, QC owner, proposed criticality (owner ratifies at D-007 sign-off).
+- **F-016 VALIDATED P1** (QC1B-06, moved to FINDINGS): launchd layer has no convergent release path — deploy renders but installs nothing; sanctioned installer covers 3/49 labels; kapital-tests (F-014 control) + qbo-keepalive (QBO credential mutation) hand-installed with no template, /tmp logs, no alerts; paloma trio rendered-never-installed. **D-012 recorded: owner says INSTALL the paloma trio** (fix session adopts; QC-9 tests).
+- **F-015 mechanisms characterized** (QC1B-05): daily-tests = missing WorkingDirectory in stale installed plist (relative require dies; no channel env → alerts nowhere); tracker-liveness = working as designed, exit 1 on 3 REAL cold-start failures (paid destinations 18–51 days active, zero CRM sessions 48h) → **QC-6/F-019 priority input**; media-rescan = MEDIA_SHOOT_SLUG unset in template AND installed → permanently failing. Remediation ownership assigned in FINDINGS.
+- **F-023 launchd convergence proof met** (QC1B-04): 43/43 loaded resort jobs execute nested-repo scripts; gateway = OpenClaw runtime + nested-repo plugins; co-tenants enumerated. Remaining for F-023 closure: owner disposition of workspace-resort tree + docs correction.
+- **F-024 opened P3** (QC1B-08): `email.message.observe` policy-autonomous but not live; registry non-autonomous. Latent grant; fix = remove via config path + QC-2 policy invariant `autonomous ⊆ live`.
 
 ## Blockers
 
-None. Recorded 2026-08-15: F-020 quarantine decision + fix-session authorization, D-003 (Max 20x), D-005 (July 2026), D-008 (confirmed as proposed), D-011 (non-expiring — ratified). Still open: D-004, D-006, D-007 (validator), D-009, D-010 (confirm), D-001 remaining rows, D-002 owner-cash-flow row.
+None. Open D-rows: D-004, D-006, D-007 (validator), D-009, D-010 (confirm), D-001 remaining rows, D-002 owner-cash-flow row. Open P1s: F-001 (QC-6), F-005 (QC-7 gate), F-014 (QC-4), F-015 + F-016 (dedicated fix session per D-008, after phase-boundary merge).
 
 ## Next
 
-**QC-1b: convergence diff + versioned service manifest + priority-evidence validation** (plan §QC-1, second split): (1) formalize the 4-way producer diff from saved evidence (fresh render E-QC1INV-08 vs deploy-generated vs installed E-QC1INV-09 vs loaded E-QC1INV-10) and name every delta incl. the warmup-daily active+disabled twin and NODE_BIN caveat; (2) build the versioned service manifest (label, owner, expected state, schedule, TZ, args, env contract, criticality, alert owner, replacement/retirement) — expected producers from policy + CUTOVER map; (3) validate priority evidence: F-015 (nonzero exits + watchdog blindness → remediation ownership), F-016 (kapital-tests/qbo-keepalive without template; paloma trio not installed — intended?), F-023 convergence proof. All RO. Expected outcome per plan: a P1 service-manifest/release-convergence finding unless a valid alternative owner+control exists.
+**Immediate (this session, owner-authorized):** phase-boundary PR pre-flight → `gh pr create` (docs-only, QC-0+QC-1, remediation note for the missed QC-0 merge) → owner merges via `! gh pr merge <N>` → then docs-only ff of production checkout, confirm clean main, and record here that the deployed runtime SHA remains 2983ed0 (code diff vs 2983ed0 empty outside qc/).
 
-**Exact next command** (start ritual, per §8, real repo root):
+**Then: QC-2a — control plane, authorization, negative fixtures, durable boundary** (plan §QC-2 first split): stack check + `npm audit --omit=dev` + `git diff --check` + full test inventory in the worktree; registered-graph-only execution; trusted Slack identity binding; channel/restricted-user capabilities; negative FIXTURE tests (wrong user/channel, spoofed identity, prose, edited/replayed command, duplicate Slack event, reused idempotency key with changed input, unsupported method/URL/tool); durable-boundary verification (hashes, provider idempotency, worker-only execution, lease fencing, retry classes, serialized guest sends, outbox/dead-letter, manual review atomicity). Inputs from QC-1: F-024 policy invariant; secrets mode 644 file + stray .bak (QC-2 mode audit); shared-gateway identity isolation. All RO/FIXTURE unless a new authorization line says otherwise.
+
+**Exact next command** (start ritual, §8, real repo root):
 
 ```
 git -C /Users/jasonmini/.openclaw/SocialSol status
 ```
 
-then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §QC-1, and execute QC-1b from the saved QC1-INV evidence (re-capture launchctl/process state fresh; deployed baseline remains `2983ed0` unless a newer deploy record says otherwise).
+then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §QC-2, and execute QC-2a. Deployed baseline remains `2983ed0` unless a newer deployment record says otherwise.

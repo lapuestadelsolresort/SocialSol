@@ -16,7 +16,7 @@ Seeded from QC Plan v3 §10. Validate with current evidence before assigning inc
 | F-012 | VIP/feedback campaigns inert | Product/backlog decision unless an enabled requirement exists; not a baseline blocker (QC-7) |
 | F-013 | Single-machine SPOF | P2 operational risk; closes only with defined off-host recovery + RPO/RTO, not a reboot (QC-3/10) |
 | F-015 | Nonzero last exits on daily-tests / tracker-liveness / media-rescan; watchdog blind | **VALIDATED 2026-08-15 (QC-1 T4) → moved to FINDINGS.md as P1** |
-| F-016 | Accounting test/keepalive jobs outside canonical template set; committed Paloma services not installed | Validate in QC-1; service-manifest convergence |
+| F-016 | Accounting test/keepalive jobs outside canonical template set; committed Paloma services not installed | **VALIDATED 2026-08-15 (QC-1b) → moved to FINDINGS.md as P1** (scope expanded to the full launchd release-convergence gap: installer covers 3/49 labels; 8 installed≠rendered incl. 2 regress-on-reinstall; symlinked definitions; NODE_BIN fragility) |
 | F-017 | Daily runner can hide test/build/Slack-post failure and is not the full stack | QC-2/3 |
 | F-018 | Backup path may diverge from CRM path; offsite retrieval untested; non-CRM state (Paloma tasks.db, policy, registry) lacks demonstrated coverage | QC-3 |
 | F-019 | Tracker liveness tests the endpoint, not deployed page JS; cold-start can misread ad creation as delivery | QC-6 |

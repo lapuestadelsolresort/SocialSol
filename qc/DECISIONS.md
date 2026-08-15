@@ -67,6 +67,10 @@ Jason = business authority. Sarah = guest and email UX surfaces. Accounting reco
 
 Boundary/no-leakage check only; content audited separately under privileged controls.
 
+## D-012 — Paloma scheduled services (paloma-followup / paloma-scan / paloma-summary) — RECORDED 2026-08-15
+
+**Owner (2026-08-15): INSTALL them.** The scheduled half is wanted. Adopt the trio into the sanctioned install path in the F-016 fix session; QC-9 then tests them. (Context: committed + rendered every deploy but never installed — F-016b, E-QC1B-14.)
+
 ## D-011 — Paulina email-reply confirmation semantics — RECORDED 2026-08-15
 
 **Owner:** Non-expiring, anywhere in channel — the current implementation is the intended behavior. The stale 15-minute/same-thread doc gets corrected through the release path; QC-7a then tests the ratified contract.
