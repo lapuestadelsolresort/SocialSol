@@ -1,6 +1,6 @@
 # QC status
 
-Updated: 2026-08-15 (PDT) — session 2 (F-020 quarantine fix session).
+Updated: 2026-08-15 (PDT) — session 3 (QC-1a generated inventory).
 
 ## QC-0 — COMPLETE
 
@@ -35,13 +35,24 @@ Owner authorized BUSINESS (release-path deploy) + OUTAGE (gateway reload) scoped
 - Verification: owner typed `!dm 1 qc quarantine check` in the social channel → exact reply "Not sent. Meta DM replies are still in shadow mode." Zero side effects (handler short-circuits before the control plane).
 - Rows QCF20-01…05; evidence E-F020-01…07 (`~/qc-evidence/F020-FIX/`). Production `main` now @ `2983ed0` — the current deployed baseline SHA for subsequent phases.
 
+## QC-1a generated inventory — COMPLETE (session 3, 2026-08-15). Artifact: `qc/INVENTORY.md`
+
+All RO (the only writes: raw evidence into `~/qc-evidence/QC1-INV/` and the sanctioned fresh plist render into that same dir; render script code-traced first — writes confined to `--output`). Every table script-generated; no handwritten lists. Rows QC1-INV-01…08; evidence E-QC1INV-01…19.
+
+- 53 registry workflows dumped via `listDefinitions()` at worktree==deployed 2983ed0 (empty code diff proven); policy: 32 live, 17 autonomous, shadow_mode=true, sha == post-quarantine `32c2bdfe…`; live ⊆ registry; `meta.dm.reply` still absent (F-020 holds).
+- Launchd 5 layers: 50 templates → 50 fresh-rendered → 51 deploy-generated → 49+2`.disabled` installed → 43+gateway loaded → processes started after the 2026-08-15T21:39Z deploy record @ 2983ed0. Six legacy producers dormant exactly per CUTOVER map (not failures); graph replacements all loaded.
+- F-016 inputs made concrete: `kapital-tests` + `qbo-keepalive` installed with **no template**; `paloma-followup/scan/summary` templated + deploy-rendered but **not installed**.
+- Data stores: live crm.db + paloma tasks.db; **stray 0-byte `crm/data/resort-crm.db` created deploy day** → QC-3; snapshot with stale WAL/SHM siblings → QC-3; chroma 3 collections; encrypted backups fresh, offsite = gog drive.
+- Secrets: 26 files, all 600 except `anthropic_vocabgen.json` 644 (+ stray healthchecks .bak) → QC-2. Gateway: SocialSol agents bind Slack-only; enabled telegram channel belongs to another venture's agent (no SocialSol refs) — QC-2 boundary input, no new transport finding.
+- Drift notes parked for QC-1b: `email.message.observe` (policy-autonomous, not live, registry non-autonomous); `marketing.report.daily` mutates under `marketing.read` (QC-6).
+
 ## Blockers
 
 None. Recorded 2026-08-15: F-020 quarantine decision + fix-session authorization, D-003 (Max 20x), D-005 (July 2026), D-008 (confirmed as proposed), D-011 (non-expiring — ratified). Still open: D-004, D-006, D-007 (validator), D-009, D-010 (confirm), D-001 remaining rows, D-002 owner-cash-flow row.
 
 ## Next
 
-**QC-1a remainder: the generated inventory** (plan §QC-1 "Then the generated inventory") — registry workflows, routes/webhooks, provider adapters, CLI entrypoints, Slack hooks, read models, OpenClaw plugins/crons, LaunchAgent templates → fresh render → installed plists → loaded launchd state → running processes, databases, Chroma collections, runtime configs, secrets locations, alert destinations, provider authorities; per-command side-effect classification. All RO. Then QC-1b: convergence diff + service manifest + priority-evidence validation (F-015 remediation ownership; F-023 convergence proof).
+**QC-1b: convergence diff + versioned service manifest + priority-evidence validation** (plan §QC-1, second split): (1) formalize the 4-way producer diff from saved evidence (fresh render E-QC1INV-08 vs deploy-generated vs installed E-QC1INV-09 vs loaded E-QC1INV-10) and name every delta incl. the warmup-daily active+disabled twin and NODE_BIN caveat; (2) build the versioned service manifest (label, owner, expected state, schedule, TZ, args, env contract, criticality, alert owner, replacement/retirement) — expected producers from policy + CUTOVER map; (3) validate priority evidence: F-015 (nonzero exits + watchdog blindness → remediation ownership), F-016 (kapital-tests/qbo-keepalive without template; paloma trio not installed — intended?), F-023 convergence proof. All RO. Expected outcome per plan: a P1 service-manifest/release-convergence finding unless a valid alternative owner+control exists.
 
 **Exact next command** (start ritual, per §8, real repo root):
 
@@ -49,4 +60,4 @@ None. Recorded 2026-08-15: F-020 quarantine decision + fix-session authorization
 git -C /Users/jasonmini/.openclaw/SocialSol status
 ```
 
-then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §QC-1, and execute the generated inventory (QC-1a remainder). Note the deployed baseline is now `2983ed0` (post-F-020-fix), not `d1a119e`.
+then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §QC-1, and execute QC-1b from the saved QC1-INV evidence (re-capture launchctl/process state fresh; deployed baseline remains `2983ed0` unless a newer deploy record says otherwise).

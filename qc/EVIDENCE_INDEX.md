@@ -39,3 +39,22 @@ Raw artifacts live in `~/qc-evidence/<CHECK-ID>/` (dir 700, files 600). Never co
 | E-F020-05 | 901fa4e51fbc3f5d62c31863872e7c8d9285210fd6ec1213590f8c0a4f662fb2 | `F020-FIX/validate-armed-refusal.log` — validate:openclaw-shadow exit 1 on still-armed patch: "refusing quarantined live workflow(s): meta.dm.reply (F-020)" |
 | E-F020-06 | 059b499338234fef27355e805415a4ce4af85b2238e87bfab10b2df9fb0615f7 | `F020-FIX/validate-quarantined-pass.log` — validate exit 0 on quarantined patch (plugins inspect + doctor clean) |
 | E-F020-07 | 85d39182b524f52841972949de0746ec5c55ad53365ff3e8a1891ad961cb1324 | `F020-FIX/apply-shadow.log` — apply exit 0; openclaw.json written with backup config-backups/openclaw.pre-socialsol-shadow.2026-08-15T21-41-55Z |
+| E-QC1INV-01 | 95a23327f224dddd30a4ddd02c8df55a27333ce4c44fa908a13297d4b4315dd3 | `QC1-INV/01-registry-definitions.json` — listDefinitions() dump: 53 workflows w/ capability, mutates, autonomous, triggers, step effect classes |
+| E-QC1INV-02 | 32c2bdfe1edefe48c9c8ad4016411d5e440c04bc7bf1ea20e24727d4b48b761f | `QC1-INV/02-policy.json` — byte copy of runtime workflow/policy.json (hash == live fingerprint; contains channel IDs, never committed) |
+| E-QC1INV-03 | 5859bca7a5580ff03c5b5ada1fa5aceac02bb81e2ccfe5715de8a0a01a7ddef4 | `QC1-INV/03-registry-policy-sets.txt` — registry↔policy set differences; live⊆registry; email.message.observe drift |
+| E-QC1INV-04 | 604b1e9e951b6ce5f966718b6369e678d6830a69c7549ec47049ab812693c108 | `QC1-INV/04-routes.txt` — generated route/mount inventory of crm/server.js + 10 routers (111 lines) |
+| E-QC1INV-05 | ba4d67b8b41ebc5c5e3e7b91cdb5ae8094c02ab4f2ef630b8b9a678f07cf7d3c | `QC1-INV/05-external-hosts.txt` — per-file external HTTPS host extraction (provider endpoint map) |
+| E-QC1INV-06 | a9f5602b975cdab2cbe52b52f55ef8c303a4e385b1897dcf5e05b743c8959e6e | `QC1-INV/06-npm-scripts.txt` — all 49 package.json scripts with exact command lines |
+| E-QC1INV-07 | f462189e64cdd899b0acdf544d808bf106aee1aec77e71e11e935b77271f29ee | `QC1-INV/07-cli-entrypoints.txt` — per-directory CLI entrypoint listing (~150 files across 9 dirs) |
+| E-QC1INV-08 | 3c988f503df70f6d4b3af2881fb08620f806151cf1df23c1246604d5214e4234 | `QC1-INV/08-render-stdout.txt` — fresh render of 50 templates to evidence dir (exit 0); templates list `0339b366…`; per-plist hashes in 08b `c3434808…` |
+| E-QC1INV-09 | 3f8cb4466800f514161924300dc286613eb005a96eb5e22999acd16a1ac4771e | `QC1-INV/09-installed-plists.txt` — ~/Library/LaunchAgents listing (49 resort + 2 .disabled + socialsol-backups/) |
+| E-QC1INV-10 | ef69491c6ceb50619f3db6a766b7c4b923fafb9f465c6e7d1e64a96a92cf204e | `QC1-INV/10-launchctl-list.txt` — loaded jobs w/ pid + last exit (43 resort + gateway) |
+| E-QC1INV-11 | c433535e93f664bd478265ece5923363fe14162a2b23f6b92f0e7150f3fed473 | `QC1-INV/11-schedule-table.tsv` — plistlib-generated label/schedule/RunAtLoad/program table from installed plists |
+| E-QC1INV-12 | 08398bbeefc3ed7734eb531e14d458eec7ef3e9efea16f2f2ea3bbebddd36753 | `QC1-INV/12-processes.txt` — process snapshot w/ start times (server/worker/gateway/chroma/tunnels) |
+| E-QC1INV-13 | e55f5bb683b9b4ebb6f47fadfd723d6b60c08f0c33670d0a0a8fd4cb50fcadfe | `QC1-INV/13-databases.txt` — all *.db under production root (excl. worktrees) + WAL/SHM state |
+| E-QC1INV-14 | 01074aa1739bd97878374ad1f6bece118a3ef06fce03760592f1551a14751ecc | `QC1-INV/14-chroma-collections.txt` — loopback API collection list (contacts, media_corpus, sarah_voice_corpus) |
+| E-QC1INV-15 | 89317d1c43ea4732f853c7de2fef20d1d04ec73b297282b6eae73638c8d078be | `QC1-INV/15-slack-commands.txt` — bang-token sweep of resort-workflows plugin (parser locations cited in INVENTORY §4) |
+| E-QC1INV-16 | 48d05bb17f7884e0437c287754a9b061062a99df98af82e1f0f6d3367d5fdd73 | `QC1-INV/16-runtime-configs.txt` — runtime config fingerprints (mode/size/sha16); campaigns/registry.json absent |
+| E-QC1INV-17 | 0429e5b2abd1ee27a99f1536ec495531b195c3e1f22045680518cf58db134f4f | `QC1-INV/17-secrets-locations.txt` — secrets/ names+modes only (26 files; one 644 flag) |
+| E-QC1INV-18 | a5f083dd46d1c889cc7206f58f91484f795a35319bda4173009bd555f0fca88b | `QC1-INV/18-healthcheck-wiring.txt` — scripts wiring healthcheck pings (17) |
+| E-QC1INV-19 | bdfda01c4429de391ab530e0d48b314f2dee8a1e1941777335686880a134eeb3 | `QC1-INV/19-installed-not-loaded.txt` — 6 dormant legacy producers + 2 .plist.disabled remnants |
