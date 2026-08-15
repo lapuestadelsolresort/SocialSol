@@ -1,0 +1,25 @@
+# Risk hypotheses — carried-in and suspected issues awaiting evidence
+
+Seeded from QC Plan v3 §10. Validate with current evidence before assigning incident severity. A row leaves this file only by becoming a validated finding in `FINDINGS.md` or being closed with evidence in `CONTROL_MATRIX.md`.
+
+| ID | Summary | Disposition |
+|---|---|---|
+| F-002 | Advantage audience expansion contrary to brief | Provider-read regression check in QC-6 |
+| F-003 | Self-referential pixel audience loop | Verify current audience/exclusion objects + shelved legacy state; historical traffic mix alone is not failure evidence (QC-6) |
+| F-004 | Clicks counted as replies | Verify current metric queries in QC-7; historical-data audit at most P2 unless still driving decisions |
+| F-006 | Multiple CRM DB paths | Reframed as path-contract integrity: `DB_PATH` vs `CRM_DB_PATH` vs hard-coded defaults (QC-3) |
+| F-007 | Lead-form black hole (11,441 views / 0 submissions) | Form premise obsolete; test the current landing → WhatsApp → signed inbound → CRM/CAPI funnel (QC-6); historical form-era attribution loss = P3 data audit |
+| F-008 | Paulina Block Kit plugin half-wired | P3 if confirmed uninstalled/unreachable; escalate if reachable outside the durable boundary (QC-7) |
+| F-009 | Documentation drift | Retained, demonstrated blast radius: a QC plan built from docs was materially wrong within ~10 weeks. Sanitized overlay comparison; never copy private runtime contents into Git (QC-2). 2026-08-15: further validated — plan v3's own repo-root claim (`~/.openclaw`) wrong; see F-023 |
+| F-010 | Legacy Meta account | Alias-only provider-read hypothesis: expect no recent spend, writes, registry, or workflow effects (QC-6) |
+| F-011 | Slack helper consolidation incomplete | Re-derive current callers; severity depends on outbox/readback bypass vs formatting duplication (QC-2/7) |
+| F-012 | VIP/feedback campaigns inert | Product/backlog decision unless an enabled requirement exists; not a baseline blocker (QC-7) |
+| F-013 | Single-machine SPOF | P2 operational risk; closes only with defined off-host recovery + RPO/RTO, not a reboot (QC-3/10) |
+| F-015 | Nonzero last exits on daily-tests / tracker-liveness / media-rescan; watchdog blind | Validate in QC-1 T4; expected P1 service-manifest finding. 2026-08-15 pre-signal: `launchctl list` shows last exit 1 for all three (E-QC0-05) |
+| F-016 | Accounting test/keepalive jobs outside canonical template set; committed Paloma services not installed | Validate in QC-1; service-manifest convergence |
+| F-017 | Daily runner can hide test/build/Slack-post failure and is not the full stack | QC-2/3 |
+| F-018 | Backup path may diverge from CRM path; offsite retrieval untested; non-CRM state (Paloma tasks.db, policy, registry) lacks demonstrated coverage | QC-3 |
+| F-019 | Tracker liveness tests the endpoint, not deployed page JS; cold-start can misread ad creation as delivery | QC-6 |
+| F-020 | (Conditional) Any transport the owner did not knowingly authorize. Active candidate: Meta DM send path — owner does not recognize it (2026-08-15); opens if QC-1 T7 finds one | Opened on any "no"/"unknown" in D-002 confirmed against inventory; quarantine per QC-8 |
+| F-021 | Private runtime overlays contain stale paths / mutation guidance; terminal tool guard is a compensating control, not a resolution | QC-2; fix via private-runtime change path |
+| F-022 | Recent fixes (accounting, OwnerRez retry, WhatsApp status, email confirmation, Paloma query, redaction, deployment integrity) lack regression rows | Mandatory regression rows in their phases |
