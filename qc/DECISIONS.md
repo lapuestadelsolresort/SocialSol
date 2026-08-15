@@ -31,6 +31,7 @@ Seeded from QC Plan v3 §11. D-001 and D-002 block QC-0 exit; D-011 blocks part 
 - Squarespace commerce — **authorized**; intent is full integration with maximum read/write capability. Authority boundaries in QC-5 still apply: Squarespace never creates or edits OwnerRez bookings and never represents Airbnb/Vrbo payouts.
 - Meta DM path — **owner does not recognize this as a feature**; if QC-1 T7 finds any Meta DM send path, open F-020, quarantine, and stop for an owner decision.
 - **Meta DM disposition recorded 2026-08-15 (owner, after T7 evidence): QUARANTINE.** Intended state = disabled. Remove `meta.dm.reply` from `live_workflows` via the config/release path in a dedicated fix session and verify `!dm` receives the shadow-mode refusal. Inbound DM forwarding to Slack may remain. (F-020 closure path.)
+- **F-020 fix-session authorization recorded 2026-08-15 (owner):** BUSINESS (release-path deploy of the policy change) and OUTAGE (gateway reload) authorized for the dedicated quarantine fix session, scoped to F-020 only, including the shadow-refusal verification step. Executed under D-008 (confirmed).
 
 **Still open:** owner cash-flow command (read-model surface).
 
@@ -54,9 +55,9 @@ Windows and targets (RPO/RTO per store).
 
 Jason = business authority. Sarah = guest and email UX surfaces. Accounting reconciliation validator = ?
 
-## D-008 — Fix policy — OPEN (proposed default in plan)
+## D-008 — Fix policy — RECORDED 2026-08-15
 
-Proposed: P0 contained immediately with explicit authorization; P1 fixed in a dedicated session through the full release path; P2/P3 batched; every fix carries a regression test and post-deploy production verification.
+**Owner (2026-08-15): confirmed as proposed.** P0 contained immediately with explicit authorization; P1 fixed in a dedicated session through the full release path; P2/P3 batched; every fix carries a regression test and post-deploy production verification.
 
 ## D-009 — Test identities and markers — OPEN
 

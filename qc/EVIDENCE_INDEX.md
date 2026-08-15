@@ -32,3 +32,10 @@ Raw artifacts live in `~/qc-evidence/<CHECK-ID>/` (dir 700, files 600). Never co
 | E-QC1-T7c | 6a3e93a54a13d3188df6db8028f1c0eb7e64057ae04bf3cd23042017b1f83789 | `QC1-T7/dm-send-provenance.txt` — outbound rows all whatsapp; cutover commit 4cad390; Graph v21.0 endpoint |
 | E-QC1-T7d | 702fcfaa74a952447dcfc6750a3b1a21493c0d4abde17afc0f95d8cc6bfe99e7 | `QC1-T7/policy-shadow-state.txt` — policy.json shadow_mode true + live_workflows incl. meta.dm.reply (33 entries) |
 | E-QC1-T7e | fef9ba7b5b333a91997364a089d306f41fb93b60a3c2b300d02583a26b17b15f | `QC1-T7/loaded-gateway-config.txt` — loaded openclaw.json plugin config matches policy; gateway/config freshness |
+| E-F020-01 | 316d2d369f4172635565a253cdc57b1099805501b76248bdc668132e0259c5b4 | `F020-FIX/check-stack-worktree.log` — full check:stack in fix worktree @ ac06896, exit 0, 591 passes |
+| E-F020-02 | 8913213d02b831c99cb66125c214f65d78bd59e336d14d6bf47d73d4d5e83d4d | `F020-FIX/release-check.log` — release:check exit 0 at merged main |
+| E-F020-03 | b0e4f56de6b1f263328ccd14e52027f0ea698e65c31ba0ea6f7cc9efddf45cfe | `F020-FIX/release-deploy.log` — release:deploy exit 0, record 2026-08-15T21-39-17Z @ 2983ed0, 9/9 steps completed |
+| E-F020-04 | 95138587c535b170d78386ff4c3924fee8df63e7769d429d5187c0755e5c04e9 | `F020-FIX/policy.json.pre-quarantine` — pre-change runtime policy copy (hash equals QC0-06 fingerprint) |
+| E-F020-05 | 901fa4e51fbc3f5d62c31863872e7c8d9285210fd6ec1213590f8c0a4f662fb2 | `F020-FIX/validate-armed-refusal.log` — validate:openclaw-shadow exit 1 on still-armed patch: "refusing quarantined live workflow(s): meta.dm.reply (F-020)" |
+| E-F020-06 | 059b499338234fef27355e805415a4ce4af85b2238e87bfab10b2df9fb0615f7 | `F020-FIX/validate-quarantined-pass.log` — validate exit 0 on quarantined patch (plugins inspect + doctor clean) |
+| E-F020-07 | 85d39182b524f52841972949de0746ec5c55ad53365ff3e8a1891ad961cb1324 | `F020-FIX/apply-shadow.log` — apply exit 0; openclaw.json written with backup config-backups/openclaw.pre-socialsol-shadow.2026-08-15T21-41-55Z |
