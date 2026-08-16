@@ -1,10 +1,10 @@
 # QC status
 
-Updated: 2026-08-16 (PDT) — session 10 (QC-3b drill). **QC-3b COMPLETE. QC3B-12 timed off-host-format restore drill PASS** (owner widened the D-006 window in-session — DECISIONS.md 2026-08-16 — and directed immediate run): all 3 offsite artifacts decrypt/restore/verify clean across BOTH key lineages, CRM RPO ~4.6h (target ≤24h) and off-host-format RTO mechanics ≈3s/artifact (target ≤4h) MET; F-018 FULLY CLOSED. **QC-3 phase work done. REMAINING: the QC-3 phase-boundary PR (Amendment 3) — pre-flight run, push/PR awaiting owner authorization.**
+Updated: 2026-08-16 (PDT) — session 10 (QC-3b drill). **QC-3b COMPLETE. QC3B-12 timed off-host-format restore drill PASS** (owner widened the D-006 window in-session — DECISIONS.md 2026-08-16 — and directed immediate run): all 3 offsite artifacts decrypt/restore/verify clean across BOTH key lineages, CRM RPO ~4.6h (target ≤24h) and off-host-format RTO mechanics ≈3s/artifact (target ≤4h) MET; F-018 FULLY CLOSED. **QC-3 COMPLETE INCLUDING THE PHASE BOUNDARY (same session): PR #72 merged (owner-run) → production main ff'd 87a4e6c → 1211b80, docs-only, runtime baseline stays 2983ed0 (QC3B-13, E-QC3B-19). Next phase: QC-4 (accounting).**
 
 Authorizations session 10: owner-recorded D-006 window widening + "run now" for the drill (DECISIONS.md 2026-08-16); otherwise blank line = RO + FIXTURE. All writes: worktree qc/**, ~/qc-evidence/QC3B/ (700/600), scratchpad (drill harness; scratch restores deleted after each run). Live stores touched RO only (mode=ro preflight; gog listing/download under D-006 retrieval authority); no live DB, secret, or backup artifact modified; passphrase contents never displayed (`-pass file:` only). **Cross-session coordination note:** the still-open session-9 window (peer `qc-worktree-16`) committed cd0bb43 (F-035 P2 + E-QC3B-17) at 07:42 this morning while this session's start ritual was running — reconciled, no collision (this session's work layers on top). Only one session should edit qc/** until the phase-boundary PR merges.
 
-## QC-0 — COMPLETE · QC-1 — COMPLETE (runtime baseline 2983ed0; PR #70) · QC-2 — COMPLETE (PR #71 → 87a4e6c docs-only; runtime 2983ed0) · QC-3a — COMPLETE (session 8; F-006/F-029 P2, F-030 P3) · QC-3b — COMPLETE (sessions 9–10)
+## QC-0 — COMPLETE · QC-1 — COMPLETE (runtime baseline 2983ed0; PR #70) · QC-2 — COMPLETE (PR #71 → 87a4e6c docs-only; runtime 2983ed0) · QC-3a — COMPLETE (session 8; F-006/F-029 P2, F-030 P3) · QC-3b — COMPLETE (sessions 9–10) · QC-3 boundary — COMPLETE (PR #72 → 1211b80 docs-only; runtime 2983ed0)
 
 ## QC-3b — sessions 9 (2026-08-15) + 10 (2026-08-16). Rows QC3B-01…12; evidence E-QC3B-01…18
 
@@ -22,11 +22,11 @@ Authorizations session 10: owner-recorded D-006 window widening + "run now" for 
 
 ## Blockers
 
-Phase-boundary PR needs owner authorization (push + PR create; owner runs `gh pr merge` via `!` — Amendment 3, QC2B-14 precedent). Open D-rows: D-004, D-007 (validator), D-009, D-010 (confirm), D-001 remaining rows (**publishing row now urgent — F-035 auto-organic-ig-post**), D-002 owner-cash-flow row; F-031 attestation (**off-host escrow of BOTH keys — the standing P1 line**), F-032 attestations (media offline copies; warmup accepted-loss). Open P1s: F-001 (QC-6), F-005 (QC-7 gate), F-014 (QC-4), F-015 + F-016 (fix session per D-008), **F-031 (escrow halves outstanding)**, F-032. Open P2s: F-013 (gated on F-031), F-023, F-025 (rescoped), F-006, F-029, F-033, **F-035 (gateway cron layer — inventory/manifest rows + owner dispositions)**. Open P3s: F-024, F-026, F-021, F-027, F-028, F-030, F-034.
+None mechanical for QC-4 start (boundary done; qc branch is 1 commit ahead of origin — the boundary-record commit — and rides with the QC-4 phase-boundary PR, same pattern as e78a183). Open D-rows: D-004, D-007 (validator), D-009, D-010 (confirm), D-001 remaining rows (**publishing row now urgent — F-035 auto-organic-ig-post**), D-002 owner-cash-flow row; F-031 attestation (**off-host escrow of BOTH keys — the standing P1 line**), F-032 attestations (media offline copies; warmup accepted-loss). Open P1s: F-001 (QC-6), F-005 (QC-7 gate), F-014 (QC-4), F-015 + F-016 (fix session per D-008), **F-031 (escrow halves outstanding)**, F-032. Open P2s: F-013 (gated on F-031), F-023, F-025 (rescoped), F-006, F-029, F-033, **F-035 (gateway cron layer — inventory/manifest rows + owner dispositions)**. Open P3s: F-024, F-026, F-021, F-027, F-028, F-030, F-034.
 
 ## Next
 
-**QC-3 phase boundary (Amendment 3): docs-only qc/** PR.** Pre-flight (qc-only diff, `npm run check:secrets` exit 0, §4.1 sweep) → push branch → PR create (**owner authorization required for push/PR**) → **owner runs `gh pr merge` via `!`** → docs-only ff of production main → runtime SHA stays 2983ed0. Then QC-4 begins (plan §9: accounting — receipts, Kapital, QBO, owner expenses; reconciliation month = July 2026 per D-005).
+**QC-4 — Accounting first: receipts, Kapital, QBO, owner expenses (plan §9 QC-4; F-014 closure phase; reconciliation month = July 2026 per D-005).** Single large session per D-003, with the a/b split as fallback: QC-4a = receipt pipeline + Kapital parsing + FX + dedup; QC-4b = QBO + July-2026 month reconciliation + OAuth-refresh audit + F-014 weekly-control rebuild criteria. Discover receipt channels from runtime config (never hard-code a count into evidence). Raw financial evidence stays outside Git (§4.1) — aliases in committed text. Default action classes RO/FIXTURE; any CANARY/BUSINESS need stops for owner authorization.
 
 **Exact next command** (start ritual, §8, real repo root):
 
@@ -34,4 +34,4 @@ Phase-boundary PR needs owner authorization (push + PR create; owner runs `gh pr
 git -C ~/.openclaw/SocialSol status
 ```
 
-Expected: clean `main` @ 87a4e6c until the QC-3 boundary PR lands; afterwards clean `main` @ the new docs-only merge SHA (reconcile against the PR merge commit). Runtime baseline stays 2983ed0 either way.
+Expected: clean `main` @ 1211b80 (docs-only merge commit of PR #72); runtime baseline 2983ed0 (newest deploy record 2026-08-15T21:39Z). Then `cd ~/qc-worktree`, read `qc/STATUS.md` + plan §9 QC-4, and begin QC-4 with the RO discovery pass: receipt channels from runtime config, accounting workflow registry entries, kapital-tests/qbo-keepalive job surfaces (F-014/F-016 context), owner-expense paths — label every check's action class before running (§1).
