@@ -12,15 +12,67 @@ Seeded from QC Plan v3 §11. D-001 and D-002 block QC-0 exit; D-011 blocks part 
 - All suppression, verification, provenance, cap, and fail-closed gates bind unchanged under autopilot. Autonomy is not gatelessness.
 - **Meta DMs — owner does not recognize this feature; intended state is disabled/nonexistent** (see D-002 and QC-1 T7).
 
-**Still open (ask when hit; QC-7 gate requires all rows recorded):**
+**Recorded 2026-08-16 (owner, in-session, session 13 continuation):**
 
-- Regina Airbnb-thread contacts (default manual as built unless the owner states otherwise)
-- Sarah guest-correspondence replies — keep proposal + same-user-confirmation flow, or auto-send too?
-- Meta campaign activation & budget increase
-- Autonomous Meta pause/decrease
-- QBO writes
-- OwnerRez mutations
-- Postiz publishing
+- **Meta campaign activation — AUTONOMOUS authorized.** The system may activate a Meta
+  campaign without per-action human approval. As built, activation is human-confirmed
+  (`marketing.change.propose` → exact `!meta confirm`, same-proposer) and
+  `meta.campaign.autonomous` permits pause/budget-decrease only — so this grant EXCEEDS
+  the built surface. Recorded as intent (D-013 precedent): the arming change goes
+  through the config/release path in a fix session, and the F-001 sequencing decision
+  (invariant-first vs accepted-risk) is nailed down in the walkthrough below.
+- **Meta per-campaign budget increase — AUTONOMOUS authorized, bounded by an
+  owner-approved AGGREGATE budget.** The total daily budget across all Meta/IG
+  campaigns is the owner's decision; the system may never raise the aggregate on its
+  own. Mechanism as built: `optimizer_config.budget_cap_daily` (80.00 USD/day at
+  recording time) enforced at budget-increase preflight against the projected ACTIVE
+  total (verified QC6-02). Cap value ratification + change procedure in the
+  walkthrough below.
+- **QBO writes — FULL AUTOPILOT authorized.** (`qbo.write` already live in policy;
+  duplicate guards, `requestid`, write/readback, ambiguous-failure review all bind.)
+- **OwnerRez mutations — FULL AUTOPILOT authorized.** As built: immutable proposal +
+  same-user confirm + 15-min expiry + fresh precondition + execute-once + readback.
+  Grant exceeds the built surface → recorded as intent; arming (removing per-action
+  confirm) via the config/release path in a fix session; every preflight/readback/
+  manual-review gate binds unchanged.
+- **Postiz publishing — FULL AUTOPILOT authorized** for the sanctioned durable-workflow
+  surface (`social.publish_routine` / `social.publish_due` / `social.content.publish`
+  with recover-before-create, readback, and double-post guards — verified QC6-09; the
+  routine/due pair is already autonomous as built). Whether the F-035(c) uninventoried
+  gateway-cron `auto-organic-ig-post` job is ALSO sanctioned is decided in the
+  walkthrough below — this grant does not implicitly bless un-inventoried producers.
+- **Regina Airbnb-thread contacts — FULL AUTOPILOT authorized.** As built (per plan
+  §9 QC-7) no send path is expected to exist for Airbnb-thread contacts; QC-7 verifies.
+  Grant recorded as intent; any path that is built/armed goes through the release path
+  with all suppression, provenance, language-exclusion, already-contacted, and cap
+  gates binding.
+- **Sarah guest-correspondence replies — AUTO-SEND authorized.** As built: immutable
+  proposal + same-user confirmation. Grant exceeds the built surface → recorded as
+  intent; arming via the config/release path; provider selection from the inbound
+  record, execute-once, Gmail-Sent/OwnerRez readback, and retry-without-second-send
+  all bind unchanged. Scope confirmation in the walkthrough below.
+- **Unchanged:** WhatsApp guest sends keep the human-typed `!wa` invariant (including
+  any Regina reactivation of WhatsApp-provenance contacts). Autonomy is not
+  gatelessness: every suppression, verification, provenance, cap, and fail-closed gate
+  binds identically under autopilot, for every row above.
+- **Executor note (owner's stated premise, to be verified in QC-7):** the owner
+  expects existing workflows to already carry these authorities. Verified state at
+  recording time: QBO writes and routine/due publishing are live-autonomous as built;
+  Meta activation, per-campaign budget increase, OwnerRez mutations, and Sarah replies
+  are built confirm-gated (grant exceeds build → arming = fix-list items); Regina
+  Airbnb-thread has no known send path (grant exceeds build → build+arm if/when
+  wanted). Each gap is a D-001-vs-runtime discrepancy to disposition in QC-7's
+  reconciliation (F-005), fix-listed per D-008 — not silently armed.
+
+**Walkthrough sub-points (same session, recorded below as answered):**
+
+- Autonomous Meta pause/decrease ratification (the built safety net) — pending.
+- Aggregate cap: ratify 80.00 USD/day as the owner-approved aggregate + owner-only
+  change procedure — pending.
+- Autonomous-activation arming order vs F-001 invariant — pending.
+- Regina Airbnb-thread: build+arm now vs grant-only until requested — pending.
+- Sarah auto-send scope (all guest-correspondence replies vs carve-outs) — pending.
+- F-035(c) `auto-organic-ig-post` gateway-cron job disposition — pending.
 
 ## D-002 — Transport authorization audit — PARTIALLY RECORDED (blocks QC-0 exit for recorded rows)
 
