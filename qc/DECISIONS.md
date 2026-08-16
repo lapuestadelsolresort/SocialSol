@@ -49,9 +49,28 @@ Live campaigns, warmup ramps, guest quiet hours; days/times when CANARY/OUTAGE/B
 
 **Owner:** July 2026 (most recent fully closed month).
 
-## D-006 — Restore-drill and offsite-retrieval approval — OPEN
+## D-006 — Restore-drill and offsite-retrieval approval — RECORDED 2026-08-15
 
-Windows and targets (RPO/RTO per store).
+**Owner (2026-08-15; owner's note dated "2026-08-__", received and recorded 2026-08-15):**
+
+- **Drill windows:** weekdays 10:00–16:00 PT; never during active sends or guest quiet hours.
+- **Offsite retrieval:** approved, read-only, anytime.
+- **Restores:** disposable copies in scratch space only.
+
+**Targets (max data loss / max time to recover):**
+
+| Store | RPO | RTO |
+|---|---|---|
+| CRM DB (incl. campaign registry) | ≤24h | ≤4h |
+| paloma tasks.db | ≤24h | ≤8h |
+| workflow/policy.json + openclaw config | ≤24h | ≤2h |
+| accounting inbox/archive | ≤24h | ≤24h |
+| warmup state | ≤7d | ≤24h (or accepted loss + re-ramp) |
+| secrets/recovery material | zero loss | ≤4h |
+| media originals | ≤7d | ≤72h |
+| Chroma | rebuildable — no targets; verify documented rebuild path | — |
+
+**Executor interpretation applied (2026-08-15, conservative; owner may widen):** the weekday 10:00–16:00 PT window governs restore drills *including* their disposable-restore step (decrypt/restore/verify/RTO timing); offsite retrieval alone (fetch + read-only verification of the retrieved artifact) is authorized anytime; any restore, whenever performed, goes only to a disposable copy in scratch space. QC-3b session of 2026-08-15 (Saturday, outside the window) therefore performs retrieval + all RO audit work; the timed restore drill runs in the next window (Mon 2026-08-17 10:00–16:00 PT) after checking active sends and guest quiet hours.
 
 ## D-007 — Sign-off roles — OPEN (partial)
 
