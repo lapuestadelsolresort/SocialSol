@@ -124,3 +124,24 @@ Boundary/no-leakage check only; content audited separately under privileged cont
 agent-run END-TO-END — push, PR create, merge, and docs-only fast-forward of production
 main (BUSINESS-scoped, this boundary only; ancestry + incoming-files proofs and post-ff
 runtime-baseline verification still required, per the QC2B-14/QC3B-13 pattern).
+
+## D-014 — F-044 external paid stream + QC-6 phase boundary — RECORDED 2026-08-16
+
+**Owner (2026-08-16, in-session, QC-6 session 13):**
+
+- **F-044 external paid Meta stream (`sf_full_resort_march_2026`) — RECOGNIZED: "Yes, I
+  run it."** The owner runs this campaign from an ad account outside the system token's
+  reach. F-044 downgrades P1 → P2 (governance blind spot, not unauthorized spend): the
+  spend is owner-known but invisible to the registry, budget cap, daily paid report,
+  autonomy safety net, and tracker-liveness destination checks (CAPI is already
+  correctly excluding it). **Still open for a later owner decision:** register the
+  campaign (registry entry/alias so reporting + caps + liveness see it, and/or system
+  credentials gaining read access to that account) vs. accepted-risk in writing.
+  F-010's unknown ("is the legacy account spending?") resolves to: an owner-run
+  outside-system account is actively spending; system-side dormancy conclusions
+  unchanged (no system path to it).
+- **QC-6 phase-boundary merge authorized agent-run END-TO-END** — push, PR create,
+  merge, docs-only fast-forward of production main (BUSINESS-scoped, this boundary
+  only; owner-run push fallback if the permission classifier blocks; ancestry +
+  incoming-files proofs and post-ff runtime-baseline verification required, per the
+  QC5-07/QC4B-04 pattern).
