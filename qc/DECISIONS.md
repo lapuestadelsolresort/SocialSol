@@ -72,6 +72,8 @@ Live campaigns, warmup ramps, guest quiet hours; days/times when CANARY/OUTAGE/B
 
 **Executor interpretation applied (2026-08-15, conservative; owner may widen):** the weekday 10:00–16:00 PT window governs restore drills *including* their disposable-restore step (decrypt/restore/verify/RTO timing); offsite retrieval alone (fetch + read-only verification of the retrieved artifact) is authorized anytime; any restore, whenever performed, goes only to a disposable copy in scratch space. QC-3b session of 2026-08-15 (Saturday, outside the window) therefore performs retrieval + all RO audit work; the timed restore drill runs in the next window (Mon 2026-08-17 10:00–16:00 PT) after checking active sends and guest quiet hours.
 
+**Window widening recorded 2026-08-16 (owner, in-session):** owner approved the rule change and directed the QC-3b timed off-host-format restore drill to run now (Sunday 2026-08-16, ~07:45 PDT — outside the weekday 10:00–16:00 window). Scope: this drill session; all other D-006 terms unchanged — live-state preflight (active sends / queued work / deploy lock) still required before the restore step, restores remain disposable/scratch-only, retrieval remains RO-anytime. Owner also independently confirmed seeing the CRM backup artifacts in Google Drive (corroborates QC3B-06/07 offsite evidence).
+
 ## D-007 — Sign-off roles — OPEN (partial)
 
 Jason = business authority. Sarah = guest and email UX surfaces. Accounting reconciliation validator = ?
