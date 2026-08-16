@@ -115,3 +115,8 @@ Boundary/no-leakage check only; content audited separately under privileged cont
   bind (autonomy is not gatelessness). Fix-list item added.
 - **kapital-tests stays scheduled** (Mon 08:00) until the F-014 fix session — status-quo
   risk accepted for the interim.
+
+**D-013 addendum (owner, 2026-08-16, in-session):** QC-4 phase-boundary merge authorized
+agent-run END-TO-END — push, PR create, merge, and docs-only fast-forward of production
+main (BUSINESS-scoped, this boundary only; ancestry + incoming-files proofs and post-ff
+runtime-baseline verification still required, per the QC2B-14/QC3B-13 pattern).
