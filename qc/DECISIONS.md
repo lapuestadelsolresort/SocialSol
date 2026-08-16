@@ -33,6 +33,8 @@ Seeded from QC Plan v3 §11. D-001 and D-002 block QC-0 exit; D-011 blocks part 
 - **Meta DM disposition recorded 2026-08-15 (owner, after T7 evidence): QUARANTINE.** Intended state = disabled. Remove `meta.dm.reply` from `live_workflows` via the config/release path in a dedicated fix session and verify `!dm` receives the shadow-mode refusal. Inbound DM forwarding to Slack may remain. (F-020 closure path.)
 - **F-020 fix-session authorization recorded 2026-08-15 (owner):** BUSINESS (release-path deploy of the policy change) and OUTAGE (gateway reload) authorized for the dedicated quarantine fix session, scoped to F-020 only, including the shadow-refusal verification step. Executed under D-008 (confirmed).
 
+- **Cal.com inbound booking webhook recorded 2026-08-15 (owner):** recognized/authorized surface. Currently dormant-by-config (`secrets/calcom.json` absent → every request 503 fail-closed); fail-closed-by-config accepted as the interim control; mounted-route violation probes deferred to QC-10 (QC2B-12). Meta inbound-webhook mounted-route probes assigned to QC-8 the same day (QC2B-10).
+
 **Still open:** owner cash-flow command (read-model surface).
 
 ## D-003 — Max plan tier and usable session length — RECORDED 2026-08-15

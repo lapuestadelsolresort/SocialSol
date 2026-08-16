@@ -1,8 +1,8 @@
 # QC status
 
-Updated: 2026-08-15 (PDT) — session 6 (QC-2b). **QC-2b COMPLETE → QC-2 phase COMPLETE.**
+Updated: 2026-08-15 (PDT) — session 7 (QC-2 phase boundary). **QC-2 phase COMPLETE; all five §QC-2 webhook surfaces dispositioned.**
 
-Authorizations this session: blank (RO/FIXTURE only) — honored; no CANARY/OUTAGE/BUSINESS action taken. All writes confined to `~/qc-worktree` and `~/qc-evidence/QC2B/`. Overlays under the dirty outer `~/.openclaw` were READ in place only (F-023 dirt untouched); no contents copied into Git — only sanitized fingerprints + risk counts.
+Authorizations session 7: BUSINESS — QC-2 phase-boundary PR create (docs-only, qc/** from QC-2a+2b) + docs-only fast-forward of production main after merge; owner runs `gh pr merge` via `!`. All else RO/FIXTURE. Session 6 (QC-2b) ran blank-auth RO/FIXTURE only, writes confined to `~/qc-worktree` + `~/qc-evidence/QC2B/`, overlays read in place (F-023 dirt untouched).
 
 ## QC-0 — COMPLETE (session 1; baseline then d1a119e)
 
@@ -23,6 +23,7 @@ Preconditions: production clean `main` @ 4b251ff; worktree code byte-identical t
 - **OAuth scopes** (QC2B-07): QBO scope accounting-only; token store atomic mode-600; `/status`+`/test` loopback-gated. **QC-4 handoff:** client/scope/`env=sandbox` load from `quickbooks-dev.json` while `quickbooks.json` is the token store — reconcile sandbox-vs-production in QC-4.
 - **Private overlays** (QC2B-08 → **F-021 validated P3, contained**): live resort+paloma overlays clean of mutation recipes/credentials; risky curl/token recipes only in ORPHANED legacy `workspace-resort/TOOLS.md` (mode 644, not loaded — resort workspace is the nested repo); no real credentials in `SECRETS.md`/`TOOLS.md`. Tool guard is the durable compensating control.
 - **New P3 findings:** F-021 (overlays, contained → fold into F-023), F-027 (QBO `/callback` reflected-XSS + unvalidated realmId persist), F-028 (secrets file-mode hygiene: `anthropic_vocabgen.json` 644 holds a live api_key, mitigated by 700 parent; stray `.bak`; tracked+served `tracker.js.bak`). All batch per D-008 P3.
+- **Webhook-surface coverage completion** (session 7, owner-directed; QC2B-09…12, E-QC2B-08): plan §QC-2's five surfaces — Twilio+OwnerRez violation-tested (QC2B-01); Meta/Resend/Cal.com routes all PRESENT so no "N/A — route not present"; none exercised per owner instruction. Dispositions (owner 2026-08-15): Meta inbound webhook (armed, signature-gated, DM→Slack forwarding half D-002 allows) → probes owned by **QC-8**; Resend (armed, svix-gated, bounce auto-pause path) → **QC-7** as planned; Cal.com (recognized surface; dormant-by-config, `calcom.json` absent → all requests 503 fail-closed) → probes **QC-10**. QC-2 exit "gaps have owners" satisfied; §12(1) closure lands in owning phases.
 
 ## Blockers
 
