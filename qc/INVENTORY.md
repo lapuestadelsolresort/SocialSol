@@ -193,7 +193,7 @@ Vertical script surfaces (file counts, E-QC1INV-07): `scripts/` 30 · `crm/scrip
 | Snapshots | `crm/data/backups/{pre-meta-capi-repair-20260809, pre-owner-cash-flow-20260810, qc-conversion-semantics-20260807}.db` | cold copies |
 | Snapshot | `runtime/config-backups/paloma-tasks.pre-checkpoint-rewind.2026-08-13.db` | cold copy |
 | Chroma | server `127.0.0.1:8000`; venv `chroma-venv/`, data `chroma-data/` | collections: `contacts`, `media_corpus`, `sarah_voice_corpus`; rebuild path documented in `crm/scripts/chroma-server.sh` (~$0.003 from `sarah_voice_corpus`) — QC-3 verifies |
-| Encrypted backups | `backups/resort-crm/crm-*.db.gz.enc` | daily 03:15 + deploy-triggered; latest 2026-08-15 14:39; mode 600; sqlite `mode=ro` verify; offsite via `gog drive upload`; retention prune. RPO/RTO + offsite retrieval = QC-3 (D-006) |
+| Encrypted backups | `backups/resort-crm/crm-*.db.gz.enc` | daily 03:15 + deploy-triggered; latest 2026-08-15 14:39; mode 600; sqlite `mode=ro` verify; offsite via `gog drive upload`; retention prune. **QC-3b 2026-08-15: offsite retrieval PROVEN (87-artifact unbroken offsite chain 07-30→08-15; newest byte-identical by sha256; locally-pruned daily retrieved); local prune is 30 FILES (~2-day depth after deploy bursts), offsite holds full history; RPO ≤24h met; key-escrow gap F-031; full matrix in qc/RECOVERY_MATRIX.md** |
 
 ## 9. Runtime configs (fingerprints only; contents never in Git)
 
