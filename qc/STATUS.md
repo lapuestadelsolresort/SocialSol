@@ -17,6 +17,7 @@ Authorizations session 9: blank — RO + FIXTURE only, plus D-006's standing gra
 - **F-034 (P3, new):** pre-scrub git bundle 644 in backups/; Drive duplicate names + no remote retention policy; count-based local retention; /tmp kapital CSV + builder logs; unrotated /tmp chroma.log; .DS_Store.
 - **F-025 corrected:** release step `install_dependencies` EXISTS with `PYTHON=/usr/bin/python3` baked in; every deploy regenerates node_modules (5.03s at 2983ed0; better-sqlite3 via shipped prebuilds — no gyp); bare `npm ci` still fails (runbook line in RECOVERY_MATRIX §3). F-018 dispositioned (→F-006/F-032/proven-retrieval); F-013 updated (blocked by F-031 + Monday drill).
 - Chroma rebuild path verified as documented (source table inside crm.db → CRM backups carry it). Migration-009 runbook note carried into RECOVERY_MATRIX §3.
+- **Session-9 addendum (2026-08-16 morning, owner-triggered): F-035 validated P2** — overnight Claude-token consumption attributed to the **gateway cron agent layer** (9 jobs, uninventoried; contradicts QC1-INV-08 "no gateway crons"): paloma-all-channel-monitor every 10 min (~12M tokens/day, working), goldroute c7-cram-hourly **763/764 lifetime runs failed at delivery — ~41.85M tokens discarded since Jun-26, silent**, and resort auto-organic-ig-post delivered autonomous IG posts Aug-7/10 (now tool-guard-blocked; D-001 publishing row OPEN → owner question). Evidence E-QC3B-17.
 
 ## Blockers
 
