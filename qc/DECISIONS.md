@@ -97,3 +97,26 @@ Boundary/no-leakage check only; content audited separately under privileged cont
 ## D-011 — Paulina email-reply confirmation semantics — RECORDED 2026-08-15
 
 **Owner:** Non-expiring, anywhere in channel — the current implementation is the intended behavior. The stale 15-minute/same-thread doc gets corrected through the release path; QC-7a then tests the ratified contract.
+
+## D-013 — QC-4 accounting authorizations and dispositions — RECORDED 2026-08-16
+
+**Owner (2026-08-16, in-session):**
+
+- **QBO read-only API access authorized for QC-4b and subsequent QC sessions** (SELECT
+  queries + entity GETs, no entity writes), accepting the incidental token refresh through
+  the sanctioned locked+atomic path (qbo_push.py QBOClient) that a stale access token
+  triggers — the same refresh qbo-keepalive performs weekly. Raw QBO data stays in
+  ~/qc-evidence (never Git); aliases in committed text.
+- **receipt.owner_expense.reconcile: intended state is LIVE.** Owner's stated default
+  posture: surfaces should have as much read/write capability as possible within
+  reasonable limits; when intended state is unknown, default to read/write live. Recorded
+  as intent — the arming change (live_workflows addition) still goes through the
+  config/release path in a fix session (D-008), and every gate/suppression continues to
+  bind (autonomy is not gatelessness). Fix-list item added.
+- **kapital-tests stays scheduled** (Mon 08:00) until the F-014 fix session — status-quo
+  risk accepted for the interim.
+
+**D-013 addendum (owner, 2026-08-16, in-session):** QC-4 phase-boundary merge authorized
+agent-run END-TO-END — push, PR create, merge, and docs-only fast-forward of production
+main (BUSINESS-scoped, this boundary only; ancestry + incoming-files proofs and post-ff
+runtime-baseline verification still required, per the QC2B-14/QC3B-13 pattern).
