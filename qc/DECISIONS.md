@@ -159,9 +159,40 @@ Jason = business authority. Sarah = guest and email UX surfaces. Accounting reco
 
 **Owner (2026-08-15): confirmed as proposed.** P0 contained immediately with explicit authorization; P1 fixed in a dedicated session through the full release path; P2/P3 batched; every fix carries a regression test and post-deploy production verification.
 
-## D-009 — Test identities and markers — OPEN
+## D-009 — Test identities and markers — RECORDED 2026-08-16
 
-`[QC TEST]` prefix in production channels vs a `#qc-scratch` channel; allowlisted test email addresses and phone numbers for CANARY actions.
+**Owner (2026-08-16, in-session, session 13 continuation; walkthrough per the
+D-006-before-QC-3b pattern):**
+
+- **Channel marker — dedicated `#qc-scratch` channel** (chosen over the `[QC TEST]`
+  prefix). QC-authored test messages post there. Creating the channel + its
+  channel-policy/capability entries goes through the config/release path →
+  **fix-list item** (prerequisite only for CANARYs that need QC-authored Slack
+  posts). Nuance recorded: system-routed side effects of canary events (e.g., a
+  test WhatsApp inbound surfacing in `#whatsapp` via normal forwarding) land in
+  production channels BY DESIGN — the canary exercises the real path; those
+  artifacts are identified by the allowlisted test identities and handled by each
+  CANARY's written cleanup/reconciliation plan, never redirected.
+- **Allowlisted test email — `jason@lapuestadelsolresort.com`** (owner-supplied
+  in-session). Used by QC-7's planted do-not-contact/suppression test and any
+  email CANARY; every send still requires session-level CANARY approval. This
+  address string is a deliberately committed test identity (sanctioned for §4.1
+  sweeps).
+- **Allowlisted test phone — the owner's personal WhatsApp number.** The raw
+  number enters only CANARY-session config and `~/qc-evidence/` (never committed
+  text — aliased per §4.1); supplied by the owner at session time. Lead/contact
+  rows it creates are flagged and reconciled per the session's cleanup plan.
+- **Browser-load funnel leg — named home: dedicated `QC-6c` CANARY session**
+  (chosen over folding into QC-10). Schedulable any time after QC-7 in a suitable
+  window. Scope: controlled browser loads per destination — including the two
+  zero-delivery ad variants (F-019) — proving deployed page JS → session/UTM
+  capture → CTA click → `wa_ref` linkage; then the test-phone WhatsApp leg proving
+  signed inbound → durable workflow → lead/attribution → CAPI eligibility; with a
+  written cleanup/reconciliation plan and synthetic-session marking so QC visits
+  are excludable from metrics (mechanics designed in the session plan; the
+  existing `testlv-` convention is the model). Requires session-level CANARY
+  authorization per §5; also shakes out the D-009 identity machinery QC-7's
+  planted-contact test reuses.
 
 ## D-010 — Corporate Intelligence scope — OPEN (confirm)
 
