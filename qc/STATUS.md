@@ -30,6 +30,8 @@ Open P1s: F-001 (fix session; invariant-first per D-001), F-005 (QC-7 reconcilia
 
 **Then QC-6c (dedicated CANARY session, D-009 recorded):** the browser-load funnel leg — controlled loads per destination incl. the two zero-delivery ad variants (F-019) proving page JS → session/UTM → CTA → wa_ref, then the test-phone WhatsApp leg proving signed inbound → lead/attribution → CAPI eligibility; requires session-level CANARY approval + written cleanup/reconciliation plan (§5) and a suitable window; synthetic-session marking per the testlv- model.
 
+**Fix-session sequencing (owner-agreed 2026-08-16, in-session): all fix sessions DELAY until QC-7 completes.** QC-7 audits the unchanged baseline; the standing advisories (F-041 reboot playbook, F-039 CSV rule) are the compensating controls in the interim, and D-013 already sanctions the F-014 delay. Ordering constraints after QC-7: (1) service-layer bundle (F-016+F-041+F-015+D-012 install, + auto-organic-ig-post retirement + #qc-scratch creation) lands BEFORE QC-9 (Paloma dependency) and soon (F-041 = calendar-time risk); (2) F-020 Meta-DM quarantine + Sarah/OwnerRez arming land BEFORE QC-8/QC-9 audit those surfaces (fix-before-audit → phases audit final config); (3) F-001 session (invariant + F-045 briefs, THEN Meta activation arming) any time — activation stays human-confirmed until it runs (zero exposure); (4) F-014 rebuild + P2/P3 batches + QC-6c slot anywhere after QC-7. Net: QC-7 → service bundle + quarantine + arming → QC-8 → QC-9.
+
 **Exact next command** (start ritual, §8):
 
 ```
