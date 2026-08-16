@@ -31,12 +31,6 @@ None. Open D-rows: D-004, D-006, D-007 (validator), D-009, D-010 (confirm), D-00
 
 ## Next
 
-**QC-2 phase-boundary PR** (Amendment 3 / §3 — one docs-only PR per phase; mirrors QC1B-09/10). Batch the QC-2a + QC-2b `qc/` artifacts to `main`. **Needs owner authorization** (BUSINESS: PR create + docs-only fast-forward; owner runs `gh pr merge` via `!`). Pre-flight like QC1B-09: diff vs `main` must touch `qc/**` only (+ any owner-named file); `npm run check:secrets` on the branch must be exit 0; §4.1 redaction sweep over the full diff must be clean (no channel IDs/tokens/UUIDs/phones/provider IDs/emails). **Deployed runtime baseline stays `2983ed0`** (docs-only, no release ceremony).
+**Immediate (session 7, owner-authorized):** QC-2 phase-boundary PR (Amendment 3 / §3; mirrors QC1B-09/10). Pre-flight PASSED (QC2B-13: qc/**-only diff, check:secrets 0, §4.1 sweep clean) → agent pushes branch + `gh pr create` (docs-only: QC-2a rows QC2A-01…11, QC-2b rows QC2B-01…13, F-025/F-026/F-027/F-028 + F-021 validated, D-002 Cal.com + D-012 rows, webhook-surface dispositions) → **owner merges via `! gh pr merge <N>`** → agent runs docs-only fast-forward of production `main` + verification (ff-ancestry, incoming files qc/**-only, clean tree, code diff vs 2983ed0 outside qc/+.claude empty, newest deploy record still 2983ed0) and records the outcome in a post-merge commit. **Deployed runtime baseline stays `2983ed0`** — no release ceremony.
 
-**Exact next command** (start ritual, §8, real repo root):
-
-```
-git -C ~/.openclaw/SocialSol status
-```
-
-Expected: clean `main` @ `4b251ff`. Then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §3 + §QC-2 Exit, and (with owner authorization) run the QC-2 phase-boundary PR pre-flight → push → owner-run merge → agent-run docs-only ff. After the PR merges, QC-3 (State, schema, backup, recovery, scheduling, observability) is the next phase; its §12 handoffs are seeded (0-byte `crm/data/resort-crm.db`, snapshot WAL/SHM siblings, offsite RPO/RTO, node_modules/toolchain rebuild row per F-025). Worktree `node_modules` from QC-2a remains reusable for FIXTURE suites. All RO/FIXTURE unless a new authorization line says otherwise.
+**Then: QC-3 — State, schema, backup, recovery, scheduling, observability** (plan §QC-3; QC-3a = DB identity + schema + integrity, QC-3b = recovery matrix + backups/offsite + scheduling/observability). Start ritual (§8, real repo root): `git -C ~/.openclaw/SocialSol status` → expected clean `main` @ the post-merge SHA; then `cd ~/qc-worktree`, read `qc/STATUS.md`, read plan §QC-3. Seeded handoffs: 0-byte `crm/data/resort-crm.db` (deploy-day stray), snapshot WAL/SHM siblings, offsite RPO/RTO (D-006 open), node_modules/toolchain rebuild row (F-025), `/tmp` logging on hand-installed + 5 templated jobs (QC1B-03). Worktree `node_modules` from QC-2a reusable for FIXTURE suites. All RO/FIXTURE unless a new authorization line says otherwise.
