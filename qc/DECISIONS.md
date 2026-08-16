@@ -64,15 +64,36 @@ Seeded from QC Plan v3 §11. D-001 and D-002 block QC-0 exit; D-011 blocks part 
   wanted). Each gap is a D-001-vs-runtime discrepancy to disposition in QC-7's
   reconciliation (F-005), fix-listed per D-008 — not silently armed.
 
-**Walkthrough sub-points (same session, recorded below as answered):**
+**Walkthrough sub-points — ANSWERED same session (owner, 2026-08-16):**
 
-- Autonomous Meta pause/decrease ratification (the built safety net) — pending.
-- Aggregate cap: ratify 80.00 USD/day as the owner-approved aggregate + owner-only
-  change procedure — pending.
-- Autonomous-activation arming order vs F-001 invariant — pending.
-- Regina Airbnb-thread: build+arm now vs grant-only until requested — pending.
-- Sarah auto-send scope (all guest-correspondence replies vs carve-outs) — pending.
-- F-035(c) `auto-organic-ig-post` gateway-cron job disposition — pending.
+- **Autonomous Meta pause/decrease — RATIFIED as built.** The nine-condition safety
+  net (verified QC6-03) is intended behavior; stays live; QC-7 reconciliation records
+  the row as MATCHED.
+- **Aggregate cap — RATIFIED at 80.00 USD/day; changes are OWNER-ONLY.** Any request
+  to change `optimizer_config.budget_cap_daily` routes to the owner; the system never
+  raises the aggregate autonomously.
+- **Autonomous-activation arming order — INVARIANT FIRST.** Autonomous activation
+  arms only in/after the F-001 fix session: the machine-enforced creative/landing-
+  review invariant + regression test (and committed briefs per F-045 for governed
+  campaigns) land BEFORE the human `!meta confirm` backstop is removed.
+- **Regina Airbnb-thread — GRANT-ONLY for now.** Authority recorded; nothing is
+  built/armed until the owner requests the feature; QC-7 verifies no send path exists
+  (as designed).
+- **Sarah auto-send scope — ALL inbound guest-correspondence replies, BOTH providers
+  (Gmail + OwnerRez).** Arming via the release path; every provenance/readback/
+  no-second-send gate binds.
+- **F-035(c) `auto-organic-ig-post` gateway-cron — RETIRE.** The un-inventoried cron
+  job is NOT sanctioned; it gets disabled in a fix session and organic IG posting
+  moves onto the sanctioned autonomous `social.*` workflow surface. (Partial F-035
+  disposition; the inventory/manifest work and the other cron jobs' dispositions
+  remain with F-035.)
+
+**D-001 is now FULLY RECORDED — owner sign-off 2026-08-16 ("Confirmed — D-001
+complete"). QC-7 gate satisfied.** Arming changes implied by grants that exceed the
+built surface (Meta autonomous activation [after F-001], OwnerRez mutation autopilot,
+Sarah auto-send both providers) are fix-list items through the config/release path
+(D-008); F-005 closes only after QC-7 reconciles runtime/docs/policy to this matrix
+and dispositions every discrepancy.
 
 ## D-002 — Transport authorization audit — PARTIALLY RECORDED (blocks QC-0 exit for recorded rows)
 
