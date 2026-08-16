@@ -46,12 +46,13 @@ Alert layers that exist: **(A)** Healthchecks.io external dead-man (14 checks; r
 - Restores go **only to disposable copies in scratch space** (D-006). The drill script already conforms (`tempfile.TemporaryDirectory`).
 - Offsite retrieval: `gog drive ls --parent <DRIVE-BACKUP-FOLDER> --account <resort Workspace owner account>` / `gog drive download <fileId> --out <scratch>` (config: `secrets/resort-backup.json`; values in E-QC3B-03). Proven 2026-08-15: newest artifact byte-identical to local (sha256 73cfe1a9…80dcb both sides); locally-pruned daily crm-2026-08-14 retrieved intact (`Salted__` header, correct size).
 - Decrypt: `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:<passphrase_file>` → gunzip → `PRAGMA quick_check`.
-- **Until F-031 closes, host loss = backups unrecoverable** (passphrase single-homed).
+- **Key lineage after the 2026-08-15 ~19:16 PDT owner-directed rotation (QC3B-11):** artifacts **≤ `crm-2026-08-15T213917Z`** (118 files: all offsite history + pre-rotation local) decrypt ONLY with `…/resort-backup-passphrase.pre-rotation-20260815` (600, same dir — **never delete**); artifacts **≥ `crm-2026-08-16T021807Z`** use the current `resort-backup-passphrase`. Both proven by attempted decrypt (E-QC3B-16).
+- **Until F-031's old-key half closes, host loss = pre-rotation history unrecoverable** (old key still single-homed); new-key artifacts recoverable iff the owner retains the current passphrase off-host.
 
 ## 4. Remaining drill (D-006 window: Mon 2026-08-17 10:00–16:00 PT)
 
 Saturday session honored the conservative D-006 reading: retrieval + RO only; the timed decrypt/restore waits for the weekday window.
 
 1. Preflight (RO): confirm weekday+window; live-state active-sends check (`mode=ro`: pending/queued outbox rows = 0 due now, no queued runs, no due outreach in the next ~15 min — graph-paulina dispatches every 300s when due), no deploy in progress (no `runtime/production-release.lock`), inside 10:00–16:00 (outside guest quiet hours by construction).
-2. Timed off-host-format drill (FIXTURE, scratch only), on the two already-retrieved offsite artifacts in `~/qc-evidence/QC3B/offsite/`: decrypt → gunzip → quick_check → QC3A oracle probes; record end-to-end RTO (retrieval[measured 2026-08-15: seconds] + restore + verify) vs ≤4h; verify the **offsite-only** crm-2026-08-14 daily decrypts with the same key (proves offsite artifacts + key lineage, not just today's).
-3. Record QC3B-11 row; close F-018's remaining half; update FINDINGS/RISK_HYPOTHESES/STATUS; then the QC-3 phase-boundary PR (Amendment 3; owner runs `gh pr merge` via `!`).
+2. Timed off-host-format drill (FIXTURE, scratch only), on the two already-retrieved offsite artifacts in `~/qc-evidence/QC3B/offsite/`: decrypt **with the pre-rotation key file** (both artifacts predate the QC3B-11 rotation) → gunzip → quick_check → QC3A oracle probes; record end-to-end RTO (retrieval[measured 2026-08-15: seconds] + restore + verify) vs ≤4h; verify the **offsite-only** crm-2026-08-14 daily decrypts (proves offsite artifacts + old-key lineage). Optionally repeat on the offsite copy of new-key `crm-2026-08-16T021807Z` for current-key lineage.
+3. Record QC3B-12 row; close F-018's remaining half; update FINDINGS/RISK_HYPOTHESES/STATUS; then the QC-3 phase-boundary PR (Amendment 3; owner runs `gh pr merge` via `!`).
