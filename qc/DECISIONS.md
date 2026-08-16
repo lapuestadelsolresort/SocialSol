@@ -35,7 +35,11 @@ Seeded from QC Plan v3 §11. D-001 and D-002 block QC-0 exit; D-011 blocks part 
 
 - **Cal.com inbound booking webhook recorded 2026-08-15 (owner):** recognized/authorized surface. Currently dormant-by-config (`secrets/calcom.json` absent → every request 503 fail-closed); fail-closed-by-config accepted as the interim control; mounted-route violation probes deferred to QC-10 (QC2B-12). Meta inbound-webhook mounted-route probes assigned to QC-8 the same day (QC2B-10).
 
-**Still open:** owner cash-flow command (read-model surface).
+- **Owner cash-flow command surface recorded 2026-08-16 (owner, in-session): AUTHORIZED AS BUILT.** CLI report + the enabled chat-agent plugin (gated to one agent) both intended; the local-only `--apply-reconciliation` link writer stays available. Verified state at decision time: GET-only OwnerRez client, deterministic report, fail-closed plugin, numbers provider-verified (QC5-05). The CLI's writable-DB-open vs read-only claim is F-042 (P3 fix-list; RO handle proven sufficient).
+
+**D-002 is now fully recorded — no open rows.**
+
+- **QC-5 phase-boundary authorization recorded 2026-08-16 (owner, in-session): agent-run END-TO-END** (push, PR create, merge, docs-only fast-forward of production main), BUSINESS-scoped to this boundary only; owner-run push fallback if the permission classifier blocks; ancestry + incoming-files proofs and post-ff runtime-baseline verification required per the QC3B-13/QC4B-04 pattern.
 
 ## D-003 — Max plan tier and usable session length — RECORDED 2026-08-15
 
