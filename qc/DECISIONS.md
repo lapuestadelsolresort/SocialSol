@@ -263,3 +263,20 @@ always enforce items 1-5 at send regardless of edit_override, plus a regression 
 edit that trips the content gate, then a post-edit suppression before the scheduled send; one
 email per override row; campaign not paused; 5 edited drafts ever, all terminal; not fired) — the
 compensating context supporting P2.
+
+## D-015 — F-047 severity + QC-7 phase boundary — RECORDED 2026-08-16
+
+**Owner (2026-08-16, in-session, QC-7b session 15):**
+
+- **F-047 (Paulina edit-override consent-bypass) — CONFIRMED P2.** Bounded and
+  compensated (requires a prior human edit, one email per override row, 5 edits ever
+  all terminal, never fired). Fix lands in the D-008 P2/P3 batch: scope the send-time
+  carve-out to content items 6/7 only, items 1-5 always enforce at send time, plus a
+  regression test (suppressed+edit_override → cancelled). QC-7b evidence that Regina
+  is NOT affected (auto-send.js has no carve-out; FIXTURE case A3) recorded with the
+  finding.
+- **QC-7 phase-boundary merge authorized agent-run END-TO-END** — push, PR create,
+  merge, docs-only fast-forward of production main (BUSINESS-scoped, this boundary
+  only; owner-run push fallback if the permission classifier blocks; ancestry +
+  incoming-files proofs and post-ff runtime-baseline verification required, per the
+  QC4B-04/QC5-07/QC6-11 pattern).
