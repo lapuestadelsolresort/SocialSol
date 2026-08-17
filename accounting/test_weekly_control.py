@@ -138,6 +138,17 @@ def make_ledger(directory, rows):
     return str(path)
 
 
+def fee_purchase(purchase_id, date, amount, memo="SPEI Commission on transfer to X"):
+    """A standalone bank-fee Purchase: every line lands on the fee account."""
+    return {
+        "Id": purchase_id, "TxnDate": date, "TotalAmt": amount,
+        "EntityRef": {"value": "7", "name": "Kapital Mexico"},
+        "PrivateNote": memo,
+        "Line": [{"DetailType": "AccountBasedExpenseLineDetail",
+                  "AccountBasedExpenseLineDetail": {"AccountRef": {"value": "44"}}}],
+    }
+
+
 def receipt_message(days_ago, *, bot=False, files=True, reactions=None):
     message = {"ts": ts_for(days_ago), "text": "receipt"}
     if bot:
@@ -540,43 +551,54 @@ class OtherCheckTests(unittest.TestCase):
         self.assertEqual(result["duplicates_found"], 1)
         self.assertEqual(result["purchases_scanned"], 2)
 
-    def test_spei_fees_on_the_same_day_are_not_duplicates(self):
+    def test_bank_fees_on_the_same_day_are_not_duplicates(self):
         """Each transfer raises its own commission and IVA at identical amounts."""
-        rows = [
-            {"Id": str(2488 + i), "TxnDate": "2026-08-13", "TotalAmt": 0.23,
-             "EntityRef": {"value": "7", "name": "Kapital Mexico"},
-             "PrivateNote": "SPEI Commission on transfer to Sergio Gracia | FX: 17.06"}
-            for i in range(9)
-        ]
+        rows = [fee_purchase(str(2488 + i), "2026-08-13", 0.23) for i in range(9)]
         result = control.check_duplicates(make_context(qbo=StubQBO(rows)))
         self.assertEqual(result["status"], "pass")
-        self.assertEqual(result["spei_fees_excluded"], 9)
+        self.assertEqual(result["bank_fees_excluded"], 9)
 
-    def test_spei_iva_lines_are_excluded_too(self):
+    def test_legacy_format_fees_are_excluded_too(self):
+        """Legacy statements memo fees differently; only the account is stable."""
         rows = [
-            {"Id": str(i), "TxnDate": "2026-08-13", "TotalAmt": 0.04,
-             "EntityRef": {"value": "7"},
-             "PrivateNote": "SPEI IVA on transfer to Sergio Gracia"}
-            for i in (1, 2, 3)
+            fee_purchase(str(i), "2026-04-06", 0.34,
+                         memo="Kapital Mexico Bank: [Bank Fees] SPEI Commission/VAT")
+            for i in (1822, 1833, 1835)
         ]
         result = control.check_duplicates(make_context(qbo=StubQBO(rows)))
         self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["bank_fees_excluded"], 3)
 
     def test_a_real_duplicate_is_still_caught_alongside_fees(self):
         rows = [
-            {"Id": "1", "TxnDate": "2026-08-13", "TotalAmt": 0.23,
-             "EntityRef": {"value": "7"}, "PrivateNote": "SPEI Commission on transfer to X"},
-            {"Id": "2", "TxnDate": "2026-08-13", "TotalAmt": 0.23,
-             "EntityRef": {"value": "7"}, "PrivateNote": "SPEI Commission on transfer to X"},
+            fee_purchase("1", "2026-08-13", 0.23),
+            fee_purchase("2", "2026-08-13", 0.23),
             {"Id": "3", "TxnDate": "2026-07-31", "TotalAmt": 10.02,
-             "EntityRef": {}, "PrivateNote": "ANTHROPIC"},
+             "EntityRef": {}, "PrivateNote": "ANTHROPIC", "Line": []},
             {"Id": "4", "TxnDate": "2026-07-31", "TotalAmt": 10.02,
-             "EntityRef": {}, "PrivateNote": "ANTHROPIC"},
+             "EntityRef": {}, "PrivateNote": "ANTHROPIC", "Line": []},
         ]
         result = control.check_duplicates(make_context(qbo=StubQBO(rows)))
         self.assertEqual(result["status"], "FAIL")
         self.assertEqual(result["duplicates_found"], 1)
         self.assertEqual(result["duplicates"][0]["ids"], ["3", "4"])
+
+    def test_a_purchase_that_merely_includes_a_fee_line_is_not_a_fee_record(self):
+        """An embedded commission does not make the whole expense a fee."""
+        rows = [
+            {"Id": "1", "TxnDate": "2026-07-02", "TotalAmt": 1451.37,
+             "EntityRef": {"value": "5"}, "PrivateNote": "Daniel monthly salary",
+             "Line": [
+                 {"DetailType": "AccountBasedExpenseLineDetail",
+                  "AccountBasedExpenseLineDetail": {"AccountRef": {"value": "43"}}},
+                 {"DetailType": "AccountBasedExpenseLineDetail",
+                  "AccountBasedExpenseLineDetail": {"AccountRef": {"value": "44"}}},
+             ]},
+        ] * 1
+        rows = rows + [dict(rows[0], Id="2")]
+        result = control.check_duplicates(make_context(qbo=StubQBO(rows)))
+        self.assertEqual(result["bank_fees_excluded"], 0)
+        self.assertEqual(result["status"], "FAIL")
 
     def test_a_reviewed_pair_can_be_accepted_by_allowlist(self):
         rows = [
@@ -589,6 +611,62 @@ class OtherCheckTests(unittest.TestCase):
         result = control.check_duplicates(make_context(config=config, qbo=StubQBO(rows)))
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["groups_accepted_by_allowlist"], 1)
+
+    def test_a_vendor_that_bills_in_identical_increments_can_be_exempted(self):
+        """Nine $4.00 ad charges on one date are spend, not nine double entries."""
+        rows = [
+            {"Id": str(1895 + i), "TxnDate": "2026-05-26", "TotalAmt": 4.0,
+             "EntityRef": {"value": "9", "name": "Facebook"},
+             "PrivateNote": "", "Line": []}
+            for i in range(9)
+        ]
+        config = base_config(receipt_coverage={"duplicate_exempt_vendors": ["facebook"]})
+        result = control.check_duplicates(make_context(config=config, qbo=StubQBO(rows)))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["exempt_vendor_rows_excluded"], 9)
+
+    def test_vendor_exemption_matches_case_insensitively_on_a_substring(self):
+        rows = [
+            {"Id": str(i), "TxnDate": "2026-05-26", "TotalAmt": 4.0,
+             "EntityRef": {"value": "9", "name": "Meta Platforms Ireland"},
+             "PrivateNote": "", "Line": []}
+            for i in (1, 2)
+        ]
+        config = base_config(receipt_coverage={"duplicate_exempt_vendors": ["META platforms"]})
+        result = control.check_duplicates(make_context(config=config, qbo=StubQBO(rows)))
+        self.assertEqual(result["status"], "pass")
+
+    def test_an_unexempted_vendor_is_still_checked(self):
+        rows = [
+            {"Id": str(i), "TxnDate": "2026-04-06", "TotalAmt": 457.72,
+             "EntityRef": {"value": "5", "name": "Daniel Business"},
+             "PrivateNote": "", "Line": []}
+            for i in (1754, 1813, 1840)
+        ]
+        config = base_config(receipt_coverage={"duplicate_exempt_vendors": ["facebook"]})
+        result = control.check_duplicates(make_context(config=config, qbo=StubQBO(rows)))
+        self.assertEqual(result["status"], "FAIL")
+        self.assertEqual(result["duplicates_found"], 1)
+        self.assertEqual(result["duplicates"][0]["count"], 3)
+
+    def test_no_exemptions_configured_means_nothing_is_skipped(self):
+        rows = [
+            {"Id": str(i), "TxnDate": "2026-05-26", "TotalAmt": 4.0,
+             "EntityRef": {"value": "9", "name": "Facebook"},
+             "PrivateNote": "", "Line": []}
+            for i in (1, 2)
+        ]
+        result = control.check_duplicates(make_context(qbo=StubQBO(rows)))
+        self.assertEqual(result["exempt_vendor_rows_excluded"], 0)
+        self.assertEqual(result["status"], "FAIL")
+
+    def test_fee_detection_needs_the_configured_account(self):
+        config = base_config(qbo_accounts={"expenses": {
+            "uncategorized_expense": {"id": "42"}, "group_activities": {"id": "40"},
+            "supplies_group": {"id": "41"},
+        }})
+        with self.assertRaises(control.CheckError):
+            control.check_duplicates(make_context(config=config))
 
     def test_allowlist_does_not_cover_a_group_it_only_partly_names(self):
         rows = [

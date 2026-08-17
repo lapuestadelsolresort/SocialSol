@@ -252,19 +252,22 @@ def _line_accounts(purchase):
     return accounts
 
 
-SPEI_FEE_MEMO = re.compile(r"^\s*SPEI (Commission|IVA) on transfer", re.I)
-
-
-def is_spei_fee(purchase):
+def is_fee_purchase(purchase, bank_fee_id):
     """A standalone bank-fee Purchase raised alongside a SPEI transfer.
 
     Every transfer raises its own commission and IVA at the same tiny amounts,
     so several land on one day with identical date, amount and vendor and no
     Kapital reference to tell them apart. They are distinct fees for distinct
     transfers, deduplicated by their own parent matcher — grouping them as
-    duplicates flags normal activity every week.
+    duplicates flags normal activity as a books-integrity failure.
+
+    Recognised by where the money lands, not by the memo: the current pipeline
+    writes "SPEI Commission on transfer to X" while the legacy statements
+    wrote "Kapital Mexico Bank: [Bank Fees] SPEI Commission/VAT", and a memo
+    pattern only ever covers the formats that existed when it was written.
     """
-    return bool(SPEI_FEE_MEMO.match(purchase.get("PrivateNote") or ""))
+    accounts = _line_accounts(purchase)
+    return bool(accounts) and accounts == {bank_fee_id}
 
 
 ATTRIBUTION_KEYWORDS = (
@@ -365,17 +368,31 @@ def check_receipt_channel_coverage(context):
 # ---------------------------------------------------------------------------
 
 def check_duplicates(context):
-    """The same date, amount and vendor booked more than once."""
+    """The same date, amount and vendor booked more than once.
+
+    Two kinds of repeat are normal rather than suspicious, and both are
+    excluded before grouping: standalone bank fees, and vendors that bill in
+    identical increments many times a day — an ad platform charging $4 nine
+    times on one date is spend, not a double entry.
+    """
     purchases = purchases_in_window(context)
-    allowlist = {
-        str(entry) for entry in
-        ((context.config.get("receipt_coverage") or {}).get("duplicate_allowlist") or [])
-    }
+    bank_fee_id = _account_id(context.config, "bank_fee")
+    settings = context.config.get("receipt_coverage") or {}
+    allowlist = {str(entry) for entry in (settings.get("duplicate_allowlist") or [])}
+    exempt_vendors = [
+        str(name).strip().lower()
+        for name in (settings.get("duplicate_exempt_vendors") or [])
+        if str(name).strip()
+    ]
     groups = defaultdict(list)
-    fees_skipped = 0
+    fees_skipped = exempt_skipped = 0
     for purchase in purchases:
-        if is_spei_fee(purchase):
+        if is_fee_purchase(purchase, bank_fee_id):
             fees_skipped += 1
+            continue
+        vendor_name = ((purchase.get("EntityRef") or {}).get("name") or "").lower()
+        if vendor_name and any(name in vendor_name for name in exempt_vendors):
+            exempt_skipped += 1
             continue
         vendor = (purchase.get("EntityRef") or {}).get("value", "none")
         groups[(purchase.get("TxnDate"), str(purchase.get("TotalAmt")), vendor)].append(purchase)
@@ -407,7 +424,8 @@ def check_duplicates(context):
         "test": "duplicate_detection",
         "status": "pass" if not duplicates else "FAIL",
         "purchases_scanned": len(purchases),
-        "spei_fees_excluded": fees_skipped,
+        "bank_fees_excluded": fees_skipped,
+        "exempt_vendor_rows_excluded": exempt_skipped,
         "groups_accepted_by_allowlist": accepted,
         "date_range": f"{context.window_start.isoformat()} to {context.today.isoformat()}",
         "duplicates_found": len(duplicates),
