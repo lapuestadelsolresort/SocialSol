@@ -12,15 +12,88 @@ Seeded from QC Plan v3 §11. D-001 and D-002 block QC-0 exit; D-011 blocks part 
 - All suppression, verification, provenance, cap, and fail-closed gates bind unchanged under autopilot. Autonomy is not gatelessness.
 - **Meta DMs — owner does not recognize this feature; intended state is disabled/nonexistent** (see D-002 and QC-1 T7).
 
-**Still open (ask when hit; QC-7 gate requires all rows recorded):**
+**Recorded 2026-08-16 (owner, in-session, session 13 continuation):**
 
-- Regina Airbnb-thread contacts (default manual as built unless the owner states otherwise)
-- Sarah guest-correspondence replies — keep proposal + same-user-confirmation flow, or auto-send too?
-- Meta campaign activation & budget increase
-- Autonomous Meta pause/decrease
-- QBO writes
-- OwnerRez mutations
-- Postiz publishing
+- **Meta campaign activation — AUTONOMOUS authorized.** The system may activate a Meta
+  campaign without per-action human approval. As built, activation is human-confirmed
+  (`marketing.change.propose` → exact `!meta confirm`, same-proposer) and
+  `meta.campaign.autonomous` permits pause/budget-decrease only — so this grant EXCEEDS
+  the built surface. Recorded as intent (D-013 precedent): the arming change goes
+  through the config/release path in a fix session, and the F-001 sequencing decision
+  (invariant-first vs accepted-risk) is nailed down in the walkthrough below.
+- **Meta per-campaign budget increase — AUTONOMOUS authorized, bounded by an
+  owner-approved AGGREGATE budget.** The total daily budget across all Meta/IG
+  campaigns is the owner's decision; the system may never raise the aggregate on its
+  own. Mechanism as built: `optimizer_config.budget_cap_daily` (80.00 USD/day at
+  recording time) enforced at budget-increase preflight against the projected ACTIVE
+  total (verified QC6-02). Cap value ratification + change procedure in the
+  walkthrough below.
+- **QBO writes — FULL AUTOPILOT authorized.** (`qbo.write` already live in policy;
+  duplicate guards, `requestid`, write/readback, ambiguous-failure review all bind.)
+- **OwnerRez mutations — FULL AUTOPILOT authorized.** As built: immutable proposal +
+  same-user confirm + 15-min expiry + fresh precondition + execute-once + readback.
+  Grant exceeds the built surface → recorded as intent; arming (removing per-action
+  confirm) via the config/release path in a fix session; every preflight/readback/
+  manual-review gate binds unchanged.
+- **Postiz publishing — FULL AUTOPILOT authorized** for the sanctioned durable-workflow
+  surface (`social.publish_routine` / `social.publish_due` / `social.content.publish`
+  with recover-before-create, readback, and double-post guards — verified QC6-09; the
+  routine/due pair is already autonomous as built). Whether the F-035(c) uninventoried
+  gateway-cron `auto-organic-ig-post` job is ALSO sanctioned is decided in the
+  walkthrough below — this grant does not implicitly bless un-inventoried producers.
+- **Regina Airbnb-thread contacts — FULL AUTOPILOT authorized.** As built (per plan
+  §9 QC-7) no send path is expected to exist for Airbnb-thread contacts; QC-7 verifies.
+  Grant recorded as intent; any path that is built/armed goes through the release path
+  with all suppression, provenance, language-exclusion, already-contacted, and cap
+  gates binding.
+- **Sarah guest-correspondence replies — AUTO-SEND authorized.** As built: immutable
+  proposal + same-user confirmation. Grant exceeds the built surface → recorded as
+  intent; arming via the config/release path; provider selection from the inbound
+  record, execute-once, Gmail-Sent/OwnerRez readback, and retry-without-second-send
+  all bind unchanged. Scope confirmation in the walkthrough below.
+- **Unchanged:** WhatsApp guest sends keep the human-typed `!wa` invariant (including
+  any Regina reactivation of WhatsApp-provenance contacts). Autonomy is not
+  gatelessness: every suppression, verification, provenance, cap, and fail-closed gate
+  binds identically under autopilot, for every row above.
+- **Executor note (owner's stated premise, to be verified in QC-7):** the owner
+  expects existing workflows to already carry these authorities. Verified state at
+  recording time: QBO writes and routine/due publishing are live-autonomous as built;
+  Meta activation, per-campaign budget increase, OwnerRez mutations, and Sarah replies
+  are built confirm-gated (grant exceeds build → arming = fix-list items); Regina
+  Airbnb-thread has no known send path (grant exceeds build → build+arm if/when
+  wanted). Each gap is a D-001-vs-runtime discrepancy to disposition in QC-7's
+  reconciliation (F-005), fix-listed per D-008 — not silently armed.
+
+**Walkthrough sub-points — ANSWERED same session (owner, 2026-08-16):**
+
+- **Autonomous Meta pause/decrease — RATIFIED as built.** The nine-condition safety
+  net (verified QC6-03) is intended behavior; stays live; QC-7 reconciliation records
+  the row as MATCHED.
+- **Aggregate cap — RATIFIED at 80.00 USD/day; changes are OWNER-ONLY.** Any request
+  to change `optimizer_config.budget_cap_daily` routes to the owner; the system never
+  raises the aggregate autonomously.
+- **Autonomous-activation arming order — INVARIANT FIRST.** Autonomous activation
+  arms only in/after the F-001 fix session: the machine-enforced creative/landing-
+  review invariant + regression test (and committed briefs per F-045 for governed
+  campaigns) land BEFORE the human `!meta confirm` backstop is removed.
+- **Regina Airbnb-thread — GRANT-ONLY for now.** Authority recorded; nothing is
+  built/armed until the owner requests the feature; QC-7 verifies no send path exists
+  (as designed).
+- **Sarah auto-send scope — ALL inbound guest-correspondence replies, BOTH providers
+  (Gmail + OwnerRez).** Arming via the release path; every provenance/readback/
+  no-second-send gate binds.
+- **F-035(c) `auto-organic-ig-post` gateway-cron — RETIRE.** The un-inventoried cron
+  job is NOT sanctioned; it gets disabled in a fix session and organic IG posting
+  moves onto the sanctioned autonomous `social.*` workflow surface. (Partial F-035
+  disposition; the inventory/manifest work and the other cron jobs' dispositions
+  remain with F-035.)
+
+**D-001 is now FULLY RECORDED — owner sign-off 2026-08-16 ("Confirmed — D-001
+complete"). QC-7 gate satisfied.** Arming changes implied by grants that exceed the
+built surface (Meta autonomous activation [after F-001], OwnerRez mutation autopilot,
+Sarah auto-send both providers) are fix-list items through the config/release path
+(D-008); F-005 closes only after QC-7 reconciles runtime/docs/policy to this matrix
+and dispositions every discrepancy.
 
 ## D-002 — Transport authorization audit — PARTIALLY RECORDED (blocks QC-0 exit for recorded rows)
 
@@ -86,9 +159,40 @@ Jason = business authority. Sarah = guest and email UX surfaces. Accounting reco
 
 **Owner (2026-08-15): confirmed as proposed.** P0 contained immediately with explicit authorization; P1 fixed in a dedicated session through the full release path; P2/P3 batched; every fix carries a regression test and post-deploy production verification.
 
-## D-009 — Test identities and markers — OPEN
+## D-009 — Test identities and markers — RECORDED 2026-08-16
 
-`[QC TEST]` prefix in production channels vs a `#qc-scratch` channel; allowlisted test email addresses and phone numbers for CANARY actions.
+**Owner (2026-08-16, in-session, session 13 continuation; walkthrough per the
+D-006-before-QC-3b pattern):**
+
+- **Channel marker — dedicated `#qc-scratch` channel** (chosen over the `[QC TEST]`
+  prefix). QC-authored test messages post there. Creating the channel + its
+  channel-policy/capability entries goes through the config/release path →
+  **fix-list item** (prerequisite only for CANARYs that need QC-authored Slack
+  posts). Nuance recorded: system-routed side effects of canary events (e.g., a
+  test WhatsApp inbound surfacing in `#whatsapp` via normal forwarding) land in
+  production channels BY DESIGN — the canary exercises the real path; those
+  artifacts are identified by the allowlisted test identities and handled by each
+  CANARY's written cleanup/reconciliation plan, never redirected.
+- **Allowlisted test email — `jason@lapuestadelsolresort.com`** (owner-supplied
+  in-session). Used by QC-7's planted do-not-contact/suppression test and any
+  email CANARY; every send still requires session-level CANARY approval. This
+  address string is a deliberately committed test identity (sanctioned for §4.1
+  sweeps).
+- **Allowlisted test phone — the owner's personal WhatsApp number.** The raw
+  number enters only CANARY-session config and `~/qc-evidence/` (never committed
+  text — aliased per §4.1); supplied by the owner at session time. Lead/contact
+  rows it creates are flagged and reconciled per the session's cleanup plan.
+- **Browser-load funnel leg — named home: dedicated `QC-6c` CANARY session**
+  (chosen over folding into QC-10). Schedulable any time after QC-7 in a suitable
+  window. Scope: controlled browser loads per destination — including the two
+  zero-delivery ad variants (F-019) — proving deployed page JS → session/UTM
+  capture → CTA click → `wa_ref` linkage; then the test-phone WhatsApp leg proving
+  signed inbound → durable workflow → lead/attribution → CAPI eligibility; with a
+  written cleanup/reconciliation plan and synthetic-session marking so QC visits
+  are excludable from metrics (mechanics designed in the session plan; the
+  existing `testlv-` convention is the model). Requires session-level CANARY
+  authorization per §5; also shakes out the D-009 identity machinery QC-7's
+  planted-contact test reuses.
 
 ## D-010 — Corporate Intelligence scope — OPEN (confirm)
 
@@ -145,3 +249,34 @@ runtime-baseline verification still required, per the QC2B-14/QC3B-13 pattern).
   only; owner-run push fallback if the permission classifier blocks; ancestry +
   incoming-files proofs and post-ff runtime-baseline verification required, per the
   QC5-07/QC4B-04 pattern).
+
+## D-015 — F-047 Paulina edit-override consent-bypass severity — RECORDED 2026-08-16
+
+**Owner (2026-08-16, in-session, QC-7a session 14): keep it a P2.**
+
+F-047 (Paulina edit-override send-time carve-out downgrades suppression [item 1] and
+do_not_contact [item 2] to advisory when an `edit_override` marker is present, allowing a send
+to a suppressed/DNC contact — reproduced in FIXTURE case D, QC7A-03) stays **P2**, not P1. It
+remains a D-008 P2-batch fix-list item: scope the send-time carve-out to content items 6/7 only,
+always enforce items 1-5 at send regardless of edit_override, plus a regression test
+(suppressed+edit_override → cancelled, not sent). Reachability is bounded (requires a prior human
+edit that trips the content gate, then a post-edit suppression before the scheduled send; one
+email per override row; campaign not paused; 5 edited drafts ever, all terminal; not fired) — the
+compensating context supporting P2.
+
+## D-015 — F-047 severity + QC-7 phase boundary — RECORDED 2026-08-16
+
+**Owner (2026-08-16, in-session, QC-7b session 15):**
+
+- **F-047 (Paulina edit-override consent-bypass) — CONFIRMED P2.** Bounded and
+  compensated (requires a prior human edit, one email per override row, 5 edits ever
+  all terminal, never fired). Fix lands in the D-008 P2/P3 batch: scope the send-time
+  carve-out to content items 6/7 only, items 1-5 always enforce at send time, plus a
+  regression test (suppressed+edit_override → cancelled). QC-7b evidence that Regina
+  is NOT affected (auto-send.js has no carve-out; FIXTURE case A3) recorded with the
+  finding.
+- **QC-7 phase-boundary merge authorized agent-run END-TO-END** — push, PR create,
+  merge, docs-only fast-forward of production main (BUSINESS-scoped, this boundary
+  only; owner-run push fallback if the permission classifier blocks; ancestry +
+  incoming-files proofs and post-ff runtime-baseline verification required, per the
+  QC4B-04/QC5-07/QC6-11 pattern).
