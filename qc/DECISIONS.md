@@ -511,3 +511,51 @@ session's Authorizations line was blank):**
 - **Budget-increase autonomy NOT armed** (D-001 grants it; this session's
   queue item was activation only). Arming it later is one line in
   `autonomous_operations` plus session authorization.
+
+## D-021 — F-014 fix session authorization + scope — RECORDED 2026-08-17
+
+**Owner (2026-08-17, start-of-session, F-014 fix session; asked because the
+session's Authorizations line was blank):**
+
+- **BUSINESS + OUTAGE AUTHORIZED — F-014 ONLY.** The weekly accounting
+  control rebuild runs the full release path agent-run (fix branch → tests →
+  PR create → CI verify → merge → fast-forward of production main → deploy
+  incl. crm/worker restarts). Merges/ff owner-run via `!` commands if the
+  permission classifier blocks (QCFS2-01/QCFS3-01 precedent).
+- **P2/P3 batch DEFERRED** to a follow-on session (owner chose the scoped
+  option over "F-014 + P2/P3 batch"). This session lands one reviewable
+  change against one P1 anchor, consistent with D-008's "P1 = dedicated
+  session, full release path". The batch (F-052, F-053, F-054, F-055, F-056,
+  F-057 residual, F-058, F-019 threshold, F-047, F-048/49/50, F-032(c),
+  F-042/43/46, F-039) stays the queue head after this session.
+- **D-004 not answered** (owner answered the authorization question only).
+  The explicit OUTAGE grant supplies this session's window; the executor
+  still runs a live-state preflight and states rollback/abort criteria
+  before the deploy, per plan §5. D-004 remains open for a standing answer.
+
+**Executor design decisions taken under this authorization** (routine calls,
+recorded because they shape the deployed control):
+
+- **Checks 1 and 6 become terminal via live read-only Slack scans**, not by
+  reconciling the pipeline's own projection. Reconciling the projection
+  would structurally miss the failure the checks exist to catch — a receipt
+  posted to Slack that the pipeline never ingested. Mechanism proven RO this
+  session: `openclaw message read --channel slack --target channel:<id>
+  --limit N [--before <ts>] --json` returns `payload.messages` with `ts`,
+  `text`, `files`, and **`reactions` inline** (`white_check_mark` present),
+  plus `payload.hasMore`; `--before` paging verified to walk strictly older.
+- **Failure semantics split by class**, so the watchdog owns real problems
+  without permanent noise: ERROR (check crashed) and FAIL (integrity
+  violation — duplicates, or unmatched receipts/✅ older than the grace
+  window) → exit 1 + `job_health` failed; WARN (attribution hygiene —
+  orphaned group/food expenses, salary-month advisories) → exit 0 +
+  `job_health` ok, with counts still delivered in the Slack report. A
+  Slack-post failure is itself exit 1 (daily-tests precedent).
+- **Unmatched-receipt grace window (7 days, configurable)** distinguishes
+  in-flight receipts from unbooked ones, so recency lag is not reported as
+  an integrity failure.
+- **No token refresh in the test job at all** (the closure spec's second
+  option): `tests.py` drops its private `_qbo_auth` and uses the sanctioned
+  `qbo_push.QBOClient`, which already does env-aware secrets resolution +
+  `.refresh.lock` flock + tmp/fsync/replace/chmod-600. This also removes
+  writer #4 from F-036.
