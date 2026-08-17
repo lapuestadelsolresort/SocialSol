@@ -19,6 +19,63 @@ Squarespace orders; they enter accounting only through Kapital statements.
 | `fx_rates.py` | MXN/USD exchange rate via the official Banxico FIX API and ignored cache. |
 | `run_classify.py` | Main entry point. Dry-run by default. |
 | `fx_cache/` | Cached daily FX rates (auto-created). |
+| `tests.py` | The weekly integrity control (see below). |
+| `slack_scan.py` | Read-only Slack channel reads used by the weekly control. |
+| `run_weekly_tests.sh` | LaunchAgent entry point for the weekly control. |
+
+## Weekly integrity control
+
+`com.lapuestadelsolresort.kapital-tests` runs Mondays at 08:00 PT and posts a
+report to the accounting channel. Run it by hand with:
+
+```bash
+# Default three-month window
+bash accounting/run_weekly_tests.sh
+
+# Narrower window (months back)
+bash accounting/run_weekly_tests.sh 1
+```
+
+Seven checks, each reaching a terminal verdict and carrying an evidence id
+(`KT-<run>-<check>`) that ties the Slack line to the run record at
+`runtime/state/kapital-tests-last-run.json`:
+
+| Verdict | Meaning | Exit code |
+|---|---|---|
+| `pass` | Ran, found nothing | 0 |
+| `WARN` | Attribution or review backlog for a human | 0 |
+| `FAIL` | Integrity violation — duplicates, or receipts and confirmed payments past the grace window with nothing booked | 1 |
+| `ERROR` | The check could not complete | 1 |
+
+Nonzero also records a `job_health` failure under `resort-kapital-tests`, so
+the watchdog owns the alert. A failed Slack post is itself nonzero — a report
+nobody received is not a report.
+
+Coverage checks read the receipt channels directly (Slack is the authority for
+what was posted), join to `accounting_receipts` by Slack channel + message ts
+for what the pipeline did with it, and treat receipts posted before the
+pipeline's first ledger row as out of scope rather than as failures. Tune the
+window in `config.json`:
+
+```json
+"receipt_coverage": {
+  "grace_days": 7,
+  "start_date": "2026-08-06T19:42:52Z",
+  "duplicate_allowlist": ["2348", "2355"]
+}
+```
+
+All three keys are optional. `grace_days` defaults to 7; an absent
+`start_date` falls back to the earliest receipt the ledger holds (resolved to
+the instant, so receipts posted earlier on the pipeline's first day are not
+counted as misses); `duplicate_allowlist` holds QBO Purchase ids of pairs a
+human has reviewed and accepted, so a decided case stops re-failing every
+week. A group is only accepted when every id in it is listed.
+
+Two things the duplicate check deliberately does not flag: standalone SPEI
+commission and IVA purchases (every transfer raises its own at identical
+amounts, so same-day repeats are normal), and groups whose members carry
+distinct Kapital `Clave` references.
 
 ## Usage
 

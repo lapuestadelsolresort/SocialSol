@@ -1,560 +1,701 @@
 #!/usr/bin/env python3
-"""
-Kapital Accounting Integration Tests
+"""Weekly Kapital accounting integrity control.
 
-Runs 7 audit checks against QBO + Slack receipt channels to ensure
-the accounting infrastructure is solid. Designed to run periodically
-(weekly or on-demand).
+Seven checks, every one of which reaches a terminal verdict. The two that used
+to stop at `needs_slack_scan` — receipt-channel coverage and the Mayela
+checkmark reconciliation — handed prose instructions to an orchestrator that
+no longer exists, so they never produced a result at all; they now do the
+Slack read themselves and answer.
 
-Tests:
-  1. Receipt channel coverage — unmatched Slack receipts vs QBO
-  2. Duplicate detection — same date+amount+vendor in QBO
-  3. Orphaned group activities — no client/booking attribution
-  4. Orphaned food expenses — no client/booking attribution
-  5. Salary month attribution — double salary in same month
-  6. Mayela ✅ reconciliation — confirmed payments without QBO match
-  7. Uncategorized/split expenses — missing categories or multi-line splits
+Verdicts, and what each means for the exit code:
+
+  pass  — the check ran and found nothing
+  WARN  — an attribution or review backlog for a human to work through. The
+          control itself is healthy, so the job still exits 0 and the counts
+          go out with the report.
+  FAIL  — an integrity violation: duplicate bookings, or receipts and
+          confirmed payments older than the grace window with nothing in the
+          books.
+  ERROR — the check could not complete.
+
+FAIL or ERROR anywhere exits nonzero and records a job_health failure, so the
+watchdog owns the alert instead of launchd recording a success. A failed
+Slack post is itself nonzero — a report nobody received is not a report.
+
+QBO access goes through the sanctioned qbo_push.QBOClient, which resolves
+secrets via SOCIALSOL_SECRETS_DIR and refreshes under a flock with an atomic
+mode-600 write. This module performs no credential writes of its own.
+
+Every QBO query pages to exhaustion rather than silently taking the first
+page, and the salary matrix comes from config rather than a copy kept in code.
 """
 
 import json
+import os
 import re
+import sqlite3
+import subprocess
 import sys
-import urllib.request
-import urllib.error
-from datetime import date, datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "automation"))
+
+from qbo_push import QBOClient  # noqa: E402
+from slack_scan import (  # noqa: E402
+    CHECKMARK,
+    SlackScanError,
+    has_reaction,
+    message_ts,
+    read_channel_since,
+    receipt_candidates,
+)
+
+ROOT = Path(__file__).resolve().parent.parent
+JOB_NAME = "resort-kapital-tests"
+PAGE_SIZE = 500
+MAX_ROWS = 20000
+DEFAULT_GRACE_DAYS = 7
+DEFAULT_MONTHS_BACK = 3
+
+# Receipt-ledger statuses, grouped by who the receipt is waiting on.
+CLOSED_STATUSES = {"posted", "ignored"}
+AWAITING_HUMAN_STATUSES = {"needs_review", "awaiting_payment_source"}
+
+
+class CheckError(RuntimeError):
+    """A check could not reach a verdict."""
+
+
+# ---------------------------------------------------------------------------
+# Context
+# ---------------------------------------------------------------------------
+
+def load_config(config_path=None):
+    path = Path(config_path or (Path(__file__).resolve().parent / "config.json"))
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def database_path():
+    """The CRM database the runtime itself resolves to.
+
+    Honours DB_PATH — the same name the Node runtime honours — rather than
+    introducing a third spelling of the path.
+    """
+    return os.environ.get("DB_PATH") or str(ROOT / "crm" / "data" / "crm.db")
+
+
+class Context:
+    """What the checks share: config, QBO, Slack, and the receipt ledger."""
+
+    def __init__(self, client, config, *, slack_account=None, db_path=None,
+                 months_back=DEFAULT_MONTHS_BACK, now=None, runner=subprocess.run):
+        self.client = client
+        self.config = config
+        self.slack_account = slack_account
+        self.db_path = db_path or database_path()
+        self.months_back = months_back
+        self.now = now or datetime.now(timezone.utc)
+        self.runner = runner
+        self._ledger = None
+
+    @property
+    def window_start(self):
+        start = self.now.date().replace(day=1) - timedelta(days=self.months_back * 31)
+        return start.replace(day=1)
+
+    @property
+    def today(self):
+        return self.now.date()
+
+    def coverage_settings(self):
+        settings = self.config.get("receipt_coverage") or {}
+        grace = float(settings.get("grace_days", DEFAULT_GRACE_DAYS))
+        start_raw = settings.get("start_date")
+        start = None
+        if start_raw:
+            try:
+                start = datetime.fromisoformat(
+                    str(start_raw).replace("Z", "+00:00")
+                )
+            except ValueError as exc:
+                raise CheckError(f"receipt_coverage.start_date is not a date: {exc}")
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+        return grace, start
+
+    def receipt_ledger(self):
+        """Receipts the pipeline durably recorded, keyed by Slack identity."""
+        if self._ledger is None:
+            database = Path(self.db_path)
+            if not database.is_file():
+                raise CheckError(f"receipt ledger database not found at {database}")
+            connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+            try:
+                connection.row_factory = sqlite3.Row
+                rows = connection.execute(
+                    "SELECT slack_channel_id, slack_message_id, status, "
+                    "qbo_entity_id, amount, currency, submitted_at "
+                    "FROM accounting_receipts"
+                ).fetchall()
+            finally:
+                connection.close()
+            self._ledger = {
+                (row["slack_channel_id"], row["slack_message_id"]): dict(row)
+                for row in rows
+            }
+        return self._ledger
+
+    def ledger_start(self):
+        """When the receipt pipeline began recording anything at all.
+
+        Receipts posted before that cannot be a pipeline coverage failure —
+        there was no pipeline. They are counted and reported, never failed.
+        Resolved to the instant, not the day: the pipeline went live partway
+        through its first day, and receipts posted earlier that same morning
+        would otherwise read as misses.
+        """
+        stamps = [
+            row.get("submitted_at") for row in self.receipt_ledger().values()
+            if row.get("submitted_at")
+        ]
+        if not stamps:
+            return None
+        try:
+            return datetime.fromisoformat(min(stamps).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    def scan_channel(self, channel_id, since):
+        if not self.slack_account:
+            raise CheckError("OPENCLAW_SLACK_ACCOUNT is not set; Slack scan impossible")
+        since_ts = datetime(
+            since.year, since.month, since.day, tzinfo=timezone.utc
+        ).timestamp()
+        return read_channel_since(
+            channel_id, since_ts,
+            account=self.slack_account,
+            runner=self.runner,
+        )
 
 
 # ---------------------------------------------------------------------------
 # QBO helpers
 # ---------------------------------------------------------------------------
 
-def _qbo_auth() -> Tuple[str, str]:
-    """Return (access_token, base_url) after refreshing if needed."""
-    secrets_path = Path(__file__).parent.parent / 'secrets' / 'quickbooks.json'
-    with open(secrets_path) as f:
-        data = json.load(f)
-
-    realm = data['realm_id']
-    token = data['tokens']['access_token']
-    base = f"https://quickbooks.api.intuit.com/v3/company/{realm}"
-
-    # Quick check if token works
-    try:
-        _qbo_get(base, token, "query?query=SELECT%20count(*)%20FROM%20Purchase%20MAXRESULTS%201&minorversion=75")
-        return token, base
-    except Exception:
-        pass
-
-    # Refresh
-    client_id = data['production']['client_id']
-    client_secret = data['production']['client_secret']
-    refresh = data['tokens']['refresh_token']
-
-    body = (
-        f"grant_type=refresh_token"
-        f"&refresh_token={refresh}"
-        f"&client_id={client_id}"
-        f"&client_secret={client_secret}"
-    ).encode()
-    req = urllib.request.Request(
-        "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
-        data=body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        result = json.loads(resp.read().decode())
-
-    new_access = result['access_token']
-    new_refresh = result.get('refresh_token', refresh)
-    data['tokens']['access_token'] = new_access
-    data['tokens']['refresh_token'] = new_refresh
-    with open(secrets_path, 'w') as f:
-        json.dump(data, f, indent=2)
-    import os
-    os.chmod(str(secrets_path), 0o600)
-
-    return new_access, base
-
-
-def _qbo_get(base: str, token: str, endpoint: str) -> dict:
-    url = f"{base}/{endpoint}"
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-    })
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
-
-
-def _qbo_query(token: str, base: str, sql: str) -> list:
-    """Run a QBO query and return all result rows."""
-    import urllib.parse
-    encoded = urllib.parse.quote(sql)
-    result = _qbo_get(base, token, f"query?query={encoded}&minorversion=75")
-    qr = result.get('QueryResponse', {})
-    # QBO returns entity name as key (Purchase, Deposit, etc)
-    for key in ('Purchase', 'Deposit', 'Transfer', 'Account', 'Vendor'):
-        if key in qr:
-            return qr[key]
+def _entities(response):
+    query_response = (response or {}).get("QueryResponse") or {}
+    for value in query_response.values():
+        if isinstance(value, list):
+            return value
     return []
 
 
-# ---------------------------------------------------------------------------
-# Config loader
-# ---------------------------------------------------------------------------
+def query_all(client, select_clause, where_clause=""):
+    """Page a QBO query to exhaustion.
 
-def _load_config() -> dict:
-    config_path = Path(__file__).parent / 'config.json'
-    with open(config_path) as f:
-        return json.load(f)
-
-
-# ---------------------------------------------------------------------------
-# Test 1: Receipt Channel Coverage
-# ---------------------------------------------------------------------------
-
-def test_receipt_channel_coverage(token: str, base: str, months_back: int = 2) -> dict:
+    QBO caps an unqualified query at one page and says nothing about it, so a
+    bare SELECT reports a partial window as though it were the whole thing.
     """
-    Check if there are receipt channel messages with amounts that
-    don't correspond to any QBO expense in the same date range.
+    rows = []
+    start = 1
+    while True:
+        sql = " ".join(part for part in (
+            select_clause, where_clause,
+            f"ORDERBY Id STARTPOSITION {start} MAXRESULTS {PAGE_SIZE}",
+        ) if part).strip()
+        batch = _entities(client.query(sql))
+        rows.extend(batch)
+        if len(batch) < PAGE_SIZE:
+            return rows
+        start += PAGE_SIZE
+        if len(rows) > MAX_ROWS:
+            raise CheckError(
+                f"query exceeded {MAX_ROWS} rows without terminating: {select_clause}"
+            )
 
-    NOTE: This is a structural test — it can't read Slack directly.
-    It returns the test definition + instructions for the orchestrator
-    (Sol) to run via Slack message reads.
+
+def purchases_in_window(context, fields="*"):
+    """Purchases in the window, with full line detail.
+
+    The projection is `*` on purpose: naming fields makes QBO return Line
+    objects carrying only DetailType and Id — no account reference, no amount
+    — so every account-based check silently matches nothing and reports a
+    clean pass it never actually performed.
     """
-    config = _load_config()
-    channels = config.get('receipt_channels', {})
-
-    # Get date range
-    today = date.today()
-    start = today.replace(day=1) - timedelta(days=months_back * 31)
-    start = start.replace(day=1)
-
-    # Get all QBO purchases in range
-    sql = (
-        f"SELECT Id, TxnDate, TotalAmt, EntityRef, PrivateNote "
-        f"FROM Purchase "
-        f"WHERE TxnDate >= '{start.isoformat()}' "
-        f"AND TxnDate <= '{today.isoformat()}' "
-        f"ORDERBY TxnDate"
+    return query_all(
+        context.client,
+        f"SELECT {fields} FROM Purchase",
+        f"WHERE TxnDate >= '{context.window_start.isoformat()}' "
+        f"AND TxnDate <= '{context.today.isoformat()}'",
     )
-    purchases = _qbo_query(token, base, sql)
 
+
+def _account_id(config, key):
+    accounts = (config.get("qbo_accounts") or {}).get("expenses") or {}
+    value = (accounts.get(key) or {}).get("id")
+    if not value:
+        raise CheckError(f"qbo_accounts.expenses.{key}.id is not configured")
+    return str(value)
+
+
+def _line_accounts(purchase):
+    accounts = set()
+    for line in purchase.get("Line") or []:
+        detail = line.get("AccountBasedExpenseLineDetail") or {}
+        reference = (detail.get("AccountRef") or {}).get("value")
+        if reference:
+            accounts.add(str(reference))
+    return accounts
+
+
+SPEI_FEE_MEMO = re.compile(r"^\s*SPEI (Commission|IVA) on transfer", re.I)
+
+
+def is_spei_fee(purchase):
+    """A standalone bank-fee Purchase raised alongside a SPEI transfer.
+
+    Every transfer raises its own commission and IVA at the same tiny amounts,
+    so several land on one day with identical date, amount and vendor and no
+    Kapital reference to tell them apart. They are distinct fees for distinct
+    transfers, deduplicated by their own parent matcher — grouping them as
+    duplicates flags normal activity every week.
+    """
+    return bool(SPEI_FEE_MEMO.match(purchase.get("PrivateNote") or ""))
+
+
+ATTRIBUTION_KEYWORDS = (
+    "guest", "group", "booking", "client", "wedding",
+    "retreat", "villa", "reservation", "airbnb", "ownerrez",
+)
+
+
+def _has_attribution(note, keywords=ATTRIBUTION_KEYWORDS):
+    lowered = (note or "").lower()
+    return any(keyword in lowered for keyword in keywords)
+
+
+def _age_days(context, stamp):
+    return (context.now - stamp).total_seconds() / 86400.0
+
+
+# ---------------------------------------------------------------------------
+# Check 1 — receipt channel coverage
+# ---------------------------------------------------------------------------
+
+def check_receipt_channel_coverage(context):
+    """Every receipt posted to a receipt channel reached the books.
+
+    Slack is the authority for what was posted, the durable receipt ledger for
+    what the pipeline did with it, and QBO for whether it was booked. A
+    receipt with no ledger row is the one the pipeline never saw.
+    """
+    channels = context.config.get("receipt_channels") or {}
+    if not channels:
+        raise CheckError("no receipt_channels configured")
+    grace_days, configured_start = context.coverage_settings()
+    ledger = context.receipt_ledger()
+    pipeline_start = configured_start or context.ledger_start()
+
+    not_ingested, not_booked, awaiting_human = [], [], []
+    pending = pre_pipeline = scanned = 0
+
+    for channel_id, channel in channels.items():
+        messages = context.scan_channel(channel_id, context.window_start)
+        for message in receipt_candidates(messages):
+            scanned += 1
+            posted_at = datetime.fromtimestamp(message_ts(message), tz=timezone.utc)
+            if pipeline_start and posted_at < pipeline_start:
+                pre_pipeline += 1
+                continue
+            age = _age_days(context, posted_at)
+            if age <= grace_days:
+                pending += 1
+                continue
+            record = {
+                "channel": channel.get("name") or channel_id,
+                "posted_at": posted_at.date().isoformat(),
+                "age_days": round(age, 1),
+                "message_ts": message.get("ts"),
+            }
+            row = ledger.get((channel_id, message.get("ts")))
+            if row is None:
+                not_ingested.append(record)
+            elif row.get("qbo_entity_id") or row.get("status") in CLOSED_STATUSES:
+                continue
+            elif row.get("status") in AWAITING_HUMAN_STATUSES:
+                awaiting_human.append({**record, "status": row.get("status")})
+            else:
+                not_booked.append({**record, "status": row.get("status")})
+
+    failures = len(not_ingested) + len(not_booked)
+    if failures:
+        status = "FAIL"
+    elif awaiting_human:
+        status = "WARN"
+    else:
+        status = "pass"
     return {
-        'test': 'receipt_channel_coverage',
-        'status': 'needs_slack_scan',
-        'channels_to_scan': list(channels.keys()),
-        'channel_names': {cid: ch['name'] for cid, ch in channels.items()},
-        'date_range': f"{start.isoformat()} to {today.isoformat()}",
-        'qbo_purchases_in_range': len(purchases),
-        'instructions': (
-            'Orchestrator: read each receipt channel for messages in the date range. '
-            'Extract amounts from messages/attachments. Cross-reference with QBO purchases '
-            'by date (±3 days) and amount (±5%). Flag unmatched receipts.'
+        "test": "receipt_channel_coverage",
+        "status": status,
+        "channels_scanned": len(channels),
+        "receipts_scanned": scanned,
+        "receipts_pending_within_grace": pending,
+        "receipts_before_pipeline_start": pre_pipeline,
+        "pipeline_start": pipeline_start.isoformat() if pipeline_start else None,
+        "grace_days": grace_days,
+        "not_ingested": not_ingested[:20],
+        "not_ingested_count": len(not_ingested),
+        "not_booked": not_booked[:20],
+        "not_booked_count": len(not_booked),
+        "awaiting_human": awaiting_human[:20],
+        "awaiting_human_count": len(awaiting_human),
+        "action": (
+            "Receipts posted to Slack never reached the books — check the accounting inbox workflow"
+            if failures else "Work the receipt review queue" if awaiting_human else None
         ),
     }
 
 
 # ---------------------------------------------------------------------------
-# Test 2: Duplicate Detection
+# Check 2 — duplicate detection
 # ---------------------------------------------------------------------------
 
-def test_duplicates(token: str, base: str, months_back: int = 3) -> dict:
-    """
-    Find potential duplicate QBO entries: same date + amount + vendor.
-    These happen when overlapping CSVs are uploaded.
-    """
-    today = date.today()
-    start = today.replace(day=1) - timedelta(days=months_back * 31)
-    start = start.replace(day=1)
-
-    sql = (
-        f"SELECT Id, TxnDate, TotalAmt, EntityRef, PrivateNote "
-        f"FROM Purchase "
-        f"WHERE TxnDate >= '{start.isoformat()}' "
-        f"AND TxnDate <= '{today.isoformat()}' "
-        f"ORDERBY TxnDate"
-    )
-    purchases = _qbo_query(token, base, sql)
-
-    # Group by (date, amount, vendor_id)
+def check_duplicates(context):
+    """The same date, amount and vendor booked more than once."""
+    purchases = purchases_in_window(context)
+    allowlist = {
+        str(entry) for entry in
+        ((context.config.get("receipt_coverage") or {}).get("duplicate_allowlist") or [])
+    }
     groups = defaultdict(list)
-    for p in purchases:
-        vendor_id = p.get('EntityRef', {}).get('value', 'none')
-        key = (p['TxnDate'], str(p['TotalAmt']), vendor_id)
-        groups[key].append(p)
+    fees_skipped = 0
+    for purchase in purchases:
+        if is_spei_fee(purchase):
+            fees_skipped += 1
+            continue
+        vendor = (purchase.get("EntityRef") or {}).get("value", "none")
+        groups[(purchase.get("TxnDate"), str(purchase.get("TotalAmt")), vendor)].append(purchase)
 
-    duplicates = []
+    duplicates, accepted = [], 0
     for key, items in groups.items():
-        if len(items) > 1:
-            # Check if they have different references (legit same-day same-amount)
-            notes = [i.get('PrivateNote', '') for i in items]
-            # Extract Kapital reference (Clave) from memo to distinguish
-            refs = set()
-            for note in notes:
-                ref_match = re.search(r'Clave:\s*([\d\-/]+)', note)
-                if ref_match:
-                    refs.add(ref_match.group(1))
-
-            if len(refs) < len(items):
-                # Possible true duplicates (same or missing refs)
-                duplicates.append({
-                    'date': key[0],
-                    'amount': float(key[1]),
-                    'vendor': items[0].get('EntityRef', {}).get('name', 'N/A'),
-                    'count': len(items),
-                    'ids': [i['Id'] for i in items],
-                    'refs_found': list(refs),
-                    'likely_duplicate': len(refs) == 0 or len(refs) < len(items),
-                })
-
-    return {
-        'test': 'duplicate_detection',
-        'status': 'pass' if not duplicates else 'FAIL',
-        'total_purchases_scanned': len(purchases),
-        'date_range': f"{start.isoformat()} to {today.isoformat()}",
-        'duplicates_found': len(duplicates),
-        'duplicates': duplicates[:20],  # Cap output
-    }
-
-
-# ---------------------------------------------------------------------------
-# Test 3: Orphaned Group Activities
-# ---------------------------------------------------------------------------
-
-def test_orphaned_group_activities(token: str, base: str) -> dict:
-    """
-    Find Group Activities expenses that don't mention a client/group
-    name in the memo. They should always be attributed.
-    """
-    config = _load_config()
-    group_account_id = config['qbo_accounts']['expenses']['group_activities']['id']
-
-    sql = (
-        f"SELECT Id, TxnDate, TotalAmt, PrivateNote, Line "
-        f"FROM Purchase "
-        f"ORDERBY TxnDate DESC "
-        f"MAXRESULTS 200"
-    )
-    purchases = _qbo_query(token, base, sql)
-
-    orphans = []
-    for p in purchases:
-        # Check if any line hits the group activities account
-        is_group = False
-        for line in p.get('Line', []):
-            detail = line.get('AccountBasedExpenseLineDetail', {})
-            acct = detail.get('AccountRef', {}).get('value', '')
-            if acct == group_account_id:
-                is_group = True
-                break
-
-        if not is_group:
+        if len(items) < 2:
             continue
-
-        # Check if memo mentions a client/group/booking
-        note = (p.get('PrivateNote') or '').lower()
-        has_attribution = any(kw in note for kw in [
-            'guest', 'group', 'booking', 'client', 'wedding',
-            'retreat', 'villa', 'reservation', 'airbnb', 'ownerrez',
-        ])
-
-        if not has_attribution:
-            orphans.append({
-                'id': p['Id'],
-                'date': p['TxnDate'],
-                'amount': p['TotalAmt'],
-                'note': (p.get('PrivateNote') or '')[:120],
-            })
-
-    return {
-        'test': 'orphaned_group_activities',
-        'status': 'pass' if not orphans else 'WARN',
-        'orphans_found': len(orphans),
-        'orphans': orphans[:20],
-        'action': 'Ping Mayela to attribute these to a specific group/booking' if orphans else None,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Test 4: Orphaned Food Expenses
-# ---------------------------------------------------------------------------
-
-def test_orphaned_food_expenses(token: str, base: str) -> dict:
-    """
-    Find food-related expenses (Supplies & Materials Group, or memos
-    mentioning food/groceries) that aren't attributed to a client.
-    """
-    config = _load_config()
-    group_supplies_id = config['qbo_accounts']['expenses']['supplies_group']['id']
-
-    sql = (
-        f"SELECT Id, TxnDate, TotalAmt, PrivateNote, Line "
-        f"FROM Purchase "
-        f"ORDERBY TxnDate DESC "
-        f"MAXRESULTS 200"
-    )
-    purchases = _qbo_query(token, base, sql)
-
-    orphans = []
-    food_keywords = ['food', 'comida', 'groceries', 'grocery', 'refrigerator',
-                     'fridge', 'kitchen', 'cook', 'chef', 'aliment', 'meat',
-                     'carne', 'pollo', 'fruit', 'fruta', 'costco food']
-
-    for p in purchases:
-        note = (p.get('PrivateNote') or '').lower()
-
-        # Check if it's food-related by memo content
-        is_food = any(kw in note for kw in food_keywords)
-
-        # Or if it hits the Supplies & Materials (Group) account
-        for line in p.get('Line', []):
-            detail = line.get('AccountBasedExpenseLineDetail', {})
-            acct = detail.get('AccountRef', {}).get('value', '')
-            if acct == group_supplies_id:
-                is_food = True
-                break
-
-        if not is_food:
+        references = set()
+        for item in items:
+            match = re.search(r"Clave:\s*([\d\-/]+)", item.get("PrivateNote") or "")
+            if match:
+                references.add(match.group(1))
+        if len(references) >= len(items):
             continue
-
-        # Check attribution
-        has_attribution = any(kw in note for kw in [
-            'guest', 'group', 'booking', 'client', 'villa',
-            'reservation', 'airbnb', 'ownerrez',
-        ])
-
-        if not has_attribution:
-            orphans.append({
-                'id': p['Id'],
-                'date': p['TxnDate'],
-                'amount': p['TotalAmt'],
-                'note': note[:120],
-            })
+        if allowlist and all(str(item.get("Id")) in allowlist for item in items):
+            accepted += 1
+            continue
+        duplicates.append({
+            "date": key[0],
+            "amount": float(key[1]),
+            "vendor": (items[0].get("EntityRef") or {}).get("name", "N/A"),
+            "count": len(items),
+            "ids": [item.get("Id") for item in items],
+            "distinct_references": len(references),
+        })
 
     return {
-        'test': 'orphaned_food_expenses',
-        'status': 'pass' if not orphans else 'WARN',
-        'orphans_found': len(orphans),
-        'orphans': orphans[:20],
-        'action': 'Ping Mayela/Daniel to attribute to specific guests' if orphans else None,
+        "test": "duplicate_detection",
+        "status": "pass" if not duplicates else "FAIL",
+        "purchases_scanned": len(purchases),
+        "spei_fees_excluded": fees_skipped,
+        "groups_accepted_by_allowlist": accepted,
+        "date_range": f"{context.window_start.isoformat()} to {context.today.isoformat()}",
+        "duplicates_found": len(duplicates),
+        "duplicates": duplicates[:20],
     }
 
 
 # ---------------------------------------------------------------------------
-# Test 5: Salary Month Attribution
+# Checks 3 and 4 — orphaned expenses
 # ---------------------------------------------------------------------------
 
-def test_salary_month_attribution(token: str, base: str) -> dict:
-    """
-    Detect when 2 salary payments to the same person land in the same
-    calendar month. The memo should indicate which month each covers
-    (e.g., "July salary" vs "June salary"), and if both are booked
-    in July, one should be re-attributed.
-    """
-    config = _load_config()
-    labor_id = config['qbo_accounts']['expenses']['contract_labor']['id']
-
-    # Known salary workers and their expected amounts (USD approx)
-    salary_workers = {
-        'Daniel Business': {'expected_monthly_mxn': 25000, 'frequency': 'monthly'},
-        'Mayela Gomez': {'expected_monthly_mxn': 30000, 'frequency': 'monthly'},
-        'Sergio Gracia': {'expected_weekly_mxn': 8000, 'frequency': 'weekly'},
+def _orphan_check(context, *, name, account_key, keywords, action, extra_match=None):
+    account_id = _account_id(context.config, account_key)
+    purchases = purchases_in_window(context)
+    orphans = []
+    for purchase in purchases:
+        note = purchase.get("PrivateNote") or ""
+        in_scope = account_id in _line_accounts(purchase)
+        if not in_scope and extra_match:
+            in_scope = extra_match(note)
+        if not in_scope or _has_attribution(note, keywords):
+            continue
+        orphans.append({
+            "id": purchase.get("Id"),
+            "date": purchase.get("TxnDate"),
+            "amount": purchase.get("TotalAmt"),
+            "note": note[:120],
+        })
+    return {
+        "test": name,
+        "status": "pass" if not orphans else "WARN",
+        "purchases_scanned": len(purchases),
+        "orphans_found": len(orphans),
+        "orphans": orphans[:20],
+        "action": action if orphans else None,
     }
 
-    sql = (
-        f"SELECT Id, TxnDate, TotalAmt, EntityRef, PrivateNote "
-        f"FROM Purchase "
-        f"ORDERBY TxnDate DESC "
-        f"MAXRESULTS 500"
+
+def check_orphaned_group_activities(context):
+    """Group-activity expenses with no client or booking in the memo."""
+    return _orphan_check(
+        context,
+        name="orphaned_group_activities",
+        account_key="group_activities",
+        keywords=ATTRIBUTION_KEYWORDS,
+        action="Ping Mayela to attribute these to a specific group/booking",
     )
-    purchases = _qbo_query(token, base, sql)
+
+
+FOOD_KEYWORDS = (
+    "food", "comida", "groceries", "grocery", "refrigerator", "fridge",
+    "kitchen", "cook", "chef", "aliment", "meat", "carne", "pollo",
+    "fruit", "fruta",
+)
+
+
+def check_orphaned_food_expenses(context):
+    """Food expenses with no guest or booking in the memo."""
+    def looks_like_food(note):
+        lowered = (note or "").lower()
+        return any(keyword in lowered for keyword in FOOD_KEYWORDS)
+
+    return _orphan_check(
+        context,
+        name="orphaned_food_expenses",
+        account_key="supplies_group",
+        keywords=("guest", "group", "booking", "client", "villa",
+                  "reservation", "airbnb", "ownerrez"),
+        action="Ping Mayela/Daniel to attribute to specific guests",
+        extra_match=looks_like_food,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Check 5 — salary month attribution
+# ---------------------------------------------------------------------------
+
+def salary_matrix(config):
+    """Who is on salary and how often — from config, not a copy in code.
+
+    A roster hard-coded here drifts away from the config the rest of the
+    accounting stack classifies against, and silently stops matching when
+    somebody's rate or cadence changes.
+    """
+    matrix = {}
+    for key, pattern in (config.get("salary_patterns") or {}).items():
+        payees = [p.strip().upper() for p in str(pattern.get("payee", "")).split("|") if p.strip()]
+        if not payees:
+            continue
+        keyword_text = str(pattern.get("keyword", ""))
+        if "expected_amount_per_day" in pattern:
+            cadence = "daily"
+        elif "weekly" in key.lower() or "WEEKLY" in keyword_text.upper():
+            cadence = "weekly"
+        else:
+            cadence = "monthly"
+        matrix[key] = {
+            "payees": payees,
+            "cadence": cadence,
+            "keywords": [k.strip().lower() for k in keyword_text.split("|") if k.strip()],
+        }
+    if not matrix:
+        raise CheckError("no salary_patterns configured")
+    return matrix
+
+
+CADENCE_LIMITS = {"monthly": 1, "weekly": 5, "daily": 31}
+
+
+def check_salary_month_attribution(context):
+    """More salary payments inside one calendar month than the cadence allows."""
+    matrix = salary_matrix(context.config)
+    purchases = purchases_in_window(context)
+
+    by_pattern_month = defaultdict(list)
+    for purchase in purchases:
+        vendor = ((purchase.get("EntityRef") or {}).get("name") or "").upper()
+        note = (purchase.get("PrivateNote") or "").lower()
+        for key, pattern in matrix.items():
+            if not any(payee in vendor for payee in pattern["payees"]):
+                continue
+            if pattern["keywords"] and not any(k in note for k in pattern["keywords"]):
+                continue
+            by_pattern_month[(key, str(purchase.get("TxnDate", ""))[:7])].append(purchase)
+            break
 
     issues = []
-
-    # Group salary payments by (vendor, year-month)
-    salary_by_month = defaultdict(list)
-    for p in purchases:
-        vendor_name = p.get('EntityRef', {}).get('name', '')
-        if vendor_name not in salary_workers:
+    for (key, month), payments in sorted(by_pattern_month.items()):
+        cadence = matrix[key]["cadence"]
+        limit = CADENCE_LIMITS[cadence]
+        if len(payments) <= limit:
             continue
-
-        # Check if it's a salary payment (not cleaning, petty cash, etc.)
-        note = (p.get('PrivateNote') or '').lower()
-        is_salary = any(kw in note for kw in ['salary', 'monthly', 'weekly payment'])
-
-        if not is_salary:
-            continue
-
-        txn_date = p['TxnDate']  # YYYY-MM-DD
-        month_key = txn_date[:7]  # YYYY-MM
-        salary_by_month[(vendor_name, month_key)].append(p)
-
-    # Check for monthly workers with > 1 salary in same month
-    for (vendor, month), payments in salary_by_month.items():
-        worker_info = salary_workers.get(vendor, {})
-
-        if worker_info.get('frequency') == 'monthly' and len(payments) > 1:
-            # Two monthly salaries in same calendar month — flag
-            notes = [(p.get('PrivateNote') or '')[:100] for p in payments]
-            issues.append({
-                'vendor': vendor,
-                'month': month,
-                'payment_count': len(payments),
-                'amounts': [p['TotalAmt'] for p in payments],
-                'dates': [p['TxnDate'] for p in payments],
-                'ids': [p['Id'] for p in payments],
-                'notes': notes,
-                'issue': f'{vendor} has {len(payments)} monthly salary payments in {month}. '
-                         f'Check if one covers a prior month.',
-            })
-
-        if worker_info.get('frequency') == 'weekly' and len(payments) > 5:
-            # More than 5 weekly payments in one month — unusual
-            issues.append({
-                'vendor': vendor,
-                'month': month,
-                'payment_count': len(payments),
-                'amounts': [p['TotalAmt'] for p in payments],
-                'dates': [p['TxnDate'] for p in payments],
-                'ids': [p['Id'] for p in payments],
-                'issue': f'{vendor} has {len(payments)} weekly payments in {month} (expected 4-5).',
-            })
+        issues.append({
+            "pattern": key,
+            "cadence": cadence,
+            "month": month,
+            "payment_count": len(payments),
+            "expected_max": limit,
+            "amounts": [p.get("TotalAmt") for p in payments],
+            "dates": [p.get("TxnDate") for p in payments],
+            "ids": [p.get("Id") for p in payments],
+            "issue": (
+                f"{key} has {len(payments)} payments in {month} "
+                f"(expected at most {limit} for {cadence})"
+            ),
+        })
 
     return {
-        'test': 'salary_month_attribution',
-        'status': 'pass' if not issues else 'WARN',
-        'issues_found': len(issues),
-        'issues': issues,
-        'action': 'Re-attribute the earlier payment to the prior month if memos confirm' if issues else None,
+        "test": "salary_month_attribution",
+        "status": "pass" if not issues else "WARN",
+        "patterns_from_config": sorted(matrix),
+        "purchases_scanned": len(purchases),
+        "issues_found": len(issues),
+        "issues": issues[:20],
+        "action": "Re-attribute the earlier payment to the prior month if the memos confirm" if issues else None,
     }
 
 
 # ---------------------------------------------------------------------------
-# Test 6: Mayela ✅ Reconciliation
+# Check 6 — Mayela checkmark reconciliation
 # ---------------------------------------------------------------------------
 
-def test_mayela_checkmark_reconciliation(token: str, base: str) -> dict:
-    """
-    Structural test: check if ✅ reactions in Mayela's receipt channel
-    correspond to QBO expenses.
+def check_mayela_checkmark(context):
+    """Payments marked as made are actually in the books.
 
-    Returns instructions for the orchestrator (Sol) since we can't
-    read Slack reactions directly from Python.
+    A checkmark is a human asserting the money moved, so a checkmarked receipt
+    with nothing booked past the grace window is a real gap, not a queue.
     """
-    config = _load_config()
-    mayela_channels = []
-    for cid, ch in config.get('receipt_channels', {}).items():
-        if 'mayela' in ch.get('scope', ''):
-            mayela_channels.append({'id': cid, 'name': ch['name']})
+    channels = {
+        cid: channel
+        for cid, channel in (context.config.get("receipt_channels") or {}).items()
+        if "mayela" in str(channel.get("scope", "")).lower()
+    }
+    if not channels:
+        raise CheckError("no receipt channel is scoped to mayela")
+    grace_days, configured_start = context.coverage_settings()
+    ledger = context.receipt_ledger()
+    pipeline_start = configured_start or context.ledger_start()
+
+    unbooked = []
+    pending = pre_pipeline = confirmed = 0
+    for channel_id, channel in channels.items():
+        for message in context.scan_channel(channel_id, context.window_start):
+            if not has_reaction(message, CHECKMARK):
+                continue
+            confirmed += 1
+            marked_at = datetime.fromtimestamp(message_ts(message), tz=timezone.utc)
+            if pipeline_start and marked_at < pipeline_start:
+                pre_pipeline += 1
+                continue
+            age = _age_days(context, marked_at)
+            if age <= grace_days:
+                pending += 1
+                continue
+            row = ledger.get((channel_id, message.get("ts")))
+            if row and (row.get("qbo_entity_id") or row.get("status") in CLOSED_STATUSES):
+                continue
+            unbooked.append({
+                "channel": channel.get("name") or channel_id,
+                "confirmed_at": marked_at.date().isoformat(),
+                "age_days": round(age, 1),
+                "message_ts": message.get("ts"),
+                "ledger_status": (row or {}).get("status"),
+            })
 
     return {
-        'test': 'mayela_checkmark_reconciliation',
-        'status': 'needs_slack_scan',
-        'channels_to_scan': mayela_channels,
-        'instructions': (
-            'Orchestrator: read each Mayela receipt channel. Find messages with '
-            ':white_check_mark: reactions. For each, extract the payment amount and date. '
-            'Query QBO for a matching Purchase (±3 days, ±5% amount, vendor=Mayela Gomez). '
-            'Flag any ✅ messages WITHOUT a QBO match — these are confirmed-paid but not yet booked. '
-            'Also flag any ✅ messages that DO match but the QBO record has a different category.'
-        ),
+        "test": "mayela_checkmark_reconciliation",
+        "status": "pass" if not unbooked else "FAIL",
+        "channels_scanned": len(channels),
+        "confirmed_payments": confirmed,
+        "pending_within_grace": pending,
+        "before_pipeline_start": pre_pipeline,
+        "grace_days": grace_days,
+        "unbooked_count": len(unbooked),
+        "unbooked": unbooked[:20],
+        "action": "Confirmed-paid receipts are not booked in QBO" if unbooked else None,
     }
 
 
 # ---------------------------------------------------------------------------
-# Test 7: Uncategorized / Split Expenses
+# Check 7 — uncategorized and split expenses
 # ---------------------------------------------------------------------------
 
-def test_uncategorized_expenses(token: str, base: str) -> dict:
-    """
-    Find QBO expenses that:
-    a) Hit the 'Uncategorized Expense' account
-    b) Have multiple line items (show as 'Split' in QBO UI)
-    c) Have no vendor assigned
-    """
-    config = _load_config()
-    uncategorized_id = str(
-        config.get('qbo_accounts', {}).get('expenses', {})
-        .get('uncategorized_expense', {}).get('id') or ''
-    )
-    if not uncategorized_id:
-        raise ValueError('Uncategorized Expense account is not configured')
+def check_uncategorized_expenses(context):
+    """Expenses with no category, an unexpected split, or no vendor."""
+    uncategorized_id = _account_id(context.config, "uncategorized_expense")
+    bank_fee_id = _account_id(context.config, "bank_fee")
+    purchases = purchases_in_window(context)
 
-    sql = (
-        f"SELECT Id, TxnDate, TotalAmt, EntityRef, PrivateNote, Line "
-        f"FROM Purchase "
-        f"ORDERBY TxnDate DESC "
-        f"MAXRESULTS 500"
-    )
-    purchases = _qbo_query(token, base, sql)
+    uncategorized, splits = [], []
+    for purchase in purchases:
+        note = purchase.get("PrivateNote") or ""
+        vendor = (purchase.get("EntityRef") or {}).get("name")
 
-    uncategorized = []
-    splits = []
-    no_vendor = []
-
-    for p in purchases:
-        lines = p.get('Line', [])
-        note = (p.get('PrivateNote') or '')
-        vendor = p.get('EntityRef', {}).get('name')
-
-        # Check for uncategorized
-        for line in lines:
-            detail = line.get('AccountBasedExpenseLineDetail', {})
-            acct = detail.get('AccountRef', {}).get('value', '')
-            if acct == uncategorized_id:
-                uncategorized.append({
-                    'id': p['Id'],
-                    'date': p['TxnDate'],
-                    'amount': p['TotalAmt'],
-                    'vendor': vendor,
-                    'note': note[:100],
-                })
-                break
-
-        # Check for splits (>1 expense line — SPEI fees create these)
-        expense_lines = [l for l in lines if l.get('DetailType') == 'AccountBasedExpenseLineDetail']
-        if len(expense_lines) > 1:
-            # Check if split is just SPEI fees (expected) vs real split (unexpected)
-            accounts_used = set()
-            for line in expense_lines:
-                detail = line.get('AccountBasedExpenseLineDetail', {})
-                acct_name = detail.get('AccountRef', {}).get('name', '')
-                accounts_used.add(acct_name)
-
-            is_spei_split = 'Bank Fee' in accounts_used and len(accounts_used) == 2
-            if not is_spei_split:
-                splits.append({
-                    'id': p['Id'],
-                    'date': p['TxnDate'],
-                    'amount': p['TotalAmt'],
-                    'vendor': vendor,
-                    'line_count': len(expense_lines),
-                    'accounts': list(accounts_used),
-                    'note': note[:100],
-                })
-
-        # Check for no vendor (on Kapital records only)
-        if not vendor and 'MXN' in note and p['TotalAmt'] > 1.0:
+        if uncategorized_id in _line_accounts(purchase):
             uncategorized.append({
-                'id': p['Id'],
-                'date': p['TxnDate'],
-                'amount': p['TotalAmt'],
-                'note': note[:100],
-                'issue': 'No vendor assigned',
+                "id": purchase.get("Id"),
+                "date": purchase.get("TxnDate"),
+                "amount": purchase.get("TotalAmt"),
+                "vendor": vendor,
+                "note": note[:100],
+            })
+
+        expense_lines = [
+            line for line in (purchase.get("Line") or [])
+            if line.get("DetailType") == "AccountBasedExpenseLineDetail"
+        ]
+        if len(expense_lines) > 1:
+            # Match the fee account by id: QBO does not always populate
+            # AccountRef.name on a query, and an absent name used to make
+            # every embedded-fee purchase look like an unexpected split.
+            accounts = set()
+            for line in expense_lines:
+                detail = line.get("AccountBasedExpenseLineDetail") or {}
+                accounts.add(str((detail.get("AccountRef") or {}).get("value", "")))
+            non_fee = accounts - {bank_fee_id}
+            if not (bank_fee_id in accounts and len(non_fee) == 1):
+                splits.append({
+                    "id": purchase.get("Id"),
+                    "date": purchase.get("TxnDate"),
+                    "amount": purchase.get("TotalAmt"),
+                    "vendor": vendor,
+                    "line_count": len(expense_lines),
+                    "accounts": sorted(accounts),
+                    "note": note[:100],
+                })
+
+        if not vendor and "MXN" in note and (purchase.get("TotalAmt") or 0) > 1.0:
+            uncategorized.append({
+                "id": purchase.get("Id"),
+                "date": purchase.get("TxnDate"),
+                "amount": purchase.get("TotalAmt"),
+                "note": note[:100],
+                "issue": "No vendor assigned",
             })
 
     return {
-        'test': 'uncategorized_expenses',
-        'status': 'pass' if not (uncategorized or splits) else 'WARN',
-        'uncategorized_count': len(uncategorized),
-        'unexpected_splits': len(splits),
-        'uncategorized': uncategorized[:20],
-        'splits': splits[:20],
+        "test": "uncategorized_expenses",
+        "status": "pass" if not (uncategorized or splits) else "WARN",
+        "purchases_scanned": len(purchases),
+        "uncategorized_count": len(uncategorized),
+        "unexpected_splits": len(splits),
+        "uncategorized": uncategorized[:20],
+        "splits": splits[:20],
+        "action": (
+            "Assign categories/vendors, or confirm the splits are intended"
+            if (uncategorized or splits) else None
+        ),
     }
 
 
@@ -562,85 +703,172 @@ def test_uncategorized_expenses(token: str, base: str) -> dict:
 # Runner
 # ---------------------------------------------------------------------------
 
-def run_all_tests(months_back: int = 3) -> dict:
-    """Run all tests and return combined results."""
-    print("🔐 Authenticating with QBO...")
-    token, base = _qbo_auth()
+CHECKS = (
+    ("receipt_coverage", check_receipt_channel_coverage),
+    ("duplicates", check_duplicates),
+    ("orphaned_group_activities", check_orphaned_group_activities),
+    ("orphaned_food_expenses", check_orphaned_food_expenses),
+    ("salary_month_attribution", check_salary_month_attribution),
+    ("mayela_checkmark", check_mayela_checkmark),
+    ("uncategorized", check_uncategorized_expenses),
+)
 
+FAILING_STATUSES = {"FAIL", "ERROR"}
+ICONS = {"pass": "✅", "WARN": "⚠️", "FAIL": "❌", "ERROR": "❌"}
+
+
+def evidence_id(run_stamp, name):
+    return f"KT-{run_stamp}-{name}"
+
+
+def run_all_checks(context, run_stamp=None):
+    """Run every check. One check failing never stops the others."""
+    stamp = run_stamp or context.now.strftime("%Y%m%dT%H%M%SZ")
     results = {}
-
-    tests = [
-        ('receipt_coverage', lambda: test_receipt_channel_coverage(token, base, months_back)),
-        ('duplicates', lambda: test_duplicates(token, base, months_back)),
-        ('orphaned_group_activities', lambda: test_orphaned_group_activities(token, base)),
-        ('orphaned_food_expenses', lambda: test_orphaned_food_expenses(token, base)),
-        ('salary_month_attribution', lambda: test_salary_month_attribution(token, base)),
-        ('mayela_checkmark', lambda: test_mayela_checkmark_reconciliation(token, base)),
-        ('uncategorized', lambda: test_uncategorized_expenses(token, base)),
-    ]
-
-    for name, test_fn in tests:
-        print(f"\n🧪 Running: {name}...")
+    for name, check in CHECKS:
         try:
-            result = test_fn()
-            results[name] = result
-            status = result.get('status', '?')
-            icon = '✅' if status == 'pass' else '⚠️' if status in ('WARN', 'needs_slack_scan') else '❌'
-            print(f"   {icon} {status}")
-            if result.get('duplicates_found'):
-                print(f"   Found {result['duplicates_found']} potential duplicates")
-            if result.get('orphans_found'):
-                print(f"   Found {result['orphans_found']} orphaned records")
-            if result.get('issues_found'):
-                print(f"   Found {result['issues_found']} salary attribution issues")
-            if result.get('uncategorized_count'):
-                print(f"   Found {result['uncategorized_count']} uncategorized records")
-        except Exception as e:
-            results[name] = {'test': name, 'status': 'ERROR', 'error': str(e)}
-            print(f"   ❌ ERROR: {e}")
-
+            result = check(context)
+        except Exception as exc:  # noqa: BLE001 — a crash is a verdict, not an escape
+            result = {"test": name, "status": "ERROR", "error": str(exc)[:300]}
+        result["evidence_id"] = evidence_id(stamp, name)
+        results[name] = result
     return results
 
 
-def format_test_report(results: dict) -> str:
-    """Format test results as a Slack-friendly report."""
-    lines = ["📋 *Kapital Accounting — Integrity Tests*\n"]
+def overall_status(results):
+    if any(r.get("status") in FAILING_STATUSES for r in results.values()):
+        return "FAIL"
+    if any(r.get("status") == "WARN" for r in results.values()):
+        return "WARN"
+    return "pass"
 
+
+REPORT_COUNTS = (
+    ("not_ingested_count", "posted to Slack, never ingested"),
+    ("not_booked_count", "ingested, never booked"),
+    ("awaiting_human_count", "waiting on a human"),
+    ("unbooked_count", "confirmed paid, not booked"),
+    ("duplicates_found", "possible duplicates"),
+    ("orphans_found", "unattributed"),
+    ("issues_found", "attribution issues"),
+    ("uncategorized_count", "uncategorized"),
+    ("unexpected_splits", "unexpected splits"),
+)
+
+
+def format_report(results, run_stamp, overall):
+    lines = [
+        f"{ICONS[overall]} *Kapital accounting — weekly integrity control* (`{run_stamp}`)"
+    ]
     for name, result in results.items():
-        status = result.get('status', '?')
-        icon = '✅' if status == 'pass' else '⚠️' if status in ('WARN', 'needs_slack_scan') else '❌'
-        test_label = result.get('test', name).replace('_', ' ').title()
-        lines.append(f"{icon} *{test_label}*: {status}")
-
-        if status == 'FAIL' or status == 'WARN':
-            # Show details
-            if result.get('duplicates'):
-                for d in result['duplicates'][:5]:
-                    lines.append(f"   • {d['date']} — {d['vendor']} ${d['amount']:.2f} x{d['count']} (IDs: {', '.join(d['ids'])})")
-
-            if result.get('orphans'):
-                for o in result['orphans'][:5]:
-                    lines.append(f"   • {o['date']} — ${o['amount']:.2f}: {o.get('note', '')[:60]}")
-
-            if result.get('issues'):
-                for i in result['issues'][:5]:
-                    lines.append(f"   • {i['issue']}")
-
-            if result.get('uncategorized'):
-                for u in result['uncategorized'][:5]:
-                    lines.append(f"   • {u['date']} — ${u['amount']:.2f}: {u.get('note', u.get('issue', ''))[:60]}")
-
-            if result.get('action'):
-                lines.append(f"   _→ {result['action']}_")
-
-        if status == 'needs_slack_scan':
-            lines.append(f"   _→ Requires Slack channel scan (orchestrator will run)_")
-
-    return '\n'.join(lines)
+        status = result.get("status", "?")
+        label = str(result.get("test", name)).replace("_", " ").title()
+        lines.append(
+            f"{ICONS.get(status, '•')} *{label}*: {status}  `{result.get('evidence_id', '')}`"
+        )
+        if status == "ERROR":
+            lines.append(f"   • error: {result.get('error', 'unknown')}")
+            continue
+        for field, caption in REPORT_COUNTS:
+            if result.get(field):
+                lines.append(f"   • {result[field]} {caption}")
+        if result.get("action"):
+            lines.append(f"   _→ {result['action']}_")
+    return "\n".join(lines)
 
 
-if __name__ == '__main__':
-    months = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-    results = run_all_tests(months)
-    print("\n" + "=" * 50)
-    print(format_test_report(results))
+def post_to_slack(message, *, account, channel, runner=subprocess.run):
+    binary = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
+    completed = runner(
+        [binary, "message", "send", "--channel", "slack", "--account", account,
+         "--target", f"channel:{channel}", "--message", message, "--json"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"slack post exited {completed.returncode}: "
+            f"{(completed.stderr or completed.stdout or '').strip()[:200]}"
+        )
+
+
+def write_run_record(results, run_stamp, overall, path):
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(
+        json.dumps(
+            {"run": run_stamp, "overall": overall, "checks": results},
+            indent=2, sort_keys=True, default=str,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp, target)
+    return target
+
+
+def main(argv=None):
+    argv = list(argv if argv is not None else sys.argv[1:])
+    months_back = int(argv[0]) if argv else DEFAULT_MONTHS_BACK
+
+    from job_health import record
+    from runtime_paths import runtime_state_path
+
+    run_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    slack_account = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "")
+    channel = os.environ.get("RESORT_ACCOUNTING_CHANNEL", "")
+
+    context = Context(
+        QBOClient(), load_config(),
+        slack_account=slack_account,
+        months_back=months_back,
+    )
+    results = run_all_checks(context, run_stamp)
+    overall = overall_status(results)
+    report = format_report(results, run_stamp, overall)
+    record_path = write_run_record(
+        results, run_stamp, overall, runtime_state_path("kapital-tests-last-run.json")
+    )
+
+    print(report)
+    print(f"\nrun record: {record_path}")
+
+    posted, post_error = True, None
+    if slack_account and channel:
+        try:
+            post_to_slack(report, account=slack_account, channel=channel)
+        except Exception as exc:  # noqa: BLE001
+            posted, post_error = False, str(exc)[:200]
+    else:
+        posted, post_error = False, "OPENCLAW_SLACK_ACCOUNT/RESORT_ACCOUNTING_CHANNEL not set"
+
+    failed = [n for n, r in results.items() if r.get("status") in FAILING_STATUSES]
+    warned = [n for n, r in results.items() if r.get("status") == "WARN"]
+    detail = f"{overall}; run {run_stamp}"
+    if failed:
+        detail += f"; failing: {','.join(failed)}"
+    if warned:
+        detail += f"; warn: {','.join(warned)}"
+    if not posted:
+        detail += f"; slack post failed: {post_error}"
+
+    healthy = not failed and posted
+    record(JOB_NAME, healthy, detail[:300])
+    if not healthy:
+        print(f"\nkapital-tests: {detail}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        try:
+            from job_health import record
+            record(JOB_NAME, False, str(exc)[:300])
+        except Exception:  # noqa: BLE001
+            pass
+        print(f"kapital-tests: {exc}", file=sys.stderr)
+        sys.exit(1)
