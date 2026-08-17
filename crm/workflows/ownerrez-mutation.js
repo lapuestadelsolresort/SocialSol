@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { sql } = require('@databases/sqlite');
 const { loadPolicy } = require('../lib/channel-policy');
+const { AUTO_CONFIRM_TRIGGER, dispatchAutoConfirm } = require('../lib/auto-confirm-dispatch');
 const { requestOwnerRez } = require('../lib/ownerrez-api');
 const { resolvePath, validateMutationInput } = require('../lib/ownerrez-mutation-catalog');
 
@@ -174,9 +175,12 @@ function notificationTargets(policy) {
 
 const proposeDefinition = {
   name: 'ownerrez.mutation.propose',
-  version: 1,
+  version: 2,
   capability: 'ownerrez.write',
-  // The proposal writes only to the local durable ledger. It cannot change OwnerRez.
+  // The proposal writes only to the local durable ledger. It cannot change
+  // OwnerRez. When `ownerrez.mutation.confirm` is policy-armed for autonomy,
+  // the final step hands the proposal to the confirm graph, which owns every
+  // external effect.
   mutates: false,
   validate: validateMutationInput,
   steps: [
@@ -240,18 +244,56 @@ const proposeDefinition = {
         };
       },
     },
+    {
+      key: 'dispatch_confirmation', effectClass: 'local_write', maxAttempts: 3,
+      async run({ db, run, state, services, store, stepKey }) {
+        return dispatchAutoConfirm({
+          db,
+          run,
+          services,
+          store,
+          stepKey,
+          confirmDefinition,
+          proposalId: state.persist_proposal.proposalId,
+          acceptanceHash: state.persist_proposal.acceptanceHash,
+          idempotencyKey: `auto-confirm:ownerrez:${state.persist_proposal.proposalId}`,
+        });
+      },
+    },
   ],
   output({ state }) {
-    return {
-      status: 'awaiting_explicit_confirmation',
+    const base = {
       operationId: state.preflight.operationId,
       method: state.preflight.method,
       requestPath: state.preflight.requestPath,
       proposalId: state.persist_proposal.proposalId,
       requestHash: state.persist_proposal.requestHash,
-      expiresAt: state.persist_proposal.expiresAt,
-      confirmationCommand: state.persist_proposal.confirmationCommand,
       evidenceId: state.persist_proposal.evidenceId,
+    };
+    const dispatch = state.dispatch_confirmation || { dispatched: false };
+    if (!dispatch.dispatched) {
+      return {
+        ...base,
+        status: 'awaiting_explicit_confirmation',
+        expiresAt: state.persist_proposal.expiresAt,
+        confirmationCommand: state.persist_proposal.confirmationCommand,
+        ...(dispatch.reason ? { autoConfirm: { dispatched: false, reason: dispatch.reason } } : {}),
+      };
+    }
+    return {
+      ...base,
+      status: dispatch.confirmStatus === 'completed' ? 'auto_confirmed_executed'
+        : dispatch.confirmStatus === 'failed' ? 'auto_confirm_failed'
+          : 'auto_confirm_in_progress',
+      autoConfirm: {
+        dispatched: true,
+        confirmRunId: dispatch.confirmRunId,
+        confirmStatus: dispatch.confirmStatus,
+        effectId: dispatch.confirmOutput?.effectId || null,
+        evidenceId: dispatch.confirmOutput?.evidenceId || null,
+        providerRef: dispatch.confirmOutput?.providerRef ?? null,
+        error: dispatch.confirmError,
+      },
     };
   },
 };
@@ -270,7 +312,7 @@ const confirmDefinition = {
   version: 2,
   capability: 'ownerrez.write',
   mutates: true,
-  allowedTriggers: ['slack_ownerrez_command'],
+  allowedTriggers: ['slack_ownerrez_command', AUTO_CONFIRM_TRIGGER],
   // OwnerRez does not document mutation idempotency keys. A crash after the
   // request crosses the network boundary must never cause an automatic replay.
   crashRecovery: 'manual',

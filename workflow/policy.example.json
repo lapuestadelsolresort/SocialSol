@@ -51,6 +51,7 @@
   "autonomous_workflows": [
     "whatsapp.inbound.process",
     "email.message.observe",
+    "email.reply.confirm",
     "paulina.daily",
     "paulina.prepare_daily",
     "regina.daily",
@@ -62,6 +63,7 @@
     "ownerrez.crm.sync",
     "squarespace.crm.sync",
     "ownerrez.webhook.process",
+    "ownerrez.mutation.confirm",
     "accounting.classify",
     "receipt.reconcile",
     "qbo.write"

@@ -30,12 +30,17 @@ Confirm an emitted proposal anywhere in the same email channel:
 !email confirm <proposal-id> <acceptance-hash>
 ```
 
-`!email reply` records an immutable, non-expiring proposal; it does not send. The
-same authorized Slack user may paste the exact emitted confirmation command
-anywhere in the same email channel. The graph chooses Gmail or OwnerRez from the
-recorded inbound event, creates one durable provider effect, and requires exact
-provider readback before documenting the send in Slack. Plain Slack replies
-never send.
+`!email reply` records an immutable, non-expiring proposal. Whether it also
+sends depends on the runtime workflow policy: when `email.reply.confirm` is
+allowlisted in `autonomous_workflows` (auto-send armed, the production
+default per D-001), the proposal is handed to the confirm graph immediately
+and the reply reports the verified send — no confirmation command is needed.
+When auto-send is not armed, the same authorized Slack user must paste the
+exact emitted confirmation command anywhere in the same email channel. In
+both modes the graph chooses Gmail or OwnerRez from the recorded inbound
+event, creates one durable provider effect, and requires exact provider
+readback before documenting the send in Slack. Plain Slack replies never
+send, and ambiguous provider results always stop for durable manual review.
 
 Sarah may continue replying directly in Gmail or OwnerRez. The Gmail poller and
 OwnerRez message webhooks capture those outbound messages idempotently and

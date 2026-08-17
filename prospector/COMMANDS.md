@@ -127,13 +127,16 @@ In the original draft thread:
 !email classify <email-event-id> hot|not_interested|ambiguous
 ```
 
-The reply command does not send. It records an immutable proposal with a
-15-minute expiry. The exact confirm command must be posted by the same
-authorized Slack user in the same thread; Gmail acceptance and Sent readback
-must both succeed before the workflow reports the message sent. Top-level
-commands and ordinary Slack replies do not send email. `!approve`, `!edit`, and
-`!reject` belong only to unsent outbound-draft review; they are never email
-conversation reply commands.
+The reply command records an immutable, non-expiring proposal. When
+`email.reply.confirm` is allowlisted in the runtime policy's
+`autonomous_workflows` (auto-send armed, the production default per D-001),
+the proposal is dispatched immediately and the reply reports the verified
+send — no confirm command is needed. When auto-send is not armed, the exact
+confirm command must be posted by the same authorized Slack user anywhere in
+the same channel. In both modes Gmail acceptance and Sent readback must both
+succeed before the workflow reports the message sent. Ordinary Slack replies
+do not send email. `!approve`, `!edit`, and `!reject` belong only to unsent
+outbound-draft review; they are never email conversation reply commands.
 
 Historical reconciliation is dry-run by default. Production repair uses
 `--apply`; by default it excludes legacy/test sends without an original Slack
