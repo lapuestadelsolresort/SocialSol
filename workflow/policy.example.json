@@ -51,7 +51,6 @@
   "autonomous_workflows": [
     "whatsapp.inbound.process",
     "email.message.observe",
-    "email.reply.confirm",
     "paulina.daily",
     "paulina.prepare_daily",
     "regina.daily",
@@ -63,11 +62,13 @@
     "ownerrez.crm.sync",
     "squarespace.crm.sync",
     "ownerrez.webhook.process",
-    "ownerrez.mutation.confirm",
     "accounting.classify",
     "receipt.reconcile",
     "qbo.write"
   ],
+  "autonomous_operations": {
+    "marketing.change.confirm": ["campaign_activate"]
+  },
   "write_notifications": {
     "user_ids": ["REPLACE_WITH_JASON_SLACK_USER_ID", "REPLACE_WITH_SARAH_SLACK_USER_ID"],
     "channel_ids": []

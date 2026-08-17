@@ -1,0 +1,84 @@
+{
+  "brief_id": "weddings",
+  "campaign_name": "LPDS — Weddings",
+  "adset_name": "LPDS — Weddings",
+  "status": "PAUSED",
+  "channel": "meta",
+  "objective": "OUTCOME_LEADS",
+  "optimization_goal": "OFFSITE_CONVERSIONS",
+  "billing_event": "IMPRESSIONS",
+  "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+  "budget_level": "campaign",
+  "campaign_daily_budget_usd": 5.0,
+  "bucket": "leads",
+  "page_slug": "weddings",
+  "utm_campaign": "us-weddings",
+  "experiment_slug": "exp-meta-weddings",
+  "audience": {
+    "countries": [
+      "US"
+    ],
+    "location_types": [
+      "frequently_in",
+      "home",
+      "recent"
+    ],
+    "age_min": 25,
+    "age_max": 45,
+    "publisher_platforms": [
+      "facebook",
+      "instagram"
+    ],
+    "interests": [
+      {
+        "id": "6003011087019",
+        "name": "Luxury Travel"
+      },
+      {
+        "id": "6003069898229",
+        "name": "Wedding planning"
+      },
+      {
+        "id": "6003147405549",
+        "name": "Boutique hotel"
+      },
+      {
+        "id": "6003349071605",
+        "name": "Wedding photography"
+      },
+      {
+        "id": "6003409392877",
+        "name": "Weddings"
+      }
+    ],
+    "custom_audience_ids": [],
+    "expansion": false
+  },
+  "ads": [
+    {
+      "ad_name": "LPDS — Wedding — Social Proof",
+      "landing_page_url": "https://weddings.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-weddings&utm_content=w3-social-v3"
+    },
+    {
+      "ad_name": "Video — Pier Walk",
+      "landing_page_url": "https://weddings.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-weddings&utm_content=pier-walk"
+    },
+    {
+      "ad_name": "Video — Dining Deck Aerial",
+      "landing_page_url": "https://weddings.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-weddings&utm_content=dining-deck-aerial"
+    },
+    {
+      "ad_name": "LPDS — Wedding — Aspirational",
+      "landing_page_url": "https://weddings.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-weddings&utm_content=w1-aspirational-v3"
+    },
+    {
+      "ad_name": "Video — Palapa Drone",
+      "landing_page_url": "https://weddings.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-weddings&utm_content=palapa-drone"
+    },
+    {
+      "ad_name": "LPDS — Wedding — Pain Point",
+      "landing_page_url": "https://weddings.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-weddings&utm_content=w2-pain-v3"
+    }
+  ],
+  "notes": "Standalone wedding campaign — 6 ads (3 copy + 3 video). Derived from live configuration 2026-08-17: OUTCOME_LEADS objective with OFFSITE_CONVERSIONS optimization, US 25-45, five wedding/luxury interests, no custom audience, Advantage Audience off. Activation through the gated path requires a brief-hash-bound approval receipt (F-001)."
+}

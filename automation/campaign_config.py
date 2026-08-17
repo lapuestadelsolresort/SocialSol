@@ -2,8 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
+
+# Volatile bookkeeping fields the CLI writes into a brief after activation.
+# They are excluded from the review hash so an approval binds to the reviewed
+# creative/targeting content, not to lifecycle metadata.
+REVIEW_HASH_EXCLUDED_FIELDS = ("status", "activated_at")
+
+
+def stable_brief_hash(brief):
+    """Content hash an approval receipt binds to (F-001 review invariant)."""
+    normalized = {
+        key: value for key, value in brief.items()
+        if key not in REVIEW_HASH_EXCLUDED_FIELDS
+    }
+    payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _ids(items):
@@ -20,14 +36,30 @@ def _flatten_detailed(targeting, field):
 
 def build_targeting(brief):
     audience = brief["audience"]
+    if audience.get("regions"):
+        geo_locations = {
+            "regions": [
+                {"key": str(row["key"]), "name": row.get("name"), "country": row.get("country")}
+                for row in audience["regions"]
+            ],
+            "location_types": list(audience.get("location_types") or ["home", "recent"]),
+        }
+    else:
+        geo_locations = {
+            "countries": list(audience["countries"]),
+            "location_types": list(audience.get("location_types") or ["home", "recent"]),
+        }
     targeting = {
         "age_min": int(audience.get("age_min", 18)),
         "age_max": int(audience.get("age_max", 65)),
-        "geo_locations": {
-            "countries": list(audience["countries"]),
-            "location_types": list(audience.get("location_types") or ["home", "recent"]),
-        },
-        "publisher_platforms": list(audience.get("publisher_platforms") or ["facebook", "instagram"]),
+        "geo_locations": geo_locations,
+        # An explicit empty list means "all placements" (mirrors live adsets
+        # created without a placement restriction); an absent key keeps the
+        # historical facebook+instagram default.
+        "publisher_platforms": (
+            list(audience["publisher_platforms"]) if "publisher_platforms" in audience
+            else ["facebook", "instagram"]
+        ),
         "targeting_automation": {"advantage_audience": 1 if audience.get("expansion") else 0},
     }
     detailed = {}
@@ -63,6 +95,7 @@ def compare_brief_to_live(brief, live, require_active=False):
     adset = live.get("adset") or {}
     ad = live.get("ad") or {}
     creative = live.get("creative") or ad.get("creative") or {}
+    brief_ads = brief.get("ads") if isinstance(brief.get("ads"), list) else None
     actual_targeting = adset.get("targeting") or {}
     expected_targeting = build_targeting(brief)
     diffs = []
@@ -79,11 +112,21 @@ def compare_brief_to_live(brief, live, require_active=False):
         int(campaign.get("daily_budget") or 0),
     )
     check("adset.optimization_goal", brief["optimization_goal"], adset.get("optimization_goal"))
-    check(
-        "targeting.countries",
-        sorted(expected_targeting["geo_locations"]["countries"]),
-        sorted((actual_targeting.get("geo_locations") or {}).get("countries") or []),
-    )
+    expected_geo = expected_targeting["geo_locations"]
+    actual_geo = actual_targeting.get("geo_locations") or {}
+    if "regions" in expected_geo:
+        check(
+            "targeting.regions",
+            sorted(str(row.get("key")) for row in expected_geo["regions"]),
+            sorted(str(row.get("key")) for row in actual_geo.get("regions") or []),
+        )
+        check("targeting.countries", [], sorted(actual_geo.get("countries") or []))
+    else:
+        check(
+            "targeting.countries",
+            sorted(expected_geo["countries"]),
+            sorted(actual_geo.get("countries") or []),
+        )
     check("targeting.age_min", expected_targeting["age_min"], int(actual_targeting.get("age_min") or 0))
     check("targeting.age_max", expected_targeting["age_max"], int(actual_targeting.get("age_max") or 0))
     check(
@@ -103,17 +146,40 @@ def compare_brief_to_live(brief, live, require_active=False):
         _ids(actual_targeting.get("custom_audiences")),
     )
     expected_expansion = 1 if brief["audience"].get("expansion") else 0
-    actual_expansion = int((actual_targeting.get("targeting_automation") or {}).get("advantage_audience", -1))
+    # An adset with no targeting_automation block has Advantage Audience off;
+    # only an explicit flag can differ from 0.
+    actual_expansion = int((actual_targeting.get("targeting_automation") or {}).get("advantage_audience", 0) or 0)
     check("targeting.advantage_audience", expected_expansion, actual_expansion)
     if not expected_expansion:
         relaxation = actual_targeting.get("targeting_relaxation_types") or {}
         check("targeting.custom_audience_relaxation", 0, int(relaxation.get("custom_audience") or 0))
-    expected_links = [brief["landing_page_url"]]
-    check("creative.links", expected_links, _creative_links(creative))
-    if require_active:
-        check("campaign.effective_status", "ACTIVE", campaign.get("effective_status"))
-        check("adset.effective_status", "ACTIVE", adset.get("effective_status"))
-        check("ad.effective_status", "ACTIVE", ad.get("effective_status"))
+    if brief_ads is not None:
+        live_ads = live.get("ads") or []
+        live_creatives = live.get("creatives") or []
+        check("adset.ad_count", len(brief_ads), len(live_ads))
+        expected_links = sorted({
+            str(row.get("landing_page_url") or "") for row in brief_ads
+        })
+        actual_links = sorted({
+            link for row in live_creatives for link in _creative_links(row)
+        })
+        check("creative.links", expected_links, actual_links)
+        if require_active:
+            check("campaign.effective_status", "ACTIVE", campaign.get("effective_status"))
+            check("adset.effective_status", "ACTIVE", adset.get("effective_status"))
+            for live_ad in live_ads:
+                check(
+                    f"ad.{live_ad.get('id')}.effective_status",
+                    "ACTIVE",
+                    live_ad.get("effective_status"),
+                )
+    else:
+        expected_links = [brief["landing_page_url"]]
+        check("creative.links", expected_links, _creative_links(creative))
+        if require_active:
+            check("campaign.effective_status", "ACTIVE", campaign.get("effective_status"))
+            check("adset.effective_status", "ACTIVE", adset.get("effective_status"))
+            check("ad.effective_status", "ACTIVE", ad.get("effective_status"))
     return diffs
 
 

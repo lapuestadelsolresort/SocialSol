@@ -42,6 +42,18 @@ function validatePolicy(policy) {
       throw new Error(`workflow policy ${field} must be an array of non-empty strings`);
     }
   }
+  if (policy.autonomous_operations !== undefined) {
+    if (!policy.autonomous_operations || typeof policy.autonomous_operations !== 'object'
+      || Array.isArray(policy.autonomous_operations)) {
+      throw new Error('workflow policy autonomous_operations must map workflow names to operation arrays');
+    }
+    for (const [workflowName, operations] of Object.entries(policy.autonomous_operations)) {
+      if (!workflowName.trim() || !Array.isArray(operations) || operations.length === 0
+        || operations.some(value => typeof value !== 'string' || !value.trim())) {
+        throw new Error(`workflow policy autonomous_operations.${workflowName || '<empty>'} must be a non-empty array of operation names`);
+      }
+    }
+  }
   return policy;
 }
 

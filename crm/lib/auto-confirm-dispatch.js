@@ -11,9 +11,14 @@ const AUTO_CONFIRM_TRIGGER = 'auto_confirm_dispatch';
 // system-origin workflow passes (D-001). When the policy cannot be read or the
 // workflow is not allowlisted, the proposal behaves exactly as un-armed:
 // awaiting the human confirmation command.
+//
+// Multi-operation surfaces (D-001 grants autonomy per OPERATION, not per
+// workflow) additionally pass `operation`: dispatch then requires the policy's
+// `autonomous_operations[<confirm workflow>]` allowlist to name that exact
+// operation. No allowlist, or an unlisted operation, stays un-armed.
 async function dispatchAutoConfirm({
   db, run, services = {}, store, stepKey,
-  confirmDefinition, proposalId, acceptanceHash, idempotencyKey,
+  confirmDefinition, proposalId, acceptanceHash, idempotencyKey, operation = null,
 }) {
   let policy;
   try {
@@ -30,6 +35,12 @@ async function dispatchAutoConfirm({
     context: { origin: 'system' },
   });
   if (!decision.allowed) return { dispatched: false, reason: decision.reason };
+  if (operation !== null) {
+    const allowedOperations = policy.autonomous_operations?.[confirmDefinition.name];
+    if (!Array.isArray(allowedOperations) || !allowedOperations.includes(operation)) {
+      return { dispatched: false, reason: 'autonomous_operation_denied', operation };
+    }
+  }
 
   let child;
   try {
