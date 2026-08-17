@@ -879,6 +879,30 @@ export function parseMarketingConfirmCommand(text) {
   return { proposalId: match[1].toLowerCase(), acceptanceHash: match[2].toLowerCase() };
 }
 
+// The gateway can deliver the user's message wrapped in untrusted-metadata
+// preamble blocks (fenced Conversation info / Sender JSON) depending on
+// runtime version and channel. Exact-command interception must parse the bare
+// user text: prefer any candidate field that already starts with a command,
+// otherwise take the text after the final fenced block (2026-08-17 incident:
+// every ^!-anchored claim parser silently dead against wrapped bodies while
+// keyword parsers survived).
+export function claimCommandText(event) {
+  const candidates = [event?.body, event?.content, event?.bodyForAgent];
+  for (const candidate of candidates) {
+    const text = String(candidate || '').trim();
+    if (text.startsWith('!')) return text;
+  }
+  for (const candidate of candidates) {
+    const text = String(candidate || '').trim();
+    const fence = text.lastIndexOf('```');
+    if (fence !== -1) {
+      const tail = text.slice(fence + 3).trim();
+      if (tail.startsWith('!')) return tail;
+    }
+  }
+  return String(event?.bodyForAgent || event?.body || event?.content || '').trim();
+}
+
 export function parseManualReviewCommand(text) {
   const body = String(text || '').trim();
   if (!/^!review(?:\s|$)/i.test(body)) return null;
@@ -1349,7 +1373,7 @@ export function createInboundClaimHandler({ config, execute = callControlPlane, 
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
     const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.whatsappChannelIds.has(channelId)) return undefined;
-    const text = event.bodyForAgent || event.body || event.content || '';
+    const text = claimCommandText(event);
     const command = parseWhatsAppCommand(text, { hasThread: Boolean(event.threadId) });
     if (!command) return undefined;
     if (!workflowIsLive(config, 'whatsapp.reply')) {
@@ -1397,7 +1421,7 @@ export function createOwnerRezClaimHandler({ config, execute = callControlPlane,
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
     const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.ownerrezChannelIds.has(channelId)) return undefined;
-    const command = parseOwnerRezConfirmCommand(event.bodyForAgent || event.body || event.content || '');
+    const command = parseOwnerRezConfirmCommand(claimCommandText(event));
     if (!command) return undefined;
     if (!workflowIsLive(config, 'ownerrez.mutation.confirm')) {
       logger?.info?.(`resort-workflows shadow: would handle OwnerRez confirmation ${event.messageId || '<no-id>'}`);
@@ -1445,7 +1469,7 @@ export function createMetaDmClaimHandler({ config, execute = callControlPlane, l
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
     const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.socialChannelIds.has(channelId)) return undefined;
-    const command = parseMetaDmCommand(event.bodyForAgent || event.body || event.content || '');
+    const command = parseMetaDmCommand(claimCommandText(event));
     if (!command) return undefined;
     if (!workflowIsLive(config, 'meta.dm.reply')) {
       return { handled: true, reply: { text: 'Not sent. Meta DM replies are still in shadow mode.' } };
@@ -1486,7 +1510,7 @@ export function createEmailClaimHandler({ config, execute = callControlPlane, lo
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
     const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.emailChannelIds.has(channelId)) return undefined;
-    const command = parseEmailCommand(event.bodyForAgent || event.body || event.content || '', {
+    const command = parseEmailCommand(claimCommandText(event), {
       hasThread: Boolean(event.threadId),
     });
     if (!command) return undefined;
@@ -1541,7 +1565,7 @@ export function createMarketingConfirmClaimHandler({ config, execute = callContr
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
     const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.socialChannelIds.has(channelId)) return undefined;
-    const command = parseMarketingConfirmCommand(event.bodyForAgent || event.body || event.content || '');
+    const command = parseMarketingConfirmCommand(claimCommandText(event));
     if (!command) return undefined;
     if (!workflowIsLive(config, 'marketing.change.confirm')) {
       return { handled: true, reply: { text: 'Not changed. Paid-media confirmations are still in shadow mode.' } };
@@ -1582,7 +1606,7 @@ export function createManualReviewClaimHandler({ config, resolve = resolveManual
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
     const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.controlledChannelIds.has(channelId)) return undefined;
-    const command = parseManualReviewCommand(event.bodyForAgent || event.body || event.content || '');
+    const command = parseManualReviewCommand(claimCommandText(event));
     if (!command) return undefined;
     if (command.error) {
       return {
@@ -1613,7 +1637,7 @@ export function createReceiptConfirmClaimHandler({ config, execute = callControl
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
     const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.ownerExpenseChannelIds.has(channelId)) return undefined;
-    const command = parseReceiptConfirmCommand(event.bodyForAgent || event.body || event.content || '');
+    const command = parseReceiptConfirmCommand(claimCommandText(event));
     if (!command) return undefined;
     if (!workflowIsLive(config, 'receipt.owner_expense.confirm')) {
       return { handled: true, reply: { text: 'Nothing posted. Owner-expense confirmations are still in shadow mode.' } };

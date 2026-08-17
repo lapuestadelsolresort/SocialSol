@@ -18,6 +18,7 @@ import {
   createInboundClaimHandler,
   createMetaDmClaimHandler,
   createMarketingConfirmClaimHandler,
+  claimCommandText,
   createManualReviewClaimHandler,
   createOwnerRezClaimHandler,
   createReceiptConfirmClaimHandler,
@@ -1706,4 +1707,43 @@ test('claim handlers intercept gateway conversation ids carrying the channel: pr
   assert.equal(email.handled, true);
   assert.equal(emailCalls.length, 1);
   assert.equal(emailCalls[0].idempotencyKey, 'slack:CPAULINA:300.2:email.reply.propose');
+});
+
+
+test('exact commands intercept when the gateway wraps the body in metadata preamble', async () => {
+  const wrapped = [
+    'Conversation info (untrusted metadata):',
+    '```json',
+    '{ "chat_id": "channel:C-REVIEW", "sender_id": "UTESTOWNER1" }',
+    '```',
+    '',
+    'Sender (untrusted metadata):',
+    '```json',
+    '{ "label": "Jason Starkey (UTESTOWNER1)" }',
+    '```',
+    '',
+    '!review resolve 3ce3ad0f-61e6-4113-8466-1b5c19a6494a not-sent',
+  ].join('\n');
+
+  assert.equal(
+    claimCommandText({ bodyForAgent: wrapped }),
+    '!review resolve 3ce3ad0f-61e6-4113-8466-1b5c19a6494a not-sent',
+  );
+  assert.equal(claimCommandText({ body: '!wa hello there' }), '!wa hello there');
+  assert.equal(claimCommandText({ bodyForAgent: 'next arrival?' }), 'next arrival?');
+
+  const resolutions = [];
+  const review = await createManualReviewClaimHandler({
+    config: pluginConfig({ slackAccountId: 'ig-drafts', controlledChannelIds: ['C-REVIEW'] }),
+    resolve: async (_config, request) => {
+      resolutions.push(request);
+      return { review: { id: request.reviewId, resolution: request.resolution } };
+    },
+  })({
+    channel: 'slack', accountId: 'ig-drafts', conversationId: 'channel:C-REVIEW',
+    messageId: '301.1', senderId: 'U-JASON', bodyForAgent: wrapped,
+  }, {});
+  assert.equal(review.handled, true);
+  assert.equal(resolutions.length, 1);
+  assert.equal(resolutions[0].resolution, 'confirmed_not_sent');
 });
