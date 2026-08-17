@@ -452,3 +452,62 @@ restart). Un-arming is the one-line reverse. Live verification per the D-018
 canary design (test identity per D-009). If only a SUBSET of OwnerRez
 operations should ever be armed, build the small `autonomous_operations`
 allowlist extension first (release path).
+
+## D-020 — F-001 fix session authorization + F-045 brief scope — RECORDED 2026-08-17
+
+**Owner (2026-08-17, start-of-session, F-001 fix session; asked because the
+session's Authorizations line was blank):**
+
+- **BUSINESS + OUTAGE AUTHORIZED — FULL SCOPE.** The F-001 fix session runs
+  the full release path agent-run (fix branch → tests → PR create → CI verify
+  → merge → fast-forward of production main → deploy incl. crm/worker
+  restarts), and then — only after the machine-enforced creative/landing-
+  review invariant + regression tests land at the deployed SHA — the Meta
+  autonomous-activation arming step, per D-001's invariant-first walkthrough
+  answer (2026-08-16). Merges/ff owner-run via `!` commands if the permission
+  classifier blocks (QCFS2-01 precedent). Every D-001 gate-binding term holds:
+  arming removes the per-action human backstop only; preflight, semantic
+  brief↔live assert, execute-once, readback, aggregate budget cap
+  (80.00 USD/day, owner-only changes), and manual-review gates bind unchanged.
+- **F-045 brief scope: ALL FIVE brief-less registry campaigns.** The 3 ACTIVE
+  (weddings, corporate-retreats, retarget-warm/hot) AND the 2 non-planner
+  PAUSED registry campaigns get committed brief files this session, so the
+  gated mutation catalog and the new review invariant bind to the whole
+  registry — including emergency pause reachability. Owner notes the paused
+  two thereby become autonomously activatable (once armed) subject to the
+  review invariant; activation of a paused campaign still requires the
+  invariant's approved review state, the semantic assert, and the aggregate
+  cap preflight.
+
+**Addendum — session executed same day (2026-08-17):**
+
+- **Arming EXECUTED.** After the invariant + briefs deployed and verified at
+  runtime baseline `c0a7b72` (PR #81, deploy record
+  2026-08-17T20-10-12-727Z completed 11/11), the owner confirmed "Arm now" in
+  the in-session ask and personally ran the atomic install (agent install
+  classifier-blocked — QCFS2-03 precedent). Runtime `workflow/policy.json`
+  sha `aa71f387…` → `0dd75080a85ac297…`, mode 600:
+  `autonomous_workflows` += `marketing.change.confirm`;
+  `autonomous_operations = {"marketing.change.confirm": ["campaign_activate"]}`.
+  ACTIVATION ONLY — pause, budget, provision, and both landing operations
+  remain `!meta confirm`-gated; `email.reply.confirm` and
+  `ownerrez.mutation.confirm` remain un-armed (D-019 standing state
+  preserved). Deployed `loadPolicy`/`validatePolicy` accept the installed
+  file; system-origin authorization for the confirm workflow verified allowed.
+- **Un-arming (owner-initiated):** restore
+  `~/qc-evidence/F001-FIX/policy-pre-arming-20260817T201341Z.json` (sha
+  `aa71f387…`) over `workflow/policy.json` via the same atomic mode-600
+  install, or remove the two policy entries by hand.
+- **Effective autonomy after arming:** an activation proposal auto-executes
+  ONLY when the target brief's registry row carries a human Slack approval
+  receipt whose `brief_hash` matches the current committed brief (the F-001
+  invariant); fresh preflight, semantic brief↔live assert, execute-once,
+  provider readback, drift auto-rollback to PAUSED, and reservations-channel
+  notification bind unchanged. At arming time ZERO campaigns have recorded
+  receipts, so nothing can auto-activate until the owner reviews and records
+  approvals (`automation/campaign_approval.py record`, which now binds
+  `brief_hash`; the pre-existing planner receipt reads as stale until
+  re-recorded).
+- **Budget-increase autonomy NOT armed** (D-001 grants it; this session's
+  queue item was activation only). Arming it later is one line in
+  `autonomous_operations` plus session authorization.
