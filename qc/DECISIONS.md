@@ -249,3 +249,17 @@ runtime-baseline verification still required, per the QC2B-14/QC3B-13 pattern).
   only; owner-run push fallback if the permission classifier blocks; ancestry +
   incoming-files proofs and post-ff runtime-baseline verification required, per the
   QC5-07/QC4B-04 pattern).
+
+## D-015 — F-047 Paulina edit-override consent-bypass severity — RECORDED 2026-08-16
+
+**Owner (2026-08-16, in-session, QC-7a session 14): keep it a P2.**
+
+F-047 (Paulina edit-override send-time carve-out downgrades suppression [item 1] and
+do_not_contact [item 2] to advisory when an `edit_override` marker is present, allowing a send
+to a suppressed/DNC contact — reproduced in FIXTURE case D, QC7A-03) stays **P2**, not P1. It
+remains a D-008 P2-batch fix-list item: scope the send-time carve-out to content items 6/7 only,
+always enforce items 1-5 at send regardless of edit_override, plus a regression test
+(suppressed+edit_override → cancelled, not sent). Reachability is bounded (requires a prior human
+edit that trips the content gate, then a post-edit suppression before the scheduled send; one
+email per override row; campaign not paused; 5 edited drafts ever, all terminal; not fired) — the
+compensating context supporting P2.
