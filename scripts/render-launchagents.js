@@ -9,7 +9,13 @@ require('../lib/runtime-paths');
 const { loadPolicy } = require('../crm/lib/channel-policy');
 
 const root = path.resolve(process.env.SOCIALSOL_ROOT || path.join(__dirname, '..'));
-const nodeBin = path.resolve(process.env.NODE_BIN || process.execPath);
+// Prefer the stable Homebrew symlink over process.execPath: execPath is the
+// Cellar-versioned binary, so a node upgrade breaks every rendered job at its
+// next start until a re-render+reinstall (F-016f).
+const STABLE_NODE_BIN = '/opt/homebrew/bin/node';
+const nodeBin = path.resolve(
+  process.env.NODE_BIN || (fs.existsSync(STABLE_NODE_BIN) ? STABLE_NODE_BIN : process.execPath),
+);
 const pythonBin = path.resolve(process.env.PYTHON_BIN || '/opt/homebrew/bin/python3');
 const policy = loadPolicy();
 let localTargets = {};
@@ -29,8 +35,9 @@ const runtimeValues = {
   '__RESORT_BIZEVENT_CHANNEL__': process.env.RESORT_BIZEVENT_CHANNEL || policyChannel('business-intel'),
   '__RESORT_ACCOUNTING_CHANNEL__': process.env.RESORT_ACCOUNTING_CHANNEL || policyChannel('accounting'),
   '__RESORT_RESERVATIONS_CHANNEL__': process.env.RESORT_RESERVATIONS_CHANNEL || policyChannel('reservations'),
-  '__RESORT_HOUSEKEEPING_CHANNEL__': process.env.RESORT_HOUSEKEEPING_CHANNEL || policyChannel('receipt-housekeeper'),
-  '__SQUARESPACE_SLACK_ENABLED__': process.env.SQUARESPACE_SLACK_ENABLED || '0',
+  '__RESORT_HOUSEKEEPING_CHANNEL__': process.env.RESORT_HOUSEKEEPING_CHANNEL || policyChannel('housekeeper'),
+  '__SQUARESPACE_SLACK_ENABLED__': process.env.SQUARESPACE_SLACK_ENABLED || '1',
+  '__RESORT_WHATSAPP_CHANNEL__': process.env.RESORT_WHATSAPP_CHANNEL || policyChannel('whatsapp'),
   '__PROSPECTOR_SLACK_CHANNEL__': process.env.PROSPECTOR_SLACK_CHANNEL
     || policyChannel('prospector-paulina') || prospectorConfig.channel_id || '',
   '__SARAH_EMAIL_SLACK_CHANNEL__': process.env.SARAH_EMAIL_SLACK_CHANNEL

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.lapuestadelsolresort.state-backup</string>
+  <key>ProgramArguments</key><array><string>__PYTHON_BIN__</string><string>__SOCIALSOL_ROOT__/automation/state_backup.py</string></array>
+  <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>45</integer></dict>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>SOCIALSOL_SECRETS_DIR</key><string>__SOCIALSOL_SECRETS_DIR__</string>
+  </dict>
+  <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/state-backup.log</string>
+  <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/state-backup.err</string>
+</dict></plist>

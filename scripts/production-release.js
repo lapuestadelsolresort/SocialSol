@@ -178,6 +178,24 @@ function clearStaleLock(args) {
   return { ok: true, removed: true, lock };
 }
 
+const INSTALL_REPORT_PATH = path.join(RUNTIME_DIR, 'launchagents-install-report.json');
+
+// The install step writes a report of what it restarted; the core-service
+// kickstarts must skip those labels so each daemon restarts exactly once per
+// deploy. A missing or stale report means the install step did not complete.
+function readFreshInstallReport(deployStartedAt, reportPath = INSTALL_REPORT_PATH) {
+  let report;
+  try {
+    report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`launchagent install report unreadable at ${reportPath}: ${error.message}`);
+  }
+  if (!Array.isArray(report.restarted) || String(report.completedAt || '') < deployStartedAt) {
+    throw new Error('launchagent install report is stale or malformed; install step did not complete');
+  }
+  return report;
+}
+
 function writeDeploymentRecord(record) {
   fs.mkdirSync(DEPLOYMENT_DIR, { recursive: true, mode: 0o700 });
   const stamp = record.startedAt.replace(/[:.]/g, '-');
@@ -233,10 +251,18 @@ function deploy(args) {
       },
     });
     runStep(record, 'render_launchagents', 'npm', ['run', 'render:launchagents']);
+    runStep(record, 'install_launchagents', process.execPath, ['scripts/install-launchagents.js', 'apply', '--confirm-production']);
+    const installReport = readFreshInstallReport(record.startedAt);
+    record.launchagents = {
+      restarted: installReport.restarted,
+      applied: Array.isArray(installReport.executed) ? installReport.executed.length : null,
+    };
     const domain = `gui/${process.getuid()}`;
     for (const label of CORE_SERVICES) {
+      if (installReport.restarted.includes(label)) continue;
       runStep(record, `restart_${label}`, '/bin/launchctl', ['kickstart', '-k', `${domain}/${label}`]);
     }
+    runStep(record, 'service_convergence', process.execPath, ['scripts/install-launchagents.js', 'check']);
     runStep(record, 'crm_health', 'curl', [
       '--fail', '--silent', '--show-error', '--retry', '20', '--retry-delay', '1',
       '--retry-connrefused', '--max-time', '30', 'http://127.0.0.1:3456/healthz',
@@ -285,6 +311,7 @@ module.exports = {
   acquireLock,
   clearStaleLock,
   inspectCheckout,
+  readFreshInstallReport,
   latestVerifyRun,
   main,
   parseGithubRemote,

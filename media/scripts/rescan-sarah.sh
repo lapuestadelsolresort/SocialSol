@@ -33,9 +33,19 @@ ENV_FILE="${SOCIALSOL_ENV_FILE:-$RESORT/.env}"
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] $*"; }
 
+# job_health reporting so the watchdog owns this job's alert path (F-015c).
+report_health() {
+  PYTHONPATH="$RESORT/automation" python3 -c "
+import sys
+from job_health import record
+record('resort-media-rescan', sys.argv[1] == 'ok', sys.argv[2] if len(sys.argv) > 2 else None)
+" "$1" "${2:-}" || log "job_health record failed"
+}
+
 if [[ ! -d "$SOURCE" ]]; then
-  log "media-rescan: $SOURCE missing — skipping"
-  exit 0
+  log "media-rescan: $SOURCE missing"
+  report_health fail "originals tree missing: $SOURCE"
+  exit 1
 fi
 
 log "media-rescan starting ($SOURCE)"
@@ -82,6 +92,7 @@ new_count="${new_count:-0}"
 
 if [[ "$new_count" == "0" ]]; then
   log "media-rescan done — no new files"
+  report_health ok "no new files (reconciled=$reconciled)"
   exit 0
 fi
 
@@ -98,12 +109,18 @@ if [[ -z "${OPENAI_API_KEY:-}" && -f "$ENV_FILE" ]]; then
   export OPENAI_API_KEY
 fi
 
-set -e
-node scripts/generate-proxies.js --concurrency=2
-node scripts/generate-waveforms.js
-node scripts/transcribe.js --concurrency=1
-node scripts/caption-keyframes.js --concurrency=3
-node scripts/synthesize-clip.js --concurrency=2
-set +e
+for stage in \
+  "generate-proxies.js --concurrency=2" \
+  "generate-waveforms.js" \
+  "transcribe.js --concurrency=1" \
+  "caption-keyframes.js --concurrency=3" \
+  "synthesize-clip.js --concurrency=2"; do
+  if ! node scripts/$stage; then
+    log "media-rescan: stage failed: $stage"
+    report_health fail "stage failed: $stage ($new_count new assets pending)"
+    exit 1
+  fi
+done
 
 log "media-rescan done — $new_count new asset(s) processed; embeddings land via the daily 08:20 media-corpus-indexer"
+report_health ok "$new_count new asset(s) processed (reconciled=$reconciled)"
