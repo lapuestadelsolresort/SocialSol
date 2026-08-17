@@ -8,6 +8,7 @@ const { sendGmailReply, readSentMessage } = require('../lib/gmail-client');
 const { sendOwnerRezMessage, readOwnerRezMessage } = require('../lib/ownerrez-messages');
 const { projectDirectGmailInbound } = require('../lib/inbound-email-crm');
 const { loadPolicy } = require('../lib/channel-policy');
+const { AUTO_CONFIRM_TRIGGER, dispatchAutoConfirm } = require('../lib/auto-confirm-dispatch');
 
 const QUALITIES = new Set(['hot', 'not_interested', 'ambiguous']);
 
@@ -319,8 +320,11 @@ const observeDefinition = {
 
 const proposeDefinition = {
   name: 'email.reply.propose',
-  version: 1,
+  version: 2,
   capability: 'email.send',
+  // The proposal writes only to the local durable ledger. When
+  // `email.reply.confirm` is policy-armed for autonomy, the final step hands
+  // the proposal to the confirm graph, which owns every external effect.
   mutates: false,
   allowedTriggers: ['slack_email_reply_command'],
   validate: validateReplyRequest,
@@ -410,10 +414,25 @@ const proposeDefinition = {
         };
       },
     },
+    {
+      key: 'dispatch_confirmation', effectClass: 'local_write', maxAttempts: 3,
+      async run({ db, run, state, services, store, stepKey }) {
+        return dispatchAutoConfirm({
+          db,
+          run,
+          services,
+          store,
+          stepKey,
+          confirmDefinition,
+          proposalId: state.persist_proposal.proposalId,
+          acceptanceHash: state.persist_proposal.acceptanceHash,
+          idempotencyKey: `auto-confirm:email:${state.persist_proposal.proposalId}`,
+        });
+      },
+    },
   ],
   output({ state }) {
-    return {
-      status: 'awaiting_explicit_confirmation',
+    const base = {
       proposalId: state.persist_proposal.proposalId,
       outreachSendId: state.resolve_thread.sendId,
       recipient: state.resolve_thread.contactName || state.resolve_thread.toAddress,
@@ -421,9 +440,33 @@ const proposeDefinition = {
       toAddress: state.resolve_thread.toAddress,
       requestHash: state.persist_proposal.requestHash,
       bodyText: state.persist_proposal.bodyText,
-      doesNotExpire: true,
-      confirmationCommand: state.persist_proposal.confirmationCommand,
       evidenceId: state.persist_proposal.evidenceId,
+    };
+    const dispatch = state.dispatch_confirmation || { dispatched: false };
+    if (!dispatch.dispatched) {
+      return {
+        ...base,
+        status: 'awaiting_explicit_confirmation',
+        doesNotExpire: true,
+        confirmationCommand: state.persist_proposal.confirmationCommand,
+        ...(dispatch.reason ? { autoConfirm: { dispatched: false, reason: dispatch.reason } } : {}),
+      };
+    }
+    return {
+      ...base,
+      status: dispatch.confirmStatus === 'completed' ? 'auto_confirmed_sent'
+        : dispatch.confirmStatus === 'failed' ? 'auto_confirm_failed'
+          : 'auto_confirm_in_progress',
+      autoConfirm: {
+        dispatched: true,
+        confirmRunId: dispatch.confirmRunId,
+        confirmStatus: dispatch.confirmStatus,
+        effectId: dispatch.confirmOutput?.effectId || null,
+        evidenceId: dispatch.confirmOutput?.evidenceId || null,
+        messageId: dispatch.confirmOutput?.messageId || null,
+        emailThreadId: dispatch.confirmOutput?.emailThreadId || null,
+        error: dispatch.confirmError,
+      },
     };
   },
 };
@@ -435,7 +478,7 @@ const confirmDefinition = {
   mutates: true,
   serializeMutations: true,
   crashRecovery: 'manual',
-  allowedTriggers: ['slack_email_confirm_command'],
+  allowedTriggers: ['slack_email_confirm_command', AUTO_CONFIRM_TRIGGER],
   validate: validateConfirmation,
   steps: [
     {

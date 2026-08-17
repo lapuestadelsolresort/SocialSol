@@ -14,7 +14,7 @@ const { ENTRIES, validateMutationInput } = require('../lib/ownerrez-mutation-cat
 const { requestOwnerRez } = require('../lib/ownerrez-api');
 const { confirmDefinition, proposeDefinition } = require('../workflows/ownerrez-mutation');
 
-async function withDb(run) {
+async function withDb(run, { autonomousWorkflows = [] } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ownerrez-mutation-'));
   const db = createDB(path.join(directory, 'crm.db'));
   const priorPolicyPath = process.env.RESORT_WORKFLOW_POLICY_PATH;
@@ -23,7 +23,7 @@ async function withDb(run) {
     version: 1,
     shadow_mode: false,
     live_workflows: ['ownerrez.mutation.confirm'],
-    autonomous_workflows: [],
+    autonomous_workflows: autonomousWorkflows,
     always_on_effects: [],
     channels: {
       'TEST-RESERVATIONS': { name: 'reservations', capabilities: ['ownerrez.write'] },
@@ -149,6 +149,75 @@ test('OwnerRez confirmation rejects a changed ETag before the mutation boundary'
     assert.equal(confirmed.error_code, 'ownerrez_precondition_changed');
     assert.equal(mutationCalls, 0);
   });
+});
+
+test('policy-armed OwnerRez proposals execute immediately with every confirm gate intact', async () => {
+  await withDb(async db => {
+    let mutationCalls = 0;
+    let reads = 0;
+    let current = { id: 41, first_name: 'Before', last_name: 'Guest' };
+    const ownerRezRequest = async request => {
+      if (request.method === 'GET') {
+        reads += 1;
+        return { ok: true, status: 200, data: { ...current }, etag: 'etag-stable' };
+      }
+      assert.equal(request.method, 'PATCH');
+      mutationCalls += 1;
+      current = { ...current, ...request.body };
+      return { ok: true, status: 200, data: { ...current }, etag: null };
+    };
+    const proposal = await startGraph(db, proposeDefinition, graphRequest('proposal-armed', 'TEST-JASON', {
+      operationId: 'Guests_Patch', pathParams: { id: 41 }, body: { first_name: 'After' },
+      reason: 'Correct the guest first name',
+    }), { ownerRezRequest });
+    assert.equal(proposal.status, 'completed', proposal.error_message);
+    assert.equal(proposal.output.status, 'auto_confirmed_executed');
+    assert.equal(proposal.output.confirmationCommand, undefined);
+    assert.equal(mutationCalls, 1);
+    assert.ok(reads >= 3, 'proposal preflight, confirm precondition, and readback all query the provider');
+    assert.ok(proposal.output.autoConfirm.confirmRunId);
+    assert.ok(proposal.output.autoConfirm.effectId);
+    assert.ok(proposal.output.autoConfirm.evidenceId);
+
+    const [child] = await db.query(sql`SELECT trigger_type, trigger_ref, actor_user_id, status
+      FROM workflow_runs WHERE id=${proposal.output.autoConfirm.confirmRunId}`);
+    assert.equal(child.trigger_type, 'auto_confirm_dispatch');
+    assert.equal(child.trigger_ref, proposal.id);
+    assert.equal(child.actor_user_id, 'TEST-JASON');
+    assert.equal(child.status, 'completed');
+
+    const [stored] = await db.query(sql`SELECT status, confirmed_by, readback_hash
+      FROM ownerrez_mutation_proposals WHERE id=${proposal.output.proposalId}`);
+    assert.equal(stored.status, 'completed');
+    assert.equal(stored.confirmed_by, 'TEST-JASON');
+    assert.ok(stored.readback_hash);
+    assert.equal(current.first_name, 'After');
+  }, { autonomousWorkflows: ['ownerrez.mutation.confirm'] });
+});
+
+test('policy-armed ambiguous OwnerRez results still stop for durable manual review', async () => {
+  await withDb(async db => {
+    let mutationCalls = 0;
+    const ownerRezRequest = async request => {
+      if (request.method === 'GET') return { ok: true, status: 200, data: { id: 9, notes: 'old' }, etag: 'stable' };
+      mutationCalls += 1;
+      throw Object.assign(new Error('socket closed after write'), { code: 'ECONNRESET' });
+    };
+    const proposal = await startGraph(db, proposeDefinition, graphRequest('proposal-armed-ambiguous', 'TEST-JASON', {
+      operationId: 'Bookings_Patch', pathParams: { id: 9 }, body: { notes: 'new' }, reason: 'Update reservation notes',
+    }), { ownerRezRequest });
+    assert.equal(proposal.status, 'completed', proposal.error_message);
+    assert.equal(proposal.output.status, 'auto_confirm_failed');
+    assert.equal(proposal.output.autoConfirm.error.code, 'ambiguous_external_result');
+    assert.equal(mutationCalls, 1);
+    const [stored] = await db.query(sql`SELECT status FROM ownerrez_mutation_proposals
+      WHERE id=${proposal.output.proposalId}`);
+    assert.equal(stored.status, 'ambiguous');
+    const [review] = await db.query(sql`SELECT status, reason_code FROM workflow_manual_reviews
+      WHERE run_id=${proposal.output.autoConfirm.confirmRunId}`);
+    assert.equal(review.status, 'open');
+    assert.equal(review.reason_code, 'ambiguous_external_result');
+  }, { autonomousWorkflows: ['ownerrez.mutation.confirm'] });
 });
 
 test('ambiguous OwnerRez network results are never automatically retried', async () => {

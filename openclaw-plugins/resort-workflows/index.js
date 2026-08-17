@@ -626,6 +626,34 @@ export function formatWorkflowReply(payload) {
   if (run.workflow_name === 'email.reply.propose') {
     const output = run.output || {};
     const transport = output.provider === 'ownerrez' ? 'OwnerRez message' : 'email';
+    const auto = output.autoConfirm || {};
+    if (output.status === 'auto_confirmed_sent') {
+      return [
+        `${output.provider === 'ownerrez' ? 'OwnerRez' : 'Gmail'} message to ${output.recipient || output.toAddress || 'the contact'} was sent automatically and verified by provider readback.`,
+        '',
+        `> ${String(output.bodyText || '').split('\n').join('\n> ')}`,
+        '',
+        'Auto-send is enabled for this surface; no confirmation step was required.',
+        `Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}${auto.effectId ? ` · Effect: ${auto.effectId}` : ''}${auto.evidenceId ? ` · Evidence: ${auto.evidenceId}` : ''}`,
+      ].join('\n');
+    }
+    if (output.status === 'auto_confirm_in_progress') {
+      return [
+        `Your ${transport} reply was dispatched automatically; provider verification is still in progress.`,
+        'The verified notice will follow in this thread. Do not re-issue the command.',
+        `Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}`,
+      ].join('\n');
+    }
+    if (output.status === 'auto_confirm_failed') {
+      return [
+        `Not sent. The automatic ${transport} dispatch failed (${auto.error?.code || 'workflow_error'}).`,
+        auto.error?.message ? `Reason: ${auto.error.message}` : null,
+        `Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}`,
+      ].filter(Boolean).join('\n');
+    }
     return [
       `No ${transport} has been sent.`,
       `Recipient: ${output.recipient || output.toAddress || 'unknown'}${output.outreachSendId ? ` · Draft #${output.outreachSendId}` : ''}`,
@@ -678,6 +706,32 @@ export function formatWorkflowReply(payload) {
   }
   if (run.workflow_name === 'ownerrez.mutation.propose') {
     const output = run.output || {};
+    const auto = output.autoConfirm || {};
+    if (output.status === 'auto_confirmed_executed') {
+      return [
+        `OwnerRez change executed automatically and verified by readback (${output.operationId || 'operation'}).`,
+        'Auto-execution is enabled for OwnerRez mutations; no confirmation step was required.',
+        `Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}${auto.effectId ? ` · Effect: ${auto.effectId}` : ''}${auto.evidenceId ? ` · Evidence: ${auto.evidenceId}` : ''}`,
+      ].join('\n');
+    }
+    if (output.status === 'auto_confirm_in_progress') {
+      return [
+        `The OwnerRez change (${output.operationId || 'operation'}) was dispatched automatically; provider verification is still in progress.`,
+        'The verified notice will follow. Do not repeat the request.',
+        `Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}`,
+      ].join('\n');
+    }
+    if (output.status === 'auto_confirm_failed') {
+      return [
+        `Not changed${auto.error?.code === 'ambiguous_external_result' ? ' — provider state is ambiguous and a manual review was opened. Do not repeat the request until it is resolved.' : '.'}`,
+        `The automatic OwnerRez execution failed (${auto.error?.code || 'workflow_error'}).`,
+        auto.error?.message ? `Reason: ${auto.error.message}` : null,
+        `Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}`,
+      ].filter(Boolean).join('\n');
+    }
     return [
       'No OwnerRez change has been made.',
       `Proposed operation: ${output.operationId || 'unknown'} · Proposal: ${output.proposalId || 'unknown'}`,

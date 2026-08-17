@@ -304,6 +304,68 @@ test('email proposal reply exposes a plain copyable command and no deadline', ()
   assert.doesNotMatch(text, new RegExp(`\`${command.replaceAll('-', '\\-')}\``));
 });
 
+test('auto-confirmed email proposals report the verified send instead of a confirmation command', () => {
+  const sent = formatWorkflowReply({ run: {
+    id: 'email-proposal-run', workflow_name: 'email.reply.propose', status: 'completed',
+    output: {
+      status: 'auto_confirmed_sent', provider: 'gmail', recipient: 'Gretel',
+      proposalId: 'proposal-1', bodyText: 'Here are the rates.',
+      autoConfirm: { dispatched: true, confirmRunId: 'confirm-run-1', confirmStatus: 'completed',
+        effectId: 'effect-1', evidenceId: 'evidence-1', messageId: 'gmail-out-1' },
+    },
+  } });
+  assert.match(sent, /sent automatically and verified by provider readback/);
+  assert.match(sent, /no confirmation step was required/i);
+  assert.match(sent, /Effect: effect-1/);
+  assert.doesNotMatch(sent, /!email confirm/);
+
+  const inProgress = formatWorkflowReply({ run: {
+    id: 'email-proposal-run', workflow_name: 'email.reply.propose', status: 'completed',
+    output: {
+      status: 'auto_confirm_in_progress', provider: 'gmail', proposalId: 'proposal-2',
+      autoConfirm: { dispatched: true, confirmRunId: 'confirm-run-2', confirmStatus: 'retry' },
+    },
+  } });
+  assert.match(inProgress, /verification is still in progress/);
+  assert.match(inProgress, /Do not re-issue the command/);
+
+  const failed = formatWorkflowReply({ run: {
+    id: 'email-proposal-run', workflow_name: 'email.reply.propose', status: 'completed',
+    output: {
+      status: 'auto_confirm_failed', provider: 'gmail', proposalId: 'proposal-3',
+      autoConfirm: { dispatched: true, confirmRunId: 'confirm-run-3', confirmStatus: 'failed',
+        error: { code: 'gmail_send_failed', message: 'quota exceeded' } },
+    },
+  } });
+  assert.match(failed, /^Not sent\./);
+  assert.match(failed, /gmail_send_failed/);
+  assert.match(failed, /quota exceeded/);
+});
+
+test('auto-executed OwnerRez proposals report readback and surface ambiguous-review stops', () => {
+  const executed = formatWorkflowReply({ run: {
+    id: 'or-proposal-run', workflow_name: 'ownerrez.mutation.propose', status: 'completed',
+    output: {
+      status: 'auto_confirmed_executed', operationId: 'Guests_Patch', proposalId: 'proposal-or-1',
+      autoConfirm: { dispatched: true, confirmRunId: 'confirm-or-1', confirmStatus: 'completed',
+        effectId: 'effect-or-1', evidenceId: 'evidence-or-1', providerRef: '41' },
+    },
+  } });
+  assert.match(executed, /executed automatically and verified by readback \(Guests_Patch\)/);
+  assert.doesNotMatch(executed, /!ownerrez confirm/);
+
+  const ambiguous = formatWorkflowReply({ run: {
+    id: 'or-proposal-run', workflow_name: 'ownerrez.mutation.propose', status: 'completed',
+    output: {
+      status: 'auto_confirm_failed', operationId: 'Bookings_Patch', proposalId: 'proposal-or-2',
+      autoConfirm: { dispatched: true, confirmRunId: 'confirm-or-2', confirmStatus: 'failed',
+        error: { code: 'ambiguous_external_result', message: 'socket closed after write' } },
+    },
+  } });
+  assert.match(ambiguous, /manual review was opened/);
+  assert.match(ambiguous, /Do not repeat the request/);
+});
+
 test('email reply commands bind trusted Slack context while top-level confirmation stays copyable', async () => {
   const config = pluginConfig({
     emailChannelIds: ['CPAULINA'], shadowMode: true,

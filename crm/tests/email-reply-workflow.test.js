@@ -10,6 +10,8 @@ const createDB = createDBModule.default || createDBModule;
 const { sql } = require('@databases/sqlite');
 const { executeGraph, startGraph } = require('../lib/workflow-engine');
 const { ensureSchemaAsync } = require('../lib/workflow-schema');
+const workflowStore = require('../lib/workflow-store');
+const { triggerDecision } = require('../lib/workflow-execution-policy');
 const {
   applyClassification,
   confirmDefinition,
@@ -19,9 +21,33 @@ const {
 } = require('../workflows/email-reply');
 const { auditClassifications } = require('../scripts/reconcile-email-classifications');
 
-async function withDb(run) {
+function armedEmailPolicy(autonomousWorkflows) {
+  return {
+    version: 1,
+    shadow_mode: false,
+    live_workflows: ['email.reply.propose', 'email.reply.confirm'],
+    autonomous_workflows: autonomousWorkflows,
+    always_on_effects: [],
+    channels: {
+      CPAULINA: { name: 'prospector-paulina', capabilities: ['email.send'] },
+      CEMAIL: { name: 'sarah-email', capabilities: ['email.send'] },
+    },
+    restricted_capabilities: {
+      'email.send': { users: ['U-SARAH'] },
+    },
+    write_notifications: { user_ids: ['U-SARAH'], channel_ids: [] },
+  };
+}
+
+async function withDb(run, { policy = null } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'email-reply-workflow-'));
   const db = createDB(path.join(directory, 'crm.db'));
+  const priorPolicyPath = process.env.RESORT_WORKFLOW_POLICY_PATH;
+  if (policy) {
+    const policyPath = path.join(directory, 'policy.json');
+    fs.writeFileSync(policyPath, JSON.stringify(policy));
+    process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
+  }
   try {
     await db.query(sql`PRAGMA foreign_keys=ON`);
     await db.query(sql`CREATE TABLE contacts (
@@ -86,6 +112,8 @@ async function withDb(run) {
     return await run(db);
   } finally {
     await db.dispose();
+    if (priorPolicyPath === undefined) delete process.env.RESORT_WORKFLOW_POLICY_PATH;
+    else process.env.RESORT_WORKFLOW_POLICY_PATH = priorPolicyPath;
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }
@@ -498,6 +526,183 @@ test('Gmail Spam remains visible without creating a CRM inquiry', async () => {
     assert.match(payload.message, /Visibility only/);
     assert.match(payload.message, /!email reply/);
   });
+});
+
+test('policy-armed email replies send once, immediately, with readback — and reject a late manual confirm', async () => {
+  await withDb(async db => {
+    let sends = 0;
+    const services = {
+      sendEmail: async input => {
+        sends += 1;
+        assert.equal(input.to, 'gretel@example.com');
+        return { id: 'gmail-armed-1', threadId: 'gmail-thread-1', labelIds: ['SENT'] };
+      },
+      readEmail: async id => ({
+        id, threadId: 'gmail-thread-1', labelIds: ['SENT'],
+        messageId: '<armed-1@example.com>', from: { address: 'sarah@example.com' },
+        to: 'gretel@example.com', subject: 'Re: A planner partnership',
+        text: 'Auto-send armed reply.', internalDate: '2026-08-17T17:00:00.000Z',
+        inReplyTo: '<reply-1@example.com>', references: '<original@example.com> <reply-1@example.com>',
+      }),
+    };
+    const proposed = await startGraph(db, proposeDefinition, {
+      idempotencyKey: 'slack:CPAULINA:armed.1:email.reply.propose',
+      triggerType: 'slack_email_reply_command', triggerRef: 'armed.1',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: { threadTs: '1786549495.693669', message: 'Auto-send armed reply.' },
+    }, services);
+    assert.equal(proposed.status, 'completed', proposed.error_message);
+    assert.equal(proposed.output.status, 'auto_confirmed_sent');
+    assert.equal(proposed.output.confirmationCommand, undefined);
+    assert.equal(sends, 1);
+    assert.ok(proposed.output.autoConfirm.confirmRunId);
+    assert.ok(proposed.output.autoConfirm.effectId);
+    assert.equal(proposed.output.autoConfirm.messageId, 'gmail-armed-1');
+
+    const [child] = await db.query(sql`SELECT trigger_type, trigger_ref, actor_user_id, channel_id, status
+      FROM workflow_runs WHERE id=${proposed.output.autoConfirm.confirmRunId}`);
+    assert.equal(child.trigger_type, 'auto_confirm_dispatch');
+    assert.equal(child.trigger_ref, proposed.id);
+    assert.equal(child.actor_user_id, 'U-SARAH');
+    assert.equal(child.channel_id, 'CPAULINA');
+    assert.equal(child.status, 'completed');
+
+    const [proposal] = await db.query(sql`SELECT status, confirmed_by, provider_message_id
+      FROM email_reply_proposals WHERE id=${proposed.output.proposalId}`);
+    assert.equal(proposal.status, 'completed');
+    assert.equal(proposal.confirmed_by, 'U-SARAH');
+    assert.equal(proposal.provider_message_id, 'gmail-armed-1');
+    const [projection] = await db.query(sql`SELECT direction, actor_user_id FROM email_threads
+      WHERE provider_message_id='gmail-armed-1'`);
+    assert.equal(projection.direction, 'outbound');
+    assert.equal(projection.actor_user_id, 'U-SARAH');
+
+    const lateManual = await startGraph(db, confirmDefinition, {
+      idempotencyKey: 'slack:CPAULINA:armed.2:email.reply.confirm',
+      triggerType: 'slack_email_confirm_command', triggerRef: 'armed.2',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: {
+        proposalId: proposed.output.proposalId,
+        acceptanceHash: proposed.output.autoConfirm.confirmRunId.slice(0, 12).replaceAll('-', 'a'),
+      },
+    }, services);
+    assert.equal(lateManual.status, 'failed');
+    assert.match(lateManual.error_message, /is completed, not pending/);
+    assert.equal(sends, 1);
+  }, { policy: armedEmailPolicy(['email.reply.confirm']) });
+});
+
+test('policy-armed OwnerRez-provider replies auto-send through the same protocol', async () => {
+  await withDb(async db => {
+    await db.query(sql`INSERT INTO email_threads (
+      direction, subject, body_text, raw_body_text, from_address, sender_name,
+      to_address, received_at, provider, provider_message_id, provider_thread_id,
+      provider_metadata_json, processing_status, slack_channel_id, slack_thread_ts,
+      slack_message_ts
+    ) VALUES (
+      'inbound', 'Vrbo guest conversation', 'Is the villa available in October?',
+      'Is the villa available in October?', 'ownerrez:guest:42', 'Morgan Guest',
+      'ownerrez:host', '2026-08-13T18:05:00Z', 'ownerrez', '112025557', '884422',
+      '{"channel":"vrbo"}', 'processed', 'CEMAIL', '300.1', '300.1'
+    )`);
+    let sends = 0;
+    const services = {
+      sendOwnerRezMessage: async input => {
+        sends += 1;
+        assert.equal(input.threadId, '884422');
+        return { id: '112026000', threadId: '884422', body: input.body,
+          internalDate: '2026-08-17T17:05:00Z', fromRole: 'owner', isDraft: false, removedAt: null };
+      },
+      readOwnerRezMessage: async (messageId, threadId) => ({
+        id: messageId, threadId, body: 'Yes—October has weekday availability.',
+        internalDate: '2026-08-17T17:05:00Z', fromRole: 'owner', isDraft: false, removedAt: null,
+      }),
+    };
+    const proposed = await startGraph(db, proposeDefinition, {
+      idempotencyKey: 'slack:CEMAIL:armed-or.1:email.reply.propose',
+      triggerType: 'slack_email_reply_command', triggerRef: 'armed-or.1',
+      channelId: 'CEMAIL', actorUserId: 'U-SARAH',
+      input: { threadTs: '300.1', message: 'Yes—October has weekday availability.' },
+    }, services);
+    assert.equal(proposed.status, 'completed', proposed.error_message);
+    assert.equal(proposed.output.status, 'auto_confirmed_sent');
+    assert.equal(proposed.output.provider, 'ownerrez');
+    assert.equal(sends, 1);
+    const [projection] = await db.query(sql`SELECT direction, slack_thread_ts FROM email_threads
+      WHERE provider='ownerrez' AND provider_message_id='112026000'`);
+    assert.equal(projection.direction, 'outbound');
+    assert.equal(projection.slack_thread_ts, '300.1');
+  }, { policy: armedEmailPolicy(['email.reply.confirm']) });
+});
+
+test('un-armed policies keep the explicit confirmation contract', async () => {
+  await withDb(async db => {
+    let sends = 0;
+    const services = { sendEmail: async () => { sends += 1; return { id: 'never' }; } };
+    const proposed = await startGraph(db, proposeDefinition, {
+      idempotencyKey: 'slack:CPAULINA:unarmed.1:email.reply.propose',
+      triggerType: 'slack_email_reply_command', triggerRef: 'unarmed.1',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: { threadTs: '1786549495.693669', message: 'Still requires confirmation.' },
+    }, services);
+    assert.equal(proposed.status, 'completed', proposed.error_message);
+    assert.equal(proposed.output.status, 'awaiting_explicit_confirmation');
+    assert.match(proposed.output.confirmationCommand, /^!email confirm /);
+    assert.equal(proposed.output.autoConfirm.reason, 'autonomous_workflow_denied');
+    assert.equal(sends, 0);
+  }, { policy: armedEmailPolicy([]) });
+
+  await withDb(async db => {
+    const proposed = await startGraph(db, proposeDefinition, {
+      idempotencyKey: 'slack:CPAULINA:unarmed.2:email.reply.propose',
+      triggerType: 'slack_email_reply_command', triggerRef: 'unarmed.2',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: { threadTs: '1786549495.693669', message: 'No policy file present.' },
+    });
+    assert.equal(proposed.status, 'completed', proposed.error_message);
+    assert.equal(proposed.output.status, 'awaiting_explicit_confirmation');
+    assert.equal(proposed.output.autoConfirm.reason, 'policy_unavailable');
+  });
+});
+
+test('auto-dispatch fails closed while the confirm workflow has an open manual review', async () => {
+  await withDb(async db => {
+    const stub = await workflowStore.createRun(db, {
+      definition: confirmDefinition,
+      idempotencyKey: 'review-stub:email.reply.confirm',
+      triggerType: 'slack_email_confirm_command',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: { proposalId: '00000000-0000-4000-8000-000000000000', acceptanceHash: 'aaaaaaaaaaaa' },
+    });
+    await workflowStore.createManualReview(db, {
+      runId: stub.run.id, stepKey: 'send_via_gmail', reviewChannelId: 'CPAULINA',
+      reasonCode: 'ambiguous_external_result', reasonMessage: 'fixture review',
+    });
+    let sends = 0;
+    const services = { sendEmail: async () => { sends += 1; return { id: 'never' }; } };
+    const proposed = await startGraph(db, proposeDefinition, {
+      idempotencyKey: 'slack:CPAULINA:review-gated.1:email.reply.propose',
+      triggerType: 'slack_email_reply_command', triggerRef: 'review-gated.1',
+      channelId: 'CPAULINA', actorUserId: 'U-SARAH',
+      input: { threadTs: '1786549495.693669', message: 'Blocked by open review.' },
+    }, services);
+    assert.equal(proposed.status, 'completed', proposed.error_message);
+    assert.equal(proposed.output.status, 'awaiting_explicit_confirmation');
+    assert.equal(proposed.output.autoConfirm.reason, 'workflow_manual_review_open');
+    assert.equal(sends, 0);
+    const [proposal] = await db.query(sql`SELECT status FROM email_reply_proposals
+      WHERE id=${proposed.output.proposalId}`);
+    assert.equal(proposal.status, 'pending');
+  }, { policy: armedEmailPolicy(['email.reply.confirm']) });
+});
+
+test('auto-confirm trigger stays forbidden for system and model entrypoints', () => {
+  assert.equal(triggerDecision(confirmDefinition, 'auto_confirm_dispatch').allowed, true);
+  assert.equal(triggerDecision(confirmDefinition, 'slack_email_confirm_command').allowed, true);
+  assert.equal(triggerDecision(confirmDefinition, 'system').allowed, false);
+  assert.equal(triggerDecision(confirmDefinition, 'model_tool').allowed, false);
+  assert.equal(triggerDecision(proposeDefinition, 'system').allowed, false);
+  assert.equal(triggerDecision(proposeDefinition, 'model_tool').allowed, false);
 });
 
 test('OwnerRez replies use the same proposal protocol with provider readback and one send', async () => {
