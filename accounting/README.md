@@ -61,21 +61,32 @@ window in `config.json`:
 "receipt_coverage": {
   "grace_days": 7,
   "start_date": "2026-08-06T19:42:52Z",
+  "duplicate_exempt_vendors": ["facebook", "meta platforms"],
   "duplicate_allowlist": ["2348", "2355"]
 }
 ```
 
-All three keys are optional. `grace_days` defaults to 7; an absent
-`start_date` falls back to the earliest receipt the ledger holds (resolved to
-the instant, so receipts posted earlier on the pipeline's first day are not
-counted as misses); `duplicate_allowlist` holds QBO Purchase ids of pairs a
-human has reviewed and accepted, so a decided case stops re-failing every
-week. A group is only accepted when every id in it is listed.
+Every key is optional:
 
-Two things the duplicate check deliberately does not flag: standalone SPEI
-commission and IVA purchases (every transfer raises its own at identical
-amounts, so same-day repeats are normal), and groups whose members carry
-distinct Kapital `Clave` references.
+- `grace_days` (default 7) — how long a receipt may sit before an unbooked one
+  counts as a failure rather than as in flight.
+- `start_date` — an absent value falls back to the earliest receipt the ledger
+  holds, resolved to the instant, so receipts posted earlier on the pipeline's
+  first day are not counted as misses.
+- `duplicate_exempt_vendors` — case-insensitive substrings of QBO vendor names
+  that bill in identical increments many times a day. An ad platform charging
+  $4.00 nine times on one date is spend, not nine double entries.
+- `duplicate_allowlist` — QBO Purchase ids of a group a human reviewed and
+  accepted, so a decided case stops re-failing every week. A group is only
+  accepted when every id in it is listed.
+
+The duplicate check also skips standalone bank-fee purchases, recognised by
+every line landing on the configured `bank_fee` account rather than by memo
+text — the current pipeline writes `SPEI Commission on transfer to X` while
+legacy statements wrote `Kapital Mexico Bank: [Bank Fees] SPEI Commission/VAT`,
+and a memo pattern only ever covers the formats that existed when it was
+written. Groups whose members carry distinct Kapital `Clave` references are
+not duplicates either.
 
 ## Usage
 
