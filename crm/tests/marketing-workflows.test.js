@@ -11,19 +11,18 @@ const { sql } = require('@databases/sqlite');
 const { ensureSchemaAsync } = require('../lib/workflow-schema');
 const { startGraph } = require('../lib/workflow-engine');
 const store = require('../lib/workflow-store');
+const { triggerDecision } = require('../lib/workflow-execution-policy');
+const { validatePolicy } = require('../lib/channel-policy');
 const { getDefinition, listDefinitions } = require('../workflows/registry');
-const { CONFIRMED_OPERATIONS } = require('../workflows/marketing');
+const { CONFIRMED_OPERATIONS, marketingChangeConfirm } = require('../workflows/marketing');
 
-async function withDb(run) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-workflows-'));
-  const db = createDB(path.join(directory, 'crm.db'));
-  const previousPolicy = process.env.RESORT_WORKFLOW_POLICY_PATH;
-  const policyPath = path.join(directory, 'policy.json');
-  fs.writeFileSync(policyPath, JSON.stringify({
+function marketingPolicy({ autonomousWorkflows = [], autonomousOperations = undefined } = {}) {
+  return {
     version: 1,
     shadow_mode: false,
     live_workflows: [],
-    autonomous_workflows: [],
+    autonomous_workflows: autonomousWorkflows,
+    ...(autonomousOperations !== undefined ? { autonomous_operations: autonomousOperations } : {}),
     always_on_effects: [],
     channels: {
       'C-SOCIAL': {
@@ -33,7 +32,15 @@ async function withDb(run) {
     },
     restricted_capabilities: { 'marketing.write': { users: ['U-JASON'] } },
     write_notifications: { user_ids: ['U-JASON'], channel_ids: [] },
-  }));
+  };
+}
+
+async function withDb(run, { policy = marketingPolicy() } = {}) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'marketing-workflows-'));
+  const db = createDB(path.join(directory, 'crm.db'));
+  const previousPolicy = process.env.RESORT_WORKFLOW_POLICY_PATH;
+  const policyPath = path.join(directory, 'policy.json');
+  fs.writeFileSync(policyPath, JSON.stringify(policy));
   process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
   try {
     await db.query(sql`PRAGMA foreign_keys=ON`);
@@ -326,4 +333,159 @@ test('ambiguous Meta execution opens manual review and never replays the provide
     assert.equal(run.effects[0].status, 'manual_review');
     assert.equal(executeCalls, 1);
   });
+});
+
+function activationPreflight(targetRef = 'cmp-armed') {
+  return {
+    operation: 'campaign_activate', provider: 'meta', targetRef,
+    campaignId: targetRef, briefId: 'brief-armed', briefHash: 'brief-hash',
+    review: { state: 'approved', reviewBriefHash: 'review-hash' },
+    before: { campaign: { id: targetRef, status: 'PAUSED' } },
+    target: { status: 'ACTIVE' }, preflightHash: 'armed-preflight-hash',
+  };
+}
+
+function activationServices(counters) {
+  return {
+    runCommand: async command => {
+      if (phase(command) === 'preflight') return jsonResult(activationPreflight());
+      if (phase(command) === 'execute') {
+        counters.executes += 1;
+        return jsonResult({ accepted: true, providerRef: 'cmp-armed' });
+      }
+      return jsonResult({ verified: true, providerRef: 'cmp-armed', readback: { status: 'ACTIVE' } });
+    },
+  };
+}
+
+test('proposal stays awaiting explicit confirmation while the policy is un-armed', async () => {
+  await withDb(async db => {
+    const counters = { executes: 0 };
+    const proposal = await startGraph(db, getDefinition('marketing.change.propose'), request(
+      'unarmed-activation', {
+        operation: 'campaign_activate', briefId: 'brief-armed', reason: 'Activate the reviewed campaign',
+      },
+    ), activationServices(counters));
+    assert.equal(proposal.status, 'completed');
+    assert.equal(proposal.output.status, 'awaiting_explicit_confirmation');
+    assert.match(proposal.output.confirmationCommand, /^!meta confirm /);
+    assert.equal(proposal.output.autoConfirm.dispatched, false);
+    assert.equal(proposal.output.autoConfirm.reason, 'autonomous_workflow_denied');
+    assert.equal(counters.executes, 0);
+  });
+});
+
+test('workflow-level arming without the per-operation allowlist does not dispatch', async () => {
+  await withDb(async db => {
+    const counters = { executes: 0 };
+    const proposal = await startGraph(db, getDefinition('marketing.change.propose'), request(
+      'no-op-allowlist', {
+        operation: 'campaign_activate', briefId: 'brief-armed', reason: 'Activate the reviewed campaign',
+      },
+    ), activationServices(counters));
+    assert.equal(proposal.status, 'completed');
+    assert.equal(proposal.output.status, 'awaiting_explicit_confirmation');
+    assert.equal(proposal.output.autoConfirm.dispatched, false);
+    assert.equal(proposal.output.autoConfirm.reason, 'autonomous_operation_denied');
+    assert.equal(counters.executes, 0);
+  }, { policy: marketingPolicy({ autonomousWorkflows: ['marketing.change.confirm'] }) });
+});
+
+test('policy-armed campaign activation auto-executes once with readback and rejects a late manual confirm', async () => {
+  await withDb(async db => {
+    const counters = { executes: 0 };
+    const services = activationServices(counters);
+    const proposal = await startGraph(db, getDefinition('marketing.change.propose'), request(
+      'armed-activation', {
+        operation: 'campaign_activate', briefId: 'brief-armed', reason: 'Activate the reviewed campaign',
+      },
+    ), services);
+    assert.equal(proposal.status, 'completed', proposal.error_message);
+    assert.equal(proposal.output.status, 'auto_confirmed_executed');
+    assert.equal(proposal.output.confirmationCommand, undefined);
+    assert.equal(counters.executes, 1);
+    assert.ok(proposal.output.autoConfirm.confirmRunId);
+    assert.ok(proposal.output.autoConfirm.effectId);
+
+    const [child] = await db.query(sql`SELECT trigger_type, trigger_ref, actor_user_id, channel_id, status
+      FROM workflow_runs WHERE id=${proposal.output.autoConfirm.confirmRunId}`);
+    assert.equal(child.trigger_type, 'auto_confirm_dispatch');
+    assert.equal(child.trigger_ref, proposal.id);
+    assert.equal(child.actor_user_id, 'U-JASON');
+    assert.equal(child.status, 'completed');
+
+    const [row] = await db.query(sql`SELECT status, confirmed_by FROM marketing_change_requests
+      WHERE id=${proposal.output.proposalId}`);
+    assert.equal(row.status, 'completed');
+    assert.equal(row.confirmed_by, 'U-JASON');
+
+    const lateManual = await startGraph(db, getDefinition('marketing.change.confirm'), {
+      ...request('late-manual-confirm', {
+        proposalId: proposal.output.proposalId,
+        acceptanceHash: 'aaaaaaaaaaaa',
+      }),
+      triggerType: 'slack_meta_campaign_confirm_command',
+    }, services);
+    assert.equal(lateManual.status, 'failed');
+    assert.match(lateManual.error_message, /is completed, not pending/);
+    assert.equal(counters.executes, 1);
+  }, {
+    policy: marketingPolicy({
+      autonomousWorkflows: ['marketing.change.confirm'],
+      autonomousOperations: { 'marketing.change.confirm': ['campaign_activate'] },
+    }),
+  });
+});
+
+test('arming campaign_activate does not arm landing or other confirmed operations', async () => {
+  await withDb(async db => {
+    const preflight = {
+      operation: 'landing_status', provider: 'crm', targetRef: 'variant-armed',
+      before: { slug: 'variant-armed', status: 'paused', review_approved: true },
+      target: { status: 'live' }, preflightHash: 'landing-armed-hash',
+    };
+    const proposal = await startGraph(db, getDefinition('marketing.change.propose'), request(
+      'armed-landing-proposal', {
+        operation: 'landing_status', slug: 'variant-armed', status: 'live',
+        reason: 'Serve the reviewed landing variant',
+      },
+    ), { runCommand: async () => jsonResult(preflight) });
+    assert.equal(proposal.status, 'completed');
+    assert.equal(proposal.output.status, 'awaiting_explicit_confirmation');
+    assert.match(proposal.output.confirmationCommand, /^!meta confirm /);
+    assert.equal(proposal.output.autoConfirm.dispatched, false);
+    assert.equal(proposal.output.autoConfirm.reason, 'autonomous_operation_denied');
+  }, {
+    policy: marketingPolicy({
+      autonomousWorkflows: ['marketing.change.confirm'],
+      autonomousOperations: { 'marketing.change.confirm': ['campaign_activate'] },
+    }),
+  });
+});
+
+test('validatePolicy enforces the autonomous_operations shape', () => {
+  const base = marketingPolicy({
+    autonomousWorkflows: ['marketing.change.confirm'],
+    autonomousOperations: { 'marketing.change.confirm': ['campaign_activate'] },
+  });
+  assert.equal(validatePolicy(base), base);
+  assert.throws(
+    () => validatePolicy({ ...base, autonomous_operations: ['campaign_activate'] }),
+    /autonomous_operations must map/,
+  );
+  assert.throws(
+    () => validatePolicy({ ...base, autonomous_operations: { 'marketing.change.confirm': [] } }),
+    /non-empty array of operation names/,
+  );
+  assert.throws(
+    () => validatePolicy({ ...base, autonomous_operations: { 'marketing.change.confirm': [' '] } }),
+    /non-empty array of operation names/,
+  );
+});
+
+test('auto-confirm trigger is allowed for the marketing confirm and forbidden elsewhere', () => {
+  assert.equal(triggerDecision(marketingChangeConfirm, 'auto_confirm_dispatch').allowed, true);
+  assert.equal(triggerDecision(marketingChangeConfirm, 'slack_meta_campaign_confirm_command').allowed, true);
+  assert.equal(triggerDecision(marketingChangeConfirm, 'system').allowed, false);
+  assert.equal(triggerDecision(marketingChangeConfirm, 'model_tool').allowed, false);
 });

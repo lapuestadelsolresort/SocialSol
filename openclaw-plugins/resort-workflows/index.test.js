@@ -366,6 +366,46 @@ test('auto-executed OwnerRez proposals report readback and surface ambiguous-rev
   assert.match(ambiguous, /Do not repeat the request/);
 });
 
+test('auto-executed marketing proposals report readback and keep the manual command otherwise', () => {
+  const executed = formatWorkflowReply({ run: {
+    id: 'mkt-proposal-run', workflow_name: 'marketing.change.propose', status: 'completed',
+    output: {
+      status: 'auto_confirmed_executed', operation: 'campaign_activate', targetRef: 'cmp-1',
+      proposalId: 'proposal-mkt-1',
+      autoConfirm: { dispatched: true, confirmRunId: 'confirm-mkt-1', confirmStatus: 'completed',
+        effectId: 'effect-mkt-1', evidenceId: 'evidence-mkt-1', providerRef: 'cmp-1' },
+    },
+  } });
+  assert.match(executed, /executed automatically and verified by readback \(campaign_activate\)/);
+  assert.match(executed, /policy-armed for this exact operation/);
+  assert.match(executed, /Effect: effect-mkt-1/);
+  assert.doesNotMatch(executed, /!meta confirm/);
+
+  const ambiguousMarketing = formatWorkflowReply({ run: {
+    id: 'mkt-proposal-run', workflow_name: 'marketing.change.propose', status: 'completed',
+    output: {
+      status: 'auto_confirm_failed', operation: 'campaign_activate', targetRef: 'cmp-1',
+      proposalId: 'proposal-mkt-2',
+      autoConfirm: { dispatched: true, confirmRunId: 'confirm-mkt-2', confirmStatus: 'failed',
+        error: { code: 'ambiguous_external_result', message: 'socket closed after dispatch' } },
+    },
+  } });
+  assert.match(ambiguousMarketing, /^Not changed/);
+  assert.match(ambiguousMarketing, /manual review was opened/);
+
+  const manual = formatWorkflowReply({ run: {
+    id: 'mkt-proposal-run', workflow_name: 'marketing.change.propose', status: 'completed',
+    output: {
+      status: 'awaiting_explicit_confirmation', operation: 'campaign_activate', targetRef: 'cmp-1',
+      proposalId: 'proposal-mkt-3', requestHash: 'hash', expiresAt: '2026-08-17T00:15:00Z',
+      confirmationCommand: '!meta confirm proposal-mkt-3 abcdefabcdef',
+      autoConfirm: { dispatched: false, reason: 'autonomous_operation_denied' },
+    },
+  } });
+  assert.match(manual, /No paid-media or landing-page change has been made/);
+  assert.match(manual, /!meta confirm proposal-mkt-3 abcdefabcdef/);
+});
+
 test('email reply commands bind trusted Slack context while top-level confirmation stays copyable', async () => {
   const config = pluginConfig({
     emailChannelIds: ['CPAULINA'], shadowMode: true,

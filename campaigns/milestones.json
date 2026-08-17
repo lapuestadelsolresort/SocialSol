@@ -1,0 +1,108 @@
+{
+  "brief_id": "milestones",
+  "campaign_name": "LPDS — Groups / Milestones",
+  "adset_name": "LPDS — Groups / Milestones",
+  "status": "PAUSED",
+  "channel": "meta",
+  "objective": "OUTCOME_LEADS",
+  "optimization_goal": "OFFSITE_CONVERSIONS",
+  "billing_event": "IMPRESSIONS",
+  "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+  "budget_level": "campaign",
+  "campaign_daily_budget_usd": 5.0,
+  "bucket": "leads",
+  "page_slug": "retreats",
+  "utm_campaign": "us-milestones",
+  "experiment_slug": "exp-meta-groups-milestones",
+  "audience": {
+    "regions": [
+      {
+        "key": "3843",
+        "name": "Alabama",
+        "country": "US"
+      },
+      {
+        "key": "3847",
+        "name": "California",
+        "country": "US"
+      },
+      {
+        "key": "3853",
+        "name": "Georgia",
+        "country": "US"
+      },
+      {
+        "key": "3875",
+        "name": "New York",
+        "country": "US"
+      },
+      {
+        "key": "3886",
+        "name": "Texas",
+        "country": "US"
+      }
+    ],
+    "location_types": [
+      "frequently_in",
+      "home",
+      "recent"
+    ],
+    "age_min": 30,
+    "age_max": 60,
+    "publisher_platforms": [
+      "facebook",
+      "instagram"
+    ],
+    "interests": [
+      {
+        "id": "6003011087019",
+        "name": "Luxury Travel"
+      },
+      {
+        "id": "6003155254305",
+        "name": "Anniversary"
+      },
+      {
+        "id": "6003283020527",
+        "name": "Family reunion"
+      },
+      {
+        "id": "6003313116980",
+        "name": "Resort"
+      },
+      {
+        "id": "6003383552337",
+        "name": "Luxury Resorts"
+      }
+    ],
+    "custom_audience_ids": [],
+    "expansion": false
+  },
+  "ads": [
+    {
+      "ad_name": "LPDS — Milestone — Emotional",
+      "landing_page_url": "https://retreats.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-milestones&utm_content=m1-emotional-v3"
+    },
+    {
+      "ad_name": "LPDS — Milestone — FOMO",
+      "landing_page_url": "https://retreats.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-milestones&utm_content=m2-fomo-v3"
+    },
+    {
+      "ad_name": "Video — Catered Dining",
+      "landing_page_url": "https://dining.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=dining&utm_content=catered-dining"
+    },
+    {
+      "ad_name": "Video — Pool Terrace",
+      "landing_page_url": "https://lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=milestones_video"
+    },
+    {
+      "ad_name": "Video — Drone Resort Orbit",
+      "landing_page_url": "https://lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=milestones_video"
+    },
+    {
+      "ad_name": "LPDS — Milestone — Emotional",
+      "landing_page_url": "https://retreats.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-milestones&utm_content=m1-emotional-v3"
+    }
+  ],
+  "notes": "Standalone milestones campaign, currently campaign-level PAUSED — 6 ads (one duplicate-named ad is ad-level PAUSED). Derived from live configuration 2026-08-17: OUTCOME_LEADS objective with OFFSITE_CONVERSIONS optimization, five US state regions (AL/CA/GA/NY/TX) 30-60, five celebration/luxury interests, no custom audience, Advantage Audience off. Activating through the gated path requires a brief-hash-bound approval receipt recorded after human review of these exact ads and landing pages (F-001)."
+}

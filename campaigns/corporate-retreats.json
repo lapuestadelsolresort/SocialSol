@@ -1,0 +1,76 @@
+{
+  "brief_id": "corporate-retreats",
+  "campaign_name": "LPDS — Corporate Retreats",
+  "adset_name": "LPDS — Corporate Retreats",
+  "status": "ACTIVE",
+  "channel": "meta",
+  "objective": "OUTCOME_LEADS",
+  "optimization_goal": "OFFSITE_CONVERSIONS",
+  "billing_event": "IMPRESSIONS",
+  "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+  "budget_level": "campaign",
+  "campaign_daily_budget_usd": 15.0,
+  "bucket": "leads",
+  "page_slug": "retreats",
+  "utm_campaign": "us-corporate",
+  "experiment_slug": "exp-meta-corporate-retreats",
+  "audience": {
+    "countries": [
+      "US"
+    ],
+    "location_types": [
+      "frequently_in",
+      "home",
+      "recent"
+    ],
+    "age_min": 30,
+    "age_max": 55,
+    "publisher_platforms": [
+      "facebook",
+      "instagram"
+    ],
+    "interests": [
+      {
+        "id": "6003011087019",
+        "name": "Luxury Travel"
+      },
+      {
+        "id": "6003092932417",
+        "name": "Event management"
+      },
+      {
+        "id": "6003147405549",
+        "name": "Boutique hotel"
+      },
+      {
+        "id": "6003371567474",
+        "name": "Entrepreneurship"
+      }
+    ],
+    "custom_audience_ids": [],
+    "expansion": false
+  },
+  "ads": [
+    {
+      "ad_name": "Video — King Suite",
+      "landing_page_url": "https://lapuestadelsolresort.com/villas?utm_source=meta&utm_medium=paid&utm_campaign=corporate_retreats_video&utm_content=king-suite"
+    },
+    {
+      "ad_name": "Video — Kitchen",
+      "landing_page_url": "https://lapuestadelsolresort.com/villas?utm_source=meta&utm_medium=paid&utm_campaign=corporate_retreats_video&utm_content=kitchen-living"
+    },
+    {
+      "ad_name": "Video — Villa Walkthrough",
+      "landing_page_url": "https://lapuestadelsolresort.com/villas?utm_source=meta&utm_medium=paid&utm_campaign=corporate_retreats_video&utm_content=villa-walkthrough"
+    },
+    {
+      "ad_name": "LPDS — Corporate — Outcome",
+      "landing_page_url": "https://retreats.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-corporate&utm_content=c1-outcome-v3"
+    },
+    {
+      "ad_name": "LPDS — Corporate — Value",
+      "landing_page_url": "https://retreats.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=us-corporate&utm_content=c2-value-v3"
+    }
+  ],
+  "notes": "Standalone corporate campaign — 5 ads (2 copy + 3 video). Derived from live configuration 2026-08-17: OUTCOME_LEADS objective with OFFSITE_CONVERSIONS optimization, US 30-55, four business/luxury interests, no custom audience, Advantage Audience off. Activation through the gated path requires a brief-hash-bound approval receipt (F-001)."
+}

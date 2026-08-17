@@ -760,6 +760,32 @@ export function formatWorkflowReply(payload) {
   }
   if (run.workflow_name === 'marketing.change.propose') {
     const output = run.output || {};
+    const auto = output.autoConfirm || {};
+    if (output.status === 'auto_confirmed_executed') {
+      return [
+        `Marketing change executed automatically and verified by readback (${output.operation || 'operation'}).`,
+        'Autonomous execution is policy-armed for this exact operation; no confirmation step was required.',
+        `Target: ${output.targetRef || 'unknown'} · Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}${auto.effectId ? ` · Effect: ${auto.effectId}` : ''}${auto.evidenceId ? ` · Evidence: ${auto.evidenceId}` : ''}`,
+      ].join('\n');
+    }
+    if (output.status === 'auto_confirm_in_progress') {
+      return [
+        `The marketing change (${output.operation || 'operation'}) was dispatched automatically; provider verification is still in progress.`,
+        'The verified notice will follow. Do not repeat the request.',
+        `Target: ${output.targetRef || 'unknown'} · Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}`,
+      ].join('\n');
+    }
+    if (output.status === 'auto_confirm_failed') {
+      return [
+        `Not changed${auto.error?.code === 'ambiguous_external_result' ? ' — provider state is ambiguous and a manual review was opened. Do not repeat the request until it is resolved.' : '.'}`,
+        `The automatic marketing execution failed (${auto.error?.code || 'workflow_error'}).`,
+        auto.error?.message ? `Reason: ${auto.error.message}` : null,
+        `Target: ${output.targetRef || 'unknown'} · Proposal: ${output.proposalId || 'unknown'} · Confirmation workflow: ${auto.confirmRunId || 'unknown'}`,
+        `Workflow: ${run.id}`,
+      ].filter(Boolean).join('\n');
+    }
     return [
       'No paid-media or landing-page change has been made.',
       `Proposed operation: ${output.operation || 'unknown'} · Target: ${output.targetRef || 'unknown'}`,

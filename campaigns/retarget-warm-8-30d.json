@@ -1,0 +1,52 @@
+{
+  "brief_id": "retarget-warm-8-30d",
+  "campaign_name": "LPDS — Retargeting — Website Visitors",
+  "adset_name": "LPDS — Retarget Warm 8-30d",
+  "status": "ACTIVE",
+  "channel": "meta",
+  "objective": "OUTCOME_LEADS",
+  "optimization_goal": "OFFSITE_CONVERSIONS",
+  "billing_event": "IMPRESSIONS",
+  "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+  "budget_level": "campaign",
+  "campaign_daily_budget_usd": 15.0,
+  "bucket": "leads",
+  "page_slug": "contact",
+  "utm_campaign": "retarget",
+  "experiment_slug": "exp-meta-retarget-website-visitors",
+  "audience": {
+    "countries": [
+      "US",
+      "CA"
+    ],
+    "location_types": [
+      "frequently_in",
+      "home",
+      "recent"
+    ],
+    "age_min": 18,
+    "age_max": 65,
+    "publisher_platforms": [],
+    "custom_audience_ids": [],
+    "expansion": false
+  },
+  "ads": [
+    {
+      "ad_name": "Video — Oceanfront Dining",
+      "landing_page_url": "https://dining.lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=dining&utm_content=oceanfront-dining-2"
+    },
+    {
+      "ad_name": "LPDS — Retarget Warm — Value",
+      "landing_page_url": "https://lapuestadelsolresort.com/contact?utm_source=meta&utm_medium=paid&utm_campaign=retarget&utm_content=r2-value-v3"
+    },
+    {
+      "ad_name": "LPDS — Retarget Warm — Urgency",
+      "landing_page_url": "https://lapuestadelsolresort.com/contact?utm_source=meta&utm_medium=paid&utm_campaign=retarget&utm_content=r1-urgency-v3"
+    },
+    {
+      "ad_name": "Video — Hero Drone Reveal",
+      "landing_page_url": "https://lapuestadelsolresort.com/?utm_source=meta&utm_medium=paid&utm_campaign=retarget_video"
+    }
+  ],
+  "notes": "Warm (8-30d) half of the shared retargeting campaign; the sibling brief retarget-hot-7d shares campaign and budget, so campaign_pause/budget through either brief moves both ad sets. Derived from live configuration 2026-08-17. Live facts mirrored deliberately: the ad set is currently PAUSED at ad-set level, three of four ads are ad-level PAUSED and delivery-flagged WITH_ISSUES, and the targeting carries NO custom-audience narrowing (broad 18-65 US/CA with relaxation zeroed) despite the retargeting name — recorded as a QC finding for owner review. Re-activation through the gated path requires a fresh brief-hash-bound approval receipt (F-001)."
+}

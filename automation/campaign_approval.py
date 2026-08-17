@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
-"""Conversational Slack approval receipts for paid campaign activation."""
+"""Conversational Slack approval receipts for paid campaign and landing review.
+
+Campaign receipts live on the runtime registry row and bind to the committed
+brief's content hash; landing receipts live on the lp_variants row and bind to
+the exact serving config. Both bindings are what the marketing adapter's F-001
+review invariant enforces before spend or serving can begin.
+"""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from campaign_config import stable_brief_hash
 from campaign_registry import REGISTRY_PATH, load_registry, write_registry
 
 ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = Path(os.environ.get("DB_PATH", ROOT / "crm/data/crm.db"))
 OPENCLAW = os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw")
 SLACK_ACCOUNT = os.environ.get("OPENCLAW_SLACK_ACCOUNT", "")
 SOCIAL_CHANNEL_ID = os.environ.get("RESORT_SOCIAL_CHANNEL", "")
@@ -21,6 +31,21 @@ APPROVER_USER_ID = os.environ.get("CAMPAIGN_APPROVER_SLACK_USER_ID", "")
 
 class ApprovalError(RuntimeError):
     pass
+
+
+def committed_brief_hash(brief_id):
+    path = ROOT / "campaigns" / f"{brief_id}.json"
+    if not path.is_file():
+        raise ApprovalError(f"committed campaign brief was not found: {brief_id}")
+    with path.open(encoding="utf-8") as fh:
+        brief = json.load(fh)
+    if brief.get("brief_id") != brief_id:
+        raise ApprovalError("brief_id in the committed file does not match its filename")
+    return stable_brief_hash(brief)
+
+
+def landing_config_hash(config_text):
+    return hashlib.sha256(str(config_text or "").encode("utf-8")).hexdigest()
 
 
 def _messages(payload):
@@ -104,6 +129,15 @@ def verify_registry_approval(record, *, channel_id=None, approver_user_id=None, 
         raise ApprovalError("stored quoted_text does not match Slack")
     if verified["approved_by_user_id"] != str(approval.get("approved_by_user_id") or ""):
         raise ApprovalError("stored approver identity does not match Slack")
+    stored_hash = str(approval.get("brief_hash") or "")
+    if not stored_hash:
+        raise ApprovalError(
+            "stored approval lacks a brief content binding; re-record the approval after review"
+        )
+    if stored_hash != committed_brief_hash(str(record.get("brief_id") or "")):
+        raise ApprovalError(
+            "stored approval binds to different brief content; re-review and re-record before activation"
+        )
     return {**approval, "verified_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -127,6 +161,7 @@ def record_approval(
     )
     found = False
     updated = []
+    brief_hash = committed_brief_hash(brief_id)
     for original in records:
         row = dict(original)
         if row.get("brief_id") == brief_id:
@@ -138,6 +173,7 @@ def record_approval(
                 "approval_request_ts": verified.get("approval_request_ts"),
                 "slack_ts": verified["slack_ts"],
                 "quoted_text": verified["quoted_text"],
+                "brief_hash": brief_hash,
                 "verified_at": datetime.now(timezone.utc).isoformat(),
             }
         updated.append(row)
@@ -172,10 +208,116 @@ def bind_approval_request(records, *, brief_id, channel_id, request_ts, account=
     return updated
 
 
+def read_landing_variant(slug, db_path=None):
+    con = sqlite3.connect(f"file:{db_path or DB_PATH}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    try:
+        row = con.execute(
+            """SELECT slug, page_slug, status, config, approved_by, approved_at,
+                      approved_config_hash, approval_receipt_json
+                 FROM lp_variants WHERE slug=?""",
+            (slug,),
+        ).fetchone()
+        if not row:
+            raise ApprovalError(f"landing variant was not found: {slug}")
+        return dict(row)
+    finally:
+        con.close()
+
+
+def record_landing_approval(
+    slug,
+    *,
+    channel_id,
+    slack_ts,
+    approver_user_id,
+    approved_by,
+    request_ts=None,
+    account=None,
+    db_path=None,
+):
+    payload = read_slack_message(channel_id, slack_ts, account=account, thread_ts=request_ts)
+    verified = verify_slack_message(
+        payload,
+        slack_ts=slack_ts,
+        approver_user_id=approver_user_id,
+        request_ts=request_ts,
+    )
+    variant = read_landing_variant(slug, db_path=db_path)
+    config_hash = landing_config_hash(variant["config"])
+    receipt = {
+        "approved_by": approved_by,
+        "approved_by_user_id": verified["approved_by_user_id"],
+        "slack_channel": channel_id,
+        "approval_request_ts": verified.get("approval_request_ts"),
+        "slack_ts": verified["slack_ts"],
+        "quoted_text": verified["quoted_text"],
+        "config_hash": config_hash,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    con = sqlite3.connect(db_path or DB_PATH, timeout=20)
+    try:
+        con.execute("PRAGMA busy_timeout=20000")
+        con.execute("BEGIN IMMEDIATE")
+        cursor = con.execute(
+            """UPDATE lp_variants
+                  SET approved_by=?, approved_at=?, approved_config_hash=?, approval_receipt_json=?
+                WHERE slug=? AND config=?""",
+            (
+                approved_by,
+                receipt["recorded_at"],
+                config_hash,
+                json.dumps(receipt, separators=(",", ":"), sort_keys=True),
+                slug,
+                variant["config"],
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ApprovalError("landing variant content changed while recording; re-review the current content")
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    return receipt
+
+
+def verify_landing_approval(slug, *, approver_user_id=None, account=None, db_path=None):
+    approver_user_id = approver_user_id or APPROVER_USER_ID
+    if not approver_user_id:
+        raise ApprovalError("approver identity must be configured")
+    variant = read_landing_variant(slug, db_path=db_path)
+    receipt_json = variant.get("approval_receipt_json")
+    if not receipt_json:
+        raise ApprovalError(f"landing variant has no recorded review approval: {slug}")
+    receipt = json.loads(receipt_json)
+    if str(variant.get("approved_config_hash") or "") != landing_config_hash(variant["config"]):
+        raise ApprovalError(
+            "landing review approval is stale: variant content changed after the recorded approval"
+        )
+    payload = read_slack_message(
+        receipt.get("slack_channel"),
+        receipt.get("slack_ts"),
+        account=account,
+        thread_ts=receipt.get("approval_request_ts"),
+    )
+    verified = verify_slack_message(
+        payload,
+        slack_ts=receipt.get("slack_ts"),
+        approver_user_id=approver_user_id,
+        request_ts=receipt.get("approval_request_ts"),
+    )
+    if verified["quoted_text"] != str(receipt.get("quoted_text") or ""):
+        raise ApprovalError("stored quoted_text does not match Slack")
+    return {**receipt, "verified_at": datetime.now(timezone.utc).isoformat()}
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Record or verify a real Slack campaign approval")
-    parser.add_argument("action", choices=("bind-request", "record", "verify"))
-    parser.add_argument("--brief-id", required=True)
+    parser = argparse.ArgumentParser(description="Record or verify a real Slack campaign or landing review approval")
+    parser.add_argument("action", choices=("bind-request", "record", "verify", "record-landing", "verify-landing"))
+    parser.add_argument("--brief-id")
+    parser.add_argument("--slug")
     parser.add_argument("--registry", default=str(REGISTRY_PATH))
     parser.add_argument("--channel-id", default=SOCIAL_CHANNEL_ID)
     parser.add_argument("--approver-user-id", default=APPROVER_USER_ID)
@@ -185,6 +327,34 @@ def main():
     parser.add_argument("--account", default=SLACK_ACCOUNT)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
+
+    if args.action in ("record-landing", "verify-landing"):
+        if not args.slug:
+            parser.error(f"{args.action} requires --slug")
+        if args.action == "verify-landing":
+            receipt = verify_landing_approval(
+                args.slug,
+                approver_user_id=args.approver_user_id,
+                account=args.account,
+            )
+            print(json.dumps({"ok": True, "slug": args.slug, "approval": receipt}, indent=2))
+            return
+        if not args.slack_ts:
+            parser.error("record-landing requires --slack-ts")
+        receipt = record_landing_approval(
+            args.slug,
+            channel_id=args.channel_id,
+            slack_ts=args.slack_ts,
+            approver_user_id=args.approver_user_id,
+            approved_by=args.approved_by,
+            request_ts=args.request_ts,
+            account=args.account,
+        )
+        print(json.dumps({"ok": True, "slug": args.slug, "approval": receipt}, indent=2))
+        return
+
+    if not args.brief_id:
+        parser.error(f"{args.action} requires --brief-id")
     records = load_registry(args.registry)
     record = next((row for row in records if row.get("brief_id") == args.brief_id), None)
     if not record:

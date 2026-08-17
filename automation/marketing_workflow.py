@@ -17,7 +17,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from campaign_config import compare_brief_to_live
+from campaign_config import compare_brief_to_live, stable_brief_hash
 from campaign_registry import (
     fetch_live_snapshot,
     graph_api,
@@ -26,7 +26,7 @@ from campaign_registry import (
     load_registry,
     write_registry,
 )
-from meta_campaign_control import assert_matches, fetch_live_configuration, load_brief, provision
+from meta_campaign_control import assert_matches, fetch_live_for_brief, load_brief, provision
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("DB_PATH", ROOT / "crm/data/crm.db"))
@@ -79,6 +79,36 @@ def record_for_brief(records, brief_id):
     return rows[0]
 
 
+def assert_campaign_review_approved(record, brief):
+    """F-001 invariant: activation requires a human review approval receipt
+    bound to the exact committed brief content. No receipt, or a receipt that
+    hashes different content, means the review is pending and spend stays off."""
+    approval = record.get("approval") or {}
+    has_receipt = (
+        bool(approval.get("slack_ts"))
+        and bool(approval.get("approved_by_user_id"))
+        and bool(str(approval.get("quoted_text") or "").strip())
+    )
+    if not has_receipt:
+        raise MarketingWorkflowError(
+            f"creative/landing review is pending for {record.get('brief_id')}: "
+            "no recorded human approval receipt; activation is blocked"
+        )
+    current_hash = stable_brief_hash(brief)
+    if str(approval.get("brief_hash") or "") != current_hash:
+        raise MarketingWorkflowError(
+            f"creative/landing review is stale for {record.get('brief_id')}: "
+            "the committed brief changed after the recorded approval; "
+            "activation is blocked until the review is re-recorded"
+        )
+    return {
+        "state": "approved",
+        "reviewBriefHash": current_hash,
+        "approvedByUserId": str(approval.get("approved_by_user_id")),
+        "approvalSlackTs": str(approval.get("slack_ts")),
+    }
+
+
 def read_variant(slug):
     if not VARIANT_SLUG_RE.fullmatch(str(slug or "")):
         raise MarketingWorkflowError("valid landing variant slug is required")
@@ -86,13 +116,22 @@ def read_variant(slug):
     con.row_factory = sqlite3.Row
     try:
         row = con.execute(
-            """SELECT slug, page_slug, language, source, audience, status, traffic_weight
+            """SELECT slug, page_slug, language, source, audience, status, traffic_weight,
+                      config, approved_config_hash, approval_receipt_json
                  FROM lp_variants WHERE slug=?""",
             (slug,),
         ).fetchone()
         if not row:
             raise MarketingWorkflowError(f"landing variant was not found: {slug}")
-        return dict(row)
+        variant = dict(row)
+        config_hash = hashlib.sha256(
+            str(variant.pop("config") or "").encode("utf-8")
+        ).hexdigest()
+        approved_hash = str(variant.pop("approved_config_hash", "") or "")
+        has_receipt = bool(variant.pop("approval_receipt_json", None))
+        variant["config_hash"] = config_hash
+        variant["review_approved"] = bool(has_receipt and approved_hash == config_hash)
+        return variant
     finally:
         con.close()
 
@@ -229,6 +268,7 @@ def campaign_preflight(request, records, secrets):
         }
 
     if operation == "campaign_activate":
+        review = assert_campaign_review_approved(record, brief)
         live = assert_matches(brief, record, secrets=secrets)
         status = live["campaign"].get("status")
         if status == "ACTIVE":
@@ -240,6 +280,7 @@ def campaign_preflight(request, records, secrets):
             "briefId": brief_id,
             "campaignId": str(record["campaign_id"]),
             "briefHash": brief_hash,
+            "review": review,
             "before": {
                 "campaign": live["campaign"],
                 "configurationHash": stable_hash(live),
@@ -259,6 +300,12 @@ def preflight(request):
         value = request["trafficWeight"] if field == "traffic_weight" else request["status"]
         if current[field] == value:
             raise MarketingWorkflowError(f"landing variant {field} already has the requested value")
+        if request["operation"] == "landing_status" and value == "live" and not current["review_approved"]:
+            raise MarketingWorkflowError(
+                f"landing review is pending or stale for {request['slug']}: "
+                "a human review approval bound to the current variant content is required "
+                "before the variant can go live"
+            )
         result = {
             "operation": request["operation"],
             "provider": "crm",
@@ -386,9 +433,28 @@ def readback(request):
         return {"verified": True, "providerRef": object_id, "readback": current}
     if operation == "campaign_activate":
         _, brief = safe_brief(request["briefId"])
-        live = fetch_live_configuration(record, secrets=secrets)
+        live = fetch_live_for_brief(brief, record, secrets=secrets)
         drift = compare_brief_to_live(brief, live, require_active=False)
-        if drift or live["campaign"].get("status") != "ACTIVE":
+        configured_status = live["campaign"].get("status")
+        if drift and configured_status == "ACTIVE":
+            # Spend must not continue on a configuration that no longer matches
+            # the reviewed brief: roll back to PAUSED, then surface for manual
+            # review (mirrors the CLI activation path's rollback behavior).
+            graph_post(secrets, str(record["campaign_id"]), status="PAUSED")
+            rolled_back = graph_api(
+                secrets,
+                str(record["campaign_id"]),
+                fields="id,name,status,effective_status,updated_time",
+            )
+            update_registry_readback(
+                {"operation": "campaign_pause", "briefId": request["briefId"]},
+                rolled_back,
+            )
+            raise MarketingWorkflowError(
+                "Meta activation readback found configuration drift; "
+                "campaign rolled back to PAUSED pending manual review"
+            )
+        if drift or configured_status != "ACTIVE":
             raise MarketingWorkflowError("Meta activation readback found configuration drift or non-ACTIVE configured status")
         update_registry_readback(request, live["campaign"])
         return {

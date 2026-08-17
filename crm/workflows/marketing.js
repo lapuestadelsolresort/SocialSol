@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { sql } = require('@databases/sqlite');
+const { AUTO_CONFIRM_TRIGGER, dispatchAutoConfirm } = require('../lib/auto-confirm-dispatch');
 const { pythonCommand } = require('../lib/workflow-command');
 const { evidenceReadDefinition } = require('./read-models');
 const { makeDurableJob } = require('./durable-job');
@@ -286,8 +287,14 @@ async function persistChangeRequest({ db, run, store, stepKey, request, prefligh
 
 const marketingChangePropose = {
   name: 'marketing.change.propose',
-  version: 1,
+  version: 2,
   capability: 'marketing.write',
+  // The proposal writes only the local immutable request. When
+  // `marketing.change.confirm` is policy-armed for autonomy AND the proposal's
+  // exact operation is named in the policy's `autonomous_operations` allowlist
+  // (D-001 grants Meta autonomy per operation), the final step hands the
+  // proposal to the confirm graph, which owns every provider effect — and the
+  // adapter's F-001 review invariant still gates activation inside it.
   mutates: false,
   validate: normalizeChangeInput,
   steps: [
@@ -312,18 +319,57 @@ const marketingChangePropose = {
         };
       },
     },
+    {
+      key: 'dispatch_confirmation', effectClass: 'local_write', maxAttempts: 3,
+      async run({ db, run, input, state, services, store, stepKey }) {
+        return dispatchAutoConfirm({
+          db,
+          run,
+          services,
+          store,
+          stepKey,
+          confirmDefinition: marketingChangeConfirm,
+          proposalId: state.persist_proposal.proposalId,
+          acceptanceHash: state.persist_proposal.acceptanceHash,
+          idempotencyKey: `auto-confirm:marketing:${state.persist_proposal.proposalId}`,
+          operation: normalizeChangeInput(input).operation,
+        });
+      },
+    },
   ],
   output({ input, state }) {
-    return {
-      status: 'awaiting_explicit_confirmation',
+    const base = {
       operation: input.operation,
       targetRef: state.preflight.targetRef,
       briefHash: state.preflight.briefHash || null,
       proposalId: state.persist_proposal.proposalId,
       requestHash: state.persist_proposal.requestHash,
       expiresAt: state.persist_proposal.expiresAt,
-      confirmationCommand: state.persist_proposal.confirmationCommand,
       evidenceId: state.persist_proposal.evidenceId,
+    };
+    const dispatch = state.dispatch_confirmation || { dispatched: false };
+    if (!dispatch.dispatched) {
+      return {
+        ...base,
+        status: 'awaiting_explicit_confirmation',
+        confirmationCommand: state.persist_proposal.confirmationCommand,
+        ...(dispatch.reason ? { autoConfirm: { dispatched: false, reason: dispatch.reason } } : {}),
+      };
+    }
+    return {
+      ...base,
+      status: dispatch.confirmStatus === 'completed' ? 'auto_confirmed_executed'
+        : dispatch.confirmStatus === 'failed' ? 'auto_confirm_failed'
+          : 'auto_confirm_in_progress',
+      autoConfirm: {
+        dispatched: true,
+        confirmRunId: dispatch.confirmRunId,
+        confirmStatus: dispatch.confirmStatus,
+        effectId: dispatch.confirmOutput?.effectId || null,
+        evidenceId: dispatch.confirmOutput?.evidenceId || null,
+        providerRef: dispatch.confirmOutput?.providerRef || null,
+        error: dispatch.confirmError,
+      },
     };
   },
 };
@@ -489,7 +535,7 @@ const marketingChangeConfirm = {
   serializeMutations: true,
   serializationKey: 'marketing.mutation',
   crashRecovery: 'manual',
-  allowedTriggers: ['slack_meta_campaign_confirm_command'],
+  allowedTriggers: ['slack_meta_campaign_confirm_command', AUTO_CONFIRM_TRIGGER],
   validate: validateConfirmation,
   steps: [
     {

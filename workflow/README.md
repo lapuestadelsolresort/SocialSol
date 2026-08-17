@@ -98,6 +98,23 @@ flowchart LR
   audience state and a hash-verified campaign-registry recovery snapshot are
   stored inside the encrypted-backup CRM database. Campaigns without a
   committed brief fail closed for autonomous mutations.
+- Creative/landing review invariant: `campaign_activate` refuses to run —
+  in preflight, on every path including the CLI — unless the registry row
+  carries a human Slack approval receipt whose `brief_hash` equals the hash of
+  the current committed brief (lifecycle fields `status`/`activated_at`
+  excluded), recorded via `automation/campaign_approval.py record`. Editing
+  the brief after review invalidates the receipt. `landing_status → live`
+  likewise requires a receipt recorded with `record-landing` that hashes the
+  variant's exact current `config`; content edits stale the receipt. A
+  post-activation readback that finds configuration drift rolls the campaign
+  back to PAUSED before opening manual review.
+- Per-operation autonomy: proposals auto-dispatch their confirmation only when
+  the runtime policy lists `marketing.change.confirm` in
+  `autonomous_workflows` AND names the proposal's exact operation in
+  `autonomous_operations["marketing.change.confirm"]` (see
+  `policy.example.json`). Absent either entry the proposal waits for the human
+  `!meta confirm`. The review invariant above still gates activation inside
+  the auto-dispatched confirmation, so arming never bypasses review.
 - Reservations: authoritative OwnerRez reads and a fixed 34-operation mutation
   catalog. Every write requires a durable proposal, exact same-user Slack
   confirmation within 15 minutes, a fresh precondition check, execute-once

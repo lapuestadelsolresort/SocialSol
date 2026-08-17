@@ -115,5 +115,88 @@ class CampaignConfigTests(unittest.TestCase):
         )
 
 
+def multi_ad_brief_fixture():
+    brief = brief_fixture()
+    del brief["landing_page_url"]
+    brief["campaign_name"] = "LPDS — Weddings"
+    brief["ads"] = [
+        {"ad_name": "Wedding — Aspirational", "landing_page_url": "https://weddings.example/?utm_content=w1"},
+        {"ad_name": "Video — Pier Walk", "landing_page_url": "https://weddings.example/?utm_content=pier"},
+    ]
+    return brief
+
+
+def multi_ad_matching_live(brief):
+    return {
+        "campaign": {
+            "name": brief["campaign_name"],
+            "objective": brief["objective"],
+            "daily_budget": "500",
+            "effective_status": "ACTIVE",
+        },
+        "adset": {
+            "optimization_goal": brief["optimization_goal"],
+            "effective_status": "ACTIVE",
+            "targeting": build_targeting(brief),
+        },
+        "ads": [
+            {"id": "a1", "effective_status": "ACTIVE", "creative": {"id": "c1"}},
+            {"id": "a2", "effective_status": "ACTIVE", "creative": {"id": "c2"}},
+        ],
+        "creatives": [
+            {"object_story_spec": {"link_data": {"link": brief["ads"][0]["landing_page_url"]}}},
+            {"object_story_spec": {"link_data": {"link": brief["ads"][1]["landing_page_url"]}}},
+        ],
+    }
+
+
+class MultiAdComparatorTests(unittest.TestCase):
+    def test_matching_multi_ad_campaign_has_no_drift(self):
+        brief = multi_ad_brief_fixture()
+        live = multi_ad_matching_live(brief)
+        self.assertEqual(compare_brief_to_live(brief, live, require_active=True), [])
+
+    def test_explicit_empty_platforms_and_absent_advantage_flag_match_unrestricted_live(self):
+        brief = multi_ad_brief_fixture()
+        brief["audience"]["publisher_platforms"] = []
+        live = multi_ad_matching_live(brief)
+        live["adset"]["targeting"].pop("publisher_platforms", None)
+        live["adset"]["targeting"].pop("targeting_automation", None)
+        self.assertEqual(compare_brief_to_live(brief, live), [])
+        live["adset"]["targeting"]["targeting_automation"] = {"advantage_audience": 1}
+        fields = {row["field"] for row in compare_brief_to_live(brief, live)}
+        self.assertEqual(fields, {"targeting.advantage_audience"})
+
+    def test_region_targeted_brief_compares_region_keys(self):
+        brief = multi_ad_brief_fixture()
+        del brief["audience"]["countries"]
+        brief["audience"]["regions"] = [
+            {"key": "3843", "name": "Alabama", "country": "US"},
+            {"key": "3847", "name": "California", "country": "US"},
+        ]
+        live = multi_ad_matching_live(brief)
+        self.assertEqual(compare_brief_to_live(brief, live), [])
+        live["adset"]["targeting"]["geo_locations"]["regions"] = [{"key": "3843"}]
+        fields = {row["field"] for row in compare_brief_to_live(brief, live)}
+        self.assertEqual(fields, {"targeting.regions"})
+
+    def test_extra_live_ad_and_foreign_link_are_drift(self):
+        brief = multi_ad_brief_fixture()
+        live = multi_ad_matching_live(brief)
+        live["ads"].append({"id": "a3", "effective_status": "ACTIVE", "creative": {"id": "c3"}})
+        live["creatives"].append(
+            {"object_story_spec": {"link_data": {"link": "https://unreviewed.example/"}}}
+        )
+        fields = {row["field"] for row in compare_brief_to_live(brief, live)}
+        self.assertEqual(fields, {"adset.ad_count", "creative.links"})
+
+    def test_inactive_child_ad_blocks_require_active(self):
+        brief = multi_ad_brief_fixture()
+        live = multi_ad_matching_live(brief)
+        live["ads"][1]["effective_status"] = "PAUSED"
+        fields = {row["field"] for row in compare_brief_to_live(brief, live, require_active=True)}
+        self.assertEqual(fields, {"ad.a2.effective_status"})
+
+
 if __name__ == "__main__":
     unittest.main()

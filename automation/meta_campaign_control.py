@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from campaign_approval import ApprovalError, verify_registry_approval
-from campaign_config import build_targeting, compare_brief_to_live
+from campaign_config import build_targeting, compare_brief_to_live, stable_brief_hash
 from campaign_registry import (
     REGISTRY_PATH,
     graph_api,
@@ -55,12 +55,25 @@ def load_brief(path):
         raise CampaignControlError(f"campaign brief is missing or invalid: {path}")
     required = {
         "brief_id", "campaign_name", "objective", "optimization_goal",
-        "campaign_daily_budget_usd", "landing_page_url", "audience",
+        "campaign_daily_budget_usd", "audience",
     }
+    if is_multi_ad_brief(brief):
+        ads = brief["ads"]
+        if not ads or not all(
+            isinstance(row, dict) and str(row.get("landing_page_url") or "").strip()
+            for row in ads
+        ):
+            raise CampaignControlError("multi-ad brief requires ads[] entries with landing_page_url")
+    else:
+        required = required | {"landing_page_url"}
     missing = sorted(required - set(brief))
     if missing:
         raise CampaignControlError("brief is missing: " + ", ".join(missing))
     return brief
+
+
+def is_multi_ad_brief(brief):
+    return isinstance(brief.get("ads"), list)
 
 
 def registry_record(records, brief_id):
@@ -95,8 +108,54 @@ def fetch_live_configuration(record, secrets=None):
     return {"campaign": campaign, "adset": adset, "ad": ad, "creative": creative}
 
 
+def fetch_live_ads_configuration(record, secrets=None):
+    """Live campaign/adset plus the adset's full ad and creative set.
+
+    Multi-ad registry records carry campaign_id/adset_id only; the ad and
+    creative population is resolved from the provider so the brief comparison
+    covers every ad that could spend.
+    """
+    secrets = secrets or load_meta_secrets()
+    for field in ("campaign_id", "adset_id"):
+        if not record.get(field):
+            raise CampaignControlError(f"registry record is missing {field}")
+    campaign = graph_api(
+        secrets,
+        str(record["campaign_id"]),
+        fields="id,name,status,effective_status,daily_budget,lifetime_budget,objective,bid_strategy",
+    )
+    adset = graph_api(
+        secrets,
+        str(record["adset_id"]),
+        fields="id,name,status,effective_status,campaign_id,daily_budget,optimization_goal,bid_strategy,billing_event,targeting",
+    )
+    ads_payload = graph_api(
+        secrets,
+        f"{record['adset_id']}/ads",
+        fields="id,name,status,effective_status,adset_id,creative{id,name}",
+    )
+    ads = list(ads_payload.get("data") or [])
+    creatives = []
+    for ad in ads:
+        creative_id = str((ad.get("creative") or {}).get("id") or "")
+        if not creative_id:
+            raise CampaignControlError(f"live ad {ad.get('id')} has no creative")
+        creatives.append(graph_api(
+            secrets,
+            creative_id,
+            fields="id,name,object_story_spec,asset_feed_spec,url_tags",
+        ))
+    return {"campaign": campaign, "adset": adset, "ads": ads, "creatives": creatives}
+
+
+def fetch_live_for_brief(brief, record, secrets=None):
+    if is_multi_ad_brief(brief):
+        return fetch_live_ads_configuration(record, secrets=secrets)
+    return fetch_live_configuration(record, secrets=secrets)
+
+
 def assert_matches(brief, record, secrets=None, require_active=False):
-    live = fetch_live_configuration(record, secrets=secrets)
+    live = fetch_live_for_brief(brief, record, secrets=secrets)
     drift = compare_brief_to_live(brief, live, require_active=require_active)
     if drift:
         raise CampaignControlError("campaign configuration drift:\n" + json.dumps(drift, indent=2))
@@ -150,6 +209,10 @@ def provision(brief, records, secrets, apply=False, resume_ids=None):
     if existing:
         live = assert_matches(brief, existing, secrets=secrets)
         return records, {"created": False, "record": existing, "live": live}
+    if is_multi_ad_brief(brief):
+        raise CampaignControlError(
+            "multi-ad briefs describe already-registered campaigns and cannot be provisioned"
+        )
     creative_config = brief.get("creative") or {}
     source_creative_id = creative_config.get("source_creative_id")
     if not source_creative_id and creative_config.get("source_brief_id"):
@@ -257,6 +320,15 @@ def activate(brief, records, secrets, *, channel_id, approver_user_id, slack_acc
         )
     except ApprovalError as exc:
         raise CampaignControlError(f"activation approval failed: {exc}") from exc
+    # F-001 review invariant: the recorded approval must bind to the exact
+    # brief content being activated, or the review is stale and spend stays off.
+    approved_hash = str(approval.get("brief_hash") or "")
+    current_hash = stable_brief_hash(brief)
+    if approved_hash != current_hash:
+        raise CampaignControlError(
+            "creative/landing review is pending or stale: the recorded approval does not bind "
+            f"to the current brief content for {brief['brief_id']} (re-record the approval after review)"
+        )
     assert_matches(brief, record, secrets=secrets)
     graph_post(secrets, str(record["campaign_id"]), status="ACTIVE")
     live = fetch_live_configuration(record, secrets=secrets)

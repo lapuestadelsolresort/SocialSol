@@ -63,7 +63,7 @@ const VARIANTS_DIR = path.join(ROOT, 'lp', 'variants');
         UPDATE lp_variants
         SET config = ${JSON.stringify(config)},
             page_slug = ${config.page_slug},
-            status = ${config.status || 'live'},
+            status = ${config.status || 'draft'},
             traffic_weight = ${weight},
             language = ${config.language || 'en'},
             source = ${config.source || null},
@@ -85,7 +85,7 @@ const VARIANTS_DIR = path.join(ROOT, 'lp', 'variants');
           meta_object_id, created_by, approved_by, approved_at
         ) VALUES (
           ${slug}, ${config.page_slug}, ${config.language || 'en'}, ${config.source || null}, ${config.audience || null},
-          ${config.status || 'live'}, ${weight},
+          ${config.status || 'draft'}, ${weight},
           ${JSON.stringify(config)}, ${config.type || 'landing_page'}, ${config.is_control ? 1 : 0},
           ${config.compliance_status || 'unknown'}, ${config.bucket || 'leads'},
           ${config.funnel_stage || 'cta'}, ${config.meta_object_id || null},

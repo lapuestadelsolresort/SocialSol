@@ -368,6 +368,11 @@ async function initDB() {
   await addColumnIfMissing('lp_variants', "bucket TEXT DEFAULT 'leads'");
   await addColumnIfMissing('lp_variants', "funnel_stage TEXT DEFAULT 'cta'");
   await addColumnIfMissing('lp_variants', "meta_object_id TEXT");
+  // F-001 landing-review invariant: a variant may only transition to 'live'
+  // through the marketing adapter when a recorded human approval receipt
+  // hashes the exact current config (see automation/campaign_approval.py).
+  await addColumnIfMissing('lp_variants', "approved_config_hash TEXT");
+  await addColumnIfMissing('lp_variants', "approval_receipt_json TEXT");
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_lpv_status ON lp_variants(status)`);
   await db.query(sql`CREATE INDEX IF NOT EXISTS idx_lpv_match  ON lp_variants(page_slug, language, source, audience)`);
   await db.query(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_lpv_slug ON lp_variants(slug)`);
