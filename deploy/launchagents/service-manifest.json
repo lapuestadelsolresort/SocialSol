@@ -71,6 +71,7 @@
     "resort-tracker-liveness": { "max_age_hours": 30 },
     "resort-media-rescan": { "max_age_hours": 192 },
     "resort-state-backup": { "max_age_hours": 30 },
-    "resort-media-backup-verify": { "max_age_hours": 192 }
+    "resort-media-backup-verify": { "max_age_hours": 192 },
+    "resort-kapital-tests": { "max_age_hours": 192 }
   }
 }
