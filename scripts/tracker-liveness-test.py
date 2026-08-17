@@ -215,17 +215,32 @@ def get_ad_created_time(secrets, ad_id):
     return None
 
 
+def get_ad_impressions_7d(secrets, ad_id):
+    """Delivery evidence for an ad: impressions over the last 7 days.
+    Returns an int, or None when the insights read fails (unknown)."""
+    try:
+        payload = graph_api(secrets, f"{ad_id}/insights", fields="impressions", date_preset="last_7d")
+        rows = payload.get("data") or []
+        if not rows:
+            return 0
+        return int(rows[0].get("impressions") or 0)
+    except Exception:
+        return None
+
+
 def cold_start_check(destinations, secrets, now_utc):
     """
     For each unique destination, query page_sessions for non-bot, non-test
     sessions in the last COLD_START_WINDOW_HOURS hours.
 
-    If a destination has been active >COLD_START_HOURS and has ZERO real sessions,
-    that's a tracker liveness failure — the script tag is present but silent.
+    A destination active >COLD_START_HOURS with ZERO real sessions is a tracker
+    capture failure ONLY when Meta shows the ad actually delivering; with zero
+    impressions it is a delivery warning, not a tracking failure (F-019).
 
-    Returns: list of failure dicts with 'message' key.
+    Returns: (failures, warnings) — lists of dicts with a 'message' key.
     """
     failures = []
+    warnings = []
     cutoff = (now_utc - timedelta(hours=COLD_START_WINDOW_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
 
     # Deduplicate by (host, utm_campaign) to avoid re-checking the same LP
@@ -254,6 +269,11 @@ def cold_start_check(destinations, secrets, now_utc):
         if age_hours < COLD_START_HOURS:
             # Too new to require sessions yet
             continue
+
+        # Delivery evidence, not ad age, decides whether zero sessions is a
+        # tracking failure: an ad Meta is not delivering cannot produce
+        # sessions no matter how healthy the tracker is (F-019).
+        impressions_7d = get_ad_impressions_7d(secrets, ad_id) if (ad_id and secrets) else None
 
         # Build a query for non-bot, non-test sessions in the window matching this destination's UTMs
         where_clauses = [
@@ -286,20 +306,46 @@ def cold_start_check(destinations, secrets, now_utc):
 
         if count == 0:
             age_days = age_hours / 24
-            failures.append({
-                "type": "cold_start",
-                "url": dest_url,
-                "utm_campaign": utm_campaign,
-                "active_hours": round(age_hours, 1),
-                "active_days": round(age_days, 1),
-                "message": (
-                    f"Tracker liveness failure: {dest_url} has been active for "
-                    f"{age_days:.1f} day(s) but has zero CRM sessions in the last "
-                    f"{COLD_START_WINDOW_HOURS}h"
-                ),
-            })
+            if impressions_7d == 0:
+                warnings.append({
+                    "type": "no_delivery",
+                    "url": dest_url,
+                    "utm_campaign": utm_campaign,
+                    "active_days": round(age_days, 1),
+                    "impressions_7d": 0,
+                    "message": (
+                        f"Delivery warning (not a tracking failure): {dest_url} has zero Meta "
+                        f"impressions in 7d, so zero CRM sessions is expected — check ad delivery"
+                    ),
+                })
+            elif impressions_7d is None:
+                warnings.append({
+                    "type": "delivery_unknown",
+                    "url": dest_url,
+                    "utm_campaign": utm_campaign,
+                    "active_days": round(age_days, 1),
+                    "impressions_7d": None,
+                    "message": (
+                        f"Delivery evidence unavailable for {dest_url} (insights read failed); "
+                        f"zero CRM sessions in {COLD_START_WINDOW_HOURS}h left unclassified"
+                    ),
+                })
+            else:
+                failures.append({
+                    "type": "no_capture",
+                    "url": dest_url,
+                    "utm_campaign": utm_campaign,
+                    "active_hours": round(age_hours, 1),
+                    "active_days": round(age_days, 1),
+                    "impressions_7d": impressions_7d,
+                    "message": (
+                        f"Tracker capture failure: {dest_url} is delivering "
+                        f"({impressions_7d} impressions/7d) but has zero CRM sessions in the last "
+                        f"{COLD_START_WINDOW_HOURS}h"
+                    ),
+                })
 
-    return failures
+    return failures, warnings
 
 
 # ─── Slack ────────────────────────────────────────────────────────────────────
@@ -388,8 +434,9 @@ def run(dry_run=False, no_post=False):
 
     # ── Phase 3: Cold-start detection ─────────────────────────────────────────
     cold_failures = []
+    delivery_warnings = []
     if not dry_run:
-        cold_failures = cold_start_check(all_destinations, secrets, now_utc)
+        cold_failures, delivery_warnings = cold_start_check(all_destinations, secrets, now_utc)
         for cf in cold_failures:
             all_failures.append(cf["message"])
     else:
@@ -417,10 +464,15 @@ def run(dry_run=False, no_post=False):
         lines.append(f"Beacon→DB round-trip: {passed_beacons}/{total_beacons} passed.")
 
     if cold_failures:
-        lines.append(f"Cold-start failures: {len(cold_failures)}")
+        lines.append(f"Cold-start capture failures: {len(cold_failures)}")
 
     for failure in all_failures:
         lines.append(f"• {failure}")
+
+    if delivery_warnings:
+        lines.append(f"_Delivery warnings ({len(delivery_warnings)} — ad not delivering; not a tracking failure):_")
+        for warning in delivery_warnings:
+            lines.append(f"• {warning['message']}")
 
     if healthy:
         lines.append(
@@ -438,6 +490,7 @@ def run(dry_run=False, no_post=False):
         "destinations_tested": len(all_destinations),
         "beacon_results": beacon_results,
         "cold_start_failures": cold_failures,
+        "delivery_warnings": delivery_warnings,
         "test_sessions_cleaned": deleted_count if not dry_run else None,
     }
 
@@ -474,7 +527,8 @@ def main():
         record(
             JOB_NAME,
             state["healthy"],
-            f"{state['failure_count']} failure(s), {state['destinations_tested']} destination(s) tested",
+            f"{state['failure_count']} failure(s), {len(state.get('delivery_warnings') or [])} delivery warning(s), "
+            f"{state['destinations_tested']} destination(s) tested",
         )
 
     raise SystemExit(0 if state["healthy"] else 1)

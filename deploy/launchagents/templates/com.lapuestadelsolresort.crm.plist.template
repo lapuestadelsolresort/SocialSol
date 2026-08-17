@@ -23,6 +23,8 @@
     <string>__SOCIALSOL_ROOT__</string>
     <key>RESORT_SOCIAL_CHANNEL</key>
     <string>__RESORT_SOCIAL_CHANNEL__</string>
+    <key>RESORT_WHATSAPP_CHANNEL</key>
+    <string>__RESORT_WHATSAPP_CHANNEL__</string>
     <key>PROSPECTOR_SLACK_CHANNEL</key>
     <string>__PROSPECTOR_SLACK_CHANNEL__</string>
     <key>OPENCLAW_SLACK_ACCOUNT</key>

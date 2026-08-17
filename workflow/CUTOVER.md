@@ -41,9 +41,13 @@ or business-system authority; ordinary joined channels retain default Sol
 conversation behavior without gaining controlled workflow capabilities.
 The guarded `npm run apply:openclaw-shadow` command performs that merge,
 validates it, and creates a mode-600 config backup before the atomic write.
-`npm run install:shadow-services` installs only the durable worker, health
-monitor, and weekly restore drill; it does not install a legacy or graph
-producer. GTKU is owned by `graph-social-routine` after social cutover.
+`npm run install:launchagents` is the single sanctioned LaunchAgent install
+path: it converges every installed job onto the current render according to
+`deploy/launchagents/service-manifest.json` (backup → atomic install →
+bootout/bootstrap), removes and durably disables retired labels, and runs as
+a step of every `release:deploy`. `npm run services:check` verifies
+installed==rendered and loaded==manifest without changing anything. GTKU is
+owned by `graph-social-routine` after social cutover.
 
 Before deploying this control-plane version, add the intended explicit
 exceptions to the ignored runtime policy and review them as production
@@ -93,6 +97,14 @@ Canary one domain at a time. Add only the matching workflow to
 corresponding legacy producer before loading its graph producer. Never run two
 producers for the same effect concurrently. Set global `shadow_mode` false only
 after every domain has completed its independent cutover.
+
+Removal must be reboot-durable: mark the legacy label `retired` in
+`deploy/launchagents/service-manifest.json` and let `install:launchagents`
+boot it out, delete its installed plist (backed up first), and write the
+launchd disable override — a live `launchctl bootout` alone resurrects the
+producer at the next login (F-041). The 2026-08-17 service-layer fix retired
+all six legacy producers below this way; the daily watchdog compares the
+loaded set against the manifest so any resurrection alerts.
 
 | New graph | Legacy producer to remove at the same cutover |
 |---|---|

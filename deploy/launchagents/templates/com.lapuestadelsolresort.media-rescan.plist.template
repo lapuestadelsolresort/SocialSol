@@ -32,6 +32,8 @@
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>SOCIALSOL_ROOT</key>
     <string>__SOCIALSOL_ROOT__</string>
+    <key>MEDIA_SHOOT_SLUG</key>
+    <string>2025-10-28-property</string>
   </dict>
 </dict>
 </plist>
