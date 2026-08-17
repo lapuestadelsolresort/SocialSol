@@ -231,3 +231,31 @@ test('reservations prompt requires live OwnerRez reads and preserves titled manu
     else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;
   }
 });
+
+test('manual-review resolution channels render workflow-only so claim interception can fire', () => {
+  const previousAccount = process.env.OPENCLAW_SLACK_ACCOUNT;
+  process.env.OPENCLAW_SLACK_ACCOUNT = 'test-account';
+  try {
+    const patch = render({
+      policy: {
+        shadow_mode: true,
+        live_workflows: [],
+        channels: {
+          CBI: { name: 'business-intel', capabilities: ['business.read_all'] },
+          CQC: { name: 'qc-scratch', capabilities: [] },
+        },
+        write_notifications: { user_ids: ['U-JASON'], channel_ids: ['CBI'] },
+      },
+      currentConfig: { channels: { slack: { accounts: { 'test-account': {} } } } },
+    });
+    const channels = patch.channels.slack.accounts['test-account'].channels;
+    // review channel: plugin-bound (allow-pinned), never the shadow alsoAllow form
+    assert.deepEqual(channels.CBI.tools.allow, ['resort_workflow']);
+    assert.deepEqual(channels.CBI.tools.alsoAllow, []);
+    // non-review zero-capability channel keeps the shadow-mode form untouched
+    assert.equal(channels.CQC.tools, undefined);
+  } finally {
+    if (previousAccount === undefined) delete process.env.OPENCLAW_SLACK_ACCOUNT;
+    else process.env.OPENCLAW_SLACK_ACCOUNT = previousAccount;
+  }
+});

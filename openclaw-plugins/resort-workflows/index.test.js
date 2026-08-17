@@ -1661,3 +1661,49 @@ test('finalizer rejects unsupported WhatsApp delivery claims', async () => {
   assert.equal(unsupported.action, 'revise');
   assert.equal(await handler({ lastAssistantMessage: 'Postiz-confirmed schedule. Workflow: 12345678-abcd.' }, { channelId: 'C-SOCIAL' }), undefined);
 });
+
+test('claim handlers intercept gateway conversation ids carrying the channel: prefix', async () => {
+  // OpenClaw emits conversationId as `channel:CXXXX`; every claim handler must
+  // normalize it before the channel-membership gate or the command silently
+  // falls through to the conversational agent (2026-08-17 incident: !wa,
+  // !email confirm, !receipt confirm, !meta confirm, and !review resolve all
+  // dead while the strip-normalized handlers kept working).
+  const resolutions = [];
+  const review = await createManualReviewClaimHandler({
+    config: pluginConfig({ slackAccountId: 'ig-drafts', controlledChannelIds: ['C-REVIEW'] }),
+    resolve: async (_config, request) => {
+      resolutions.push(request);
+      return { review: { id: request.reviewId, resolution: request.resolution } };
+    },
+  })({
+    channel: 'slack', accountId: 'ig-drafts', conversationId: 'channel:C-REVIEW',
+    messageId: '300.1', senderId: 'U-JASON',
+    bodyForAgent: '!review resolve 3ce3ad0f-61e6-4113-8466-1b5c19a6494a not-sent',
+  }, {});
+  assert.equal(review.handled, true);
+  assert.equal(resolutions.length, 1);
+  assert.equal(resolutions[0].resolution, 'confirmed_not_sent');
+  assert.equal(resolutions[0].channelId, 'C-REVIEW');
+  assert.match(review.reply.text, /resolved as confirmed_not_sent/);
+
+  const emailCalls = [];
+  const email = await createEmailClaimHandler({
+    config: pluginConfig({
+      slackAccountId: 'ig-drafts',
+      emailChannelIds: ['CPAULINA'],
+      liveWorkflowNames: ['email.reply.propose'],
+    }),
+    execute: async (_config, request) => {
+      emailCalls.push(request);
+      return { run: { id: 'run', workflow_name: request.workflow, status: 'completed',
+        output: { status: 'awaiting_explicit_confirmation', bodyText: 'x', confirmationCommand: '!email confirm id hash' } } };
+    },
+  })({
+    channel: 'slack', accountId: 'ig-drafts', conversationId: 'channel:CPAULINA',
+    messageId: '300.2', senderId: 'U-SARAH', threadId: '1786549495.693669',
+    bodyForAgent: '!email reply Prefixed conversation ids must still intercept.',
+  }, {});
+  assert.equal(email.handled, true);
+  assert.equal(emailCalls.length, 1);
+  assert.equal(emailCalls[0].idempotencyKey, 'slack:CPAULINA:300.2:email.reply.propose');
+});
