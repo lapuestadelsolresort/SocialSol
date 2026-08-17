@@ -15,7 +15,14 @@ sha `aa71f387` mtime 08:29 untouched end-to-end; `autonomous_workflows` contains
 neither confirm workflow; staged armed-policy candidate destroyed. Rows
 QCFS2-01…03 + RO17-01/02; evidence E-FIX2-01…03; new F-056 (P3 publish_due
 null-snapshot latent, fail-closed) + F-057 (P3 dormant capability vs superseded
-intent, rides D-019); D-018 superseded in part; **D-019 OPEN and load-bearing**.
+intent). **17c: D-019 RECORDED same day** — owner keeps ALL 34 OwnerRez
+operations confirmation-gated (no autopilot, no per-op extension built);
+dormant auto-confirm machinery STAYS, documented, as the future auto-send
+mechanism (F-057 dispositioned keep-dormant; doc-accuracy residual queued);
+Sarah draft-and-approve is the STANDING rule (both providers, whole surface)
+with auto-send recorded as anticipated future intent — arming only by future
+owner decision via the D-019 procedure. D-001 Sarah + OwnerRez rows superseded
+by dated addendum.
 
 **Owner-stated intended state (2026-08-17, 17b — supersedes the D-018 addendum):**
 Paulina auto-send ENABLED (verified MATCH), Regina auto-send ENABLED (verified
@@ -60,11 +67,11 @@ interim positive, D-018; ledger corroboration deferred to QC-8.)
 
 ## Blockers
 
-**D-019 (OPEN) blocks any arming work**: per-operation OwnerRez autopilot matrix
-+ dormant-dispatch disposition (keep vs revert, F-057) + ratifying Sarah
-draft-and-approve as the standing D-001 row. Input = the RO map. Other open
-D-rows: D-004 (blackout windows — load-bearing at QC-6c/QC-10), D-007
-(accounting validator), D-010 (CI scope confirm).
+None for the next sessions — **D-019 RECORDED 2026-08-17** (no arming;
+everything stays confirmation-gated; dormant machinery kept + documented; any
+future arming is owner-initiated via the D-019 procedure). Open D-rows: D-004
+(blackout windows — load-bearing at QC-6c/QC-10), D-007 (accounting
+validator), D-010 (CI scope confirm).
 
 Open P1s: F-001 (invariant-first fix session), F-014, F-051 (fixes deployed;
 live exact-command verify + coalescing disposition remain — QC-8 opener). Open
@@ -79,26 +86,22 @@ email_reply_proposal exists (inert; human-confirmable or ignorable).
 
 ## Next
 
-**(1) D-019 owner decision** (can be a short walkthrough): per-operation
-OwnerRez autopilot (the 34-row map; `destructive` flag is a natural axis) +
-keep-vs-revert the dormant dispatch (F-057) + ratify Sarah draft-and-approve
-into D-001. No arming of any kind before this is recorded.
-
-**Then:** (2) If D-019 grants any autopilot: arming fix session (release path)
-— `autonomous_operations` per-op extension if a subset is granted, policy edit
-via the sanctioned path with backup; if D-019 reverts: removal fix session.
-(3) F-001 session (creative/landing-review invariant + regression + F-045
+**(1) F-001 session** (creative/landing-review invariant + regression + F-045
 briefs, then Meta autonomous-activation arming per the invariant-first order).
-(4) F-014 rebuild + P2/P3 batch (now incl. F-052 fallback, F-053, F-054, F-055,
-F-056, F-019 threshold, F-047, F-048/49/50, F-032(c), F-042/43/46, F-039).
-(5) QC-6c CANARY (D-004 first). (6) F-031 drill slot (D-006 window; F-013 gated
-on it). (7) **QC-8** — OPEN with the F-051 live verification (`!wa` fixture
-battery in a quiet channel) + F-051 ack-corroboration ledger pull; then Sarah
-email (audits the D-019-final config), Meta DM quarantine re-verify, Sarah
-Coach. (8) **QC-9** (OwnerRez + Paloma) — the RO map is the audit target; note
-the surface is production-unfired. Definition-of-Done #3 note: F-051 must reach
-verified-fixed (or accepted-risk with the advisory) and the F-031 drill must
-run before baseline stamps.
+
+**Then:** (2) F-014 rebuild + P2/P3 batch (now incl. F-052 fallback, F-053,
+F-054, F-055, F-056, **F-057 doc residual** — fix the two COMMANDS.md
+"production default" parentheticals + revert policy.example.json
+autonomous_workflows to the standing un-armed shape — F-019 threshold, F-047,
+F-048/49/50, F-032(c), F-042/43/46, F-039). (3) QC-6c CANARY (D-004 first).
+(4) F-031 drill slot (D-006 window; F-013 gated on it). (5) **QC-8** — OPEN
+with the F-051 live verification (`!wa` fixture battery in a quiet channel) +
+F-051 ack-corroboration ledger pull; then Sarah email (audits the standing
+draft-and-approve config per D-019), Meta DM quarantine re-verify, Sarah
+Coach. (6) **QC-9** (OwnerRez + Paloma) — the RO map is the audit target; all
+34 mutations confirmation-gated per D-019; surface production-unfired.
+Definition-of-Done #3 note: F-051 must reach verified-fixed (or accepted-risk
+with the advisory) and the F-031 drill must run before baseline stamps.
 
 **Exact next command** (start ritual, §8):
 
@@ -107,6 +110,7 @@ git -C ~/.openclaw/SocialSol status
 ```
 
 Expected: clean `main` @ 1dd627ed (runtime baseline 1dd627ed; newest deploy
-record 2026-08-17T17-58-54-930Z completed; policy sha aa71f387 un-armed). Then
-`cd ~/qc-worktree`, read qc/STATUS.md + D-019 + the RO map, and hold the D-019
-walkthrough with the owner before any other work.
+record 2026-08-17T17-58-54-930Z completed; policy sha aa71f387 un-armed —
+standing state per D-019). Then `cd ~/qc-worktree`, read qc/STATUS.md +
+D-019, and begin the F-001 fix session with its authorization stated on the
+Authorizations line (BUSINESS for the release path).

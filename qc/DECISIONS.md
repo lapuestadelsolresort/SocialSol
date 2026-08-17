@@ -95,6 +95,23 @@ Sarah auto-send both providers) are fix-list items through the config/release pa
 (D-008); F-005 closes only after QC-7 reconciles runtime/docs/policy to this matrix
 and dispositions every discrepancy.
 
+**Addendum 2026-08-17 (D-019 supersessions — current standing matrix for these
+two rows):**
+
+- **OwnerRez mutations — CONFIRMATION-GATED (all 34 operations).** The
+  2026-08-16 FULL AUTOPILOT row is superseded by D-019 item 1: every mutation
+  keeps immutable proposal + same-user `!ownerrez confirm` + 15-min expiry +
+  fresh precondition + execute-once + readback. No autopilot for any operation.
+- **Sarah guest-correspondence replies — DRAFT-AND-APPROVE (standing rule,
+  both providers, whole `email.reply` surface).** The 2026-08-16 AUTO-SEND row
+  and the D-018 "whole surface" walkthrough answer are superseded by D-019
+  item 3. Recorded future intent: auto-send anticipated later; the mechanism
+  exists dormant (PR #80 dispatch, policy-gated); arming only by a future
+  owner-initiated decision via the D-019 arming procedure.
+- All other D-001 rows (WhatsApp `!wa` invariant, Paulina/Regina autopilot,
+  Meta rows incl. invariant-first activation order, QBO, Postiz, Regina
+  Airbnb-thread grant-only) are unchanged.
+
 ## D-002 — Transport authorization audit — PARTIALLY RECORDED (blocks QC-0 exit for recorded rows)
 
 **Recorded 2026-08-15 (owner):**
@@ -389,20 +406,49 @@ neither confirm workflow is in autonomous_workflows; the email canary is
 CANCELLED (not merely deferred) unless D-019 revives it. The deployed PR #80
 dispatch code remains dormant and policy-gated → F-057, dispositioned in D-019.
 
-## D-019 — Per-operation OwnerRez autopilot matrix + dormant-dispatch disposition — OPEN (2026-08-17)
+## D-019 — Per-operation OwnerRez autopilot + dormant-dispatch disposition + Sarah standing rule — RECORDED 2026-08-17
 
 Input: `qc/RO-2026-08-17-email-autonomy-ownerrez-mutation-map.md` (34 fixed
 operations; shared gate chain; `destructive` flag as a natural decision axis;
-zero production usage to date). The owner decides:
+zero production usage to date).
 
-1. Which of the 34 OwnerRez operations (if any) get autopilot vs stay
-   confirmation-gated. Note: today's arming switch (`autonomous_workflows`) is
-   per-WORKFLOW — arming `ownerrez.mutation.confirm` arms all 34 at once; a
-   per-operation grant requires a small code extension (e.g. an
-   `autonomous_operations` allowlist checked against operationId in the
-   dispatch step) through the release path.
-2. Whether the dormant PR #80 auto-confirm dispatch steps (email + ownerrez)
-   stay in place as the arming mechanism for whatever is granted, or are
-   reverted via the release path (F-057).
-3. Whether Sarah draft-and-approve is now the standing D-001 row (recommend:
-   yes, recorded as such — it matches the deployed behavioral state).
+**Owner (2026-08-17, session 17c):**
+
+1. **OwnerRez mutations — KEEP "ALWAYS ASK FIRST" FOR EVERYTHING.** All 34
+   operations stay confirmation-gated (agent proposes → human pastes
+   `!ownerrez confirm`). NO autopilot granted for any operation. Consequence:
+   the `autonomous_operations` per-op extension is NOT built now;
+   `ownerrez.mutation.confirm` stays out of `autonomous_workflows`. This
+   supersedes D-001's 2026-08-16 "OwnerRez mutations — FULL AUTOPILOT" row.
+2. **Dormant auto-confirm machinery — LEAVE IN PLACE, DOCUMENTED.** The owner
+   expects to use it in the future when the time is right and wants its
+   existence durably documented. It stays deployed and policy-gated (inert
+   while neither confirm workflow is listed in `autonomous_workflows`).
+   Documentation homes as of this recording: this D-019 record (incl. the
+   arming procedure below); the RO map note
+   (`qc/RO-2026-08-17-email-autonomy-ownerrez-mutation-map.md`); sarah-email +
+   prospector COMMANDS.md (behavior in both modes — with one stale
+   parenthetical each to correct, see F-057 residual);
+   `workflow/policy.example.json` (residual: currently SHOWS the armed shape —
+   to be reverted to the standing un-armed shape so the example matches
+   intent). F-057 dispositioned: keep-dormant.
+3. **Sarah guest-correspondence replies — DRAFT-AND-APPROVE is the STANDING
+   RULE** (human writes and confirms every send, both providers; applies to
+   the whole `email.reply` surface, #sarah-email and #prospector-paulina
+   reply threads, since the arming switch is per-workflow and nothing is
+   armed). **Recorded future intent: auto-send WILL be wanted at some point**
+   — nothing more is built now; the future path must stay available, and it
+   already exists: the dormant dispatch of item 2 IS the auto-send mechanism,
+   already regression-tested. This supersedes D-001's 2026-08-16 "Sarah
+   auto-send" row and the D-018 walkthrough's "whole surface" grant.
+
+**Arming procedure for the future (owner-initiated only; BUSINESS
+authorization + a fix session):** add `email.reply.confirm` and/or
+`ownerrez.mutation.confirm` to `autonomous_workflows` in the runtime
+`workflow/policy.json` via the sanctioned edit path (backup copy → candidate
+validated with the repo's `validatePolicy` → diff reviewed → atomic mode-600
+install; server picks it up by mtime, worker reads policy fresh per step — no
+restart). Un-arming is the one-line reverse. Live verification per the D-018
+canary design (test identity per D-009). If only a SUBSET of OwnerRez
+operations should ever be armed, build the small `autonomous_operations`
+allowlist extension first (release path).
