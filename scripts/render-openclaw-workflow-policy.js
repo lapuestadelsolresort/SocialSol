@@ -135,6 +135,12 @@ function render({ policy, currentConfig, pluginIds = [], joinedChannels = [] }) 
     };
   }
   const liveWorkflows = new Set(Array.isArray(policy.live_workflows) ? policy.live_workflows : []);
+  // Manual-review resolution channels must be plugin-bound (workflow-only):
+  // OpenClaw dispatches inbound_claim only for plugin-bound conversations, so a
+  // review channel rendered in the shadow alsoAllow form can never intercept
+  // the `!review resolve` command.
+  const reviewChannelIds = new Set(Array.isArray(policy.write_notifications?.channel_ids)
+    ? policy.write_notifications.channel_ids : []);
   for (const [channelId, channel] of Object.entries(policy.channels || {})) {
     const receipt = channel.capabilities.includes('accounting.read_scoped');
     const ownerExpense = channel.capabilities.includes('qbo.owner_expense.write');
@@ -149,7 +155,8 @@ function render({ policy, currentConfig, pluginIds = [], joinedChannels = [] }) 
       || (receipt && ['receipt.ingest', 'receipt.process', 'receipt.payment_source.select', 'receipt.annotate',
         'receipt.owner_expense.ingest', 'receipt.owner_expense.process', 'receipt.owner_expense.confirm']
         .some(workflow => liveWorkflows.has(workflow)));
-    const workflowOnly = policy.shadow_mode !== true || hasLiveMutation || channel.name === 'reservations';
+    const workflowOnly = policy.shadow_mode !== true || hasLiveMutation
+      || channel.name === 'reservations' || reviewChannelIds.has(channelId);
     channels[channelId] = {
       enabled: true,
       requireMention: false,

@@ -1347,7 +1347,7 @@ export function createInboundClaimHandler({ config, execute = callControlPlane, 
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
-    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.whatsappChannelIds.has(channelId)) return undefined;
     const text = event.bodyForAgent || event.body || event.content || '';
     const command = parseWhatsAppCommand(text, { hasThread: Boolean(event.threadId) });
@@ -1395,7 +1395,7 @@ export function createOwnerRezClaimHandler({ config, execute = callControlPlane,
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
-    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.ownerrezChannelIds.has(channelId)) return undefined;
     const command = parseOwnerRezConfirmCommand(event.bodyForAgent || event.body || event.content || '');
     if (!command) return undefined;
@@ -1443,7 +1443,7 @@ export function createMetaDmClaimHandler({ config, execute = callControlPlane, l
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
-    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.socialChannelIds.has(channelId)) return undefined;
     const command = parseMetaDmCommand(event.bodyForAgent || event.body || event.content || '');
     if (!command) return undefined;
@@ -1484,7 +1484,7 @@ export function createEmailClaimHandler({ config, execute = callControlPlane, lo
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
-    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.emailChannelIds.has(channelId)) return undefined;
     const command = parseEmailCommand(event.bodyForAgent || event.body || event.content || '', {
       hasThread: Boolean(event.threadId),
@@ -1539,7 +1539,7 @@ export function createMarketingConfirmClaimHandler({ config, execute = callContr
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
-    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.socialChannelIds.has(channelId)) return undefined;
     const command = parseMarketingConfirmCommand(event.bodyForAgent || event.body || event.content || '');
     if (!command) return undefined;
@@ -1580,7 +1580,7 @@ export function createManualReviewClaimHandler({ config, resolve = resolveManual
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
-    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.controlledChannelIds.has(channelId)) return undefined;
     const command = parseManualReviewCommand(event.bodyForAgent || event.body || event.content || '');
     if (!command) return undefined;
@@ -1611,7 +1611,7 @@ export function createReceiptConfirmClaimHandler({ config, execute = callControl
   return async (event, ctx) => {
     if (event?.channel !== 'slack') return undefined;
     if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
-    const channelId = String(event.conversationId || ctx?.conversationId || '');
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
     if (!config.ownerExpenseChannelIds.has(channelId)) return undefined;
     const command = parseReceiptConfirmCommand(event.bodyForAgent || event.body || event.content || '');
     if (!command) return undefined;
