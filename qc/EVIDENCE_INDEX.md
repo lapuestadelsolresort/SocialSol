@@ -146,3 +146,25 @@ Raw artifacts live in `~/qc-evidence/<CHECK-ID>/` (dir 700, files 600). Never co
 | E-QC7B-02 | a728f044d223977bb4d4c00c53af4c4655108a44984eb4b6279cf7dcdb7eec3e | `QC7/E-QC7B-02-fixture-battery.txt` — 35/35 FIXTURE battery (core 27 + e2e-anniv 7 + e2e-smoke 1): eligibility matrix, context matrix, consent battery A1-A12 incl F-047 non-extension, e2e cron run + same-day idempotency, bare-!batch probe; driver at E-QC7B-02-driver.js (e6dccbe5…), results JSONL (2bdcb8b7…) |
 | E-QC7B-03 | 655953dfc67bdbc6a6a5551bef9699729a8693bb7c9cff6f16893059349f4555 | `QC7/E-QC7B-03-suites.txt` — node --test 126/126 across 12 regina suites at the SHA (context, extractors, format, r6 anniversary/batch/eligibility/loader, reconcile pass1/pass2, similarity, thread-lookup, dossier-context) |
 | E-QC7B-04 | 9a48633300631ce317eb2d99f1cb4d931db519073bc19495f2ad889e4e8fc452 | `QC7/E-QC7B-04-boundary.txt` — QC-7 boundary record: pre-flight (100% qc/**, secrets pass, §4.1 clean), agent-run push (no classifier block), PR #76, CI verify 1m7s, merge 12b99ae, ancestry + incoming-files proofs, post-ff clean + code-diff-0 + deploy record unchanged @ 2983ed0 |
+| E-FIX1-01 | 123f16c240698cd2… | Convergence baseline: render-vs-installed diff status (8 DIFFERS/2 symlinks/3 missing/2 no-template), loaded set, six-legacy state incl. explicit enabled overrides, last exits | ~/qc-evidence/FIX1/01-convergence-baseline.txt |
+| E-FIX1-02 | de0b9023db196d2f… | Full diffs of the 8 divergent plists (rendered vs installed) incl. channel-binding values | ~/qc-evidence/FIX1/02-differs-diffs.txt |
+| E-FIX1-03 | c09475020fc69437… | check:stack exit 0 on fix/service-layer-bundle | ~/qc-evidence/FIX1/03-check-stack.log |
+| E-FIX1-04 | 4de976a5a278c8df… | Converge plan preview vs live host: 42 actions, 0 errors/strays | ~/qc-evidence/FIX1/04-converge-plan-preview.json |
+| E-FIX1-05 | 0825f5947365f098… | policy.json edit #1 (housekeeper + qc-scratch), shas 32c2bdfe→e46d2dbd, pre-change copy | ~/qc-evidence/FIX1/05-policy-change.txt + policy.json.pre-qcfs1-20260817 |
+| E-FIX1-06 | a13106d80d6d1939… | openclaw render/validate/apply ×2 (stale-patch first attempt recorded + redo), applied-channel verification, gateway reload | ~/qc-evidence/FIX1/06-openclaw-apply.txt |
+| E-FIX1-07 | 63c26bf4494056fd… | resort-backup.json media_offline attestation stanza, shas + pre-change copy | ~/qc-evidence/FIX1/07-resort-backup-config.txt |
+| E-FIX1-08 | 8c364381eb60a681… | release:deploy #1 full log (8/9, health gate on pre-existing failure) | ~/qc-evidence/FIX1/08-release-deploy.log |
+| E-FIX1-09 | c1baeef6fefef1b8… | Post-converge verification: legacy absent+disabled, new jobs loaded, media pair regular, services:check drift-free | ~/qc-evidence/FIX1/09-post-converge-verify.txt |
+| E-FIX1-10 | 9ce9bf32449ca6e0… | F-035(c) cron retirement: disable + gateway/disk verification + pre-change jobs.json | ~/qc-evidence/FIX1/10-cron-retire.txt + jobs.json.pre-qcfs1 |
+| E-FIX1-11 | bc814cac55b3bbe8… | Deployment record #1 (failed at workflow_health only) | ~/qc-evidence/FIX1/11-deploy-record-1.json |
+| E-FIX1-12 | 153a3a13b95ab56d… | Installer report: 42 executed actions, 24 restarts, zero strays | ~/qc-evidence/FIX1/12-install-report.json |
+| E-FIX1-13 | 78ba57bf43f9ccdd… | release:deploy #2 log (blocked by npm-ci race → F-053) | ~/qc-evidence/FIX1/13-release-deploy-2.log |
+| E-FIX1-14 | 6c3764932aa6fce2… | policy.json edit #2 (prospector-paulina into write_notifications), shas incl. detection of the out-of-band bb067418 state | ~/qc-evidence/FIX1/14-policy-change-2.txt + policy.json.pre-qcfs1b |
+| E-FIX1-15 | e250d96a5ce1f95e… | Claim-outage diagnosis: last-claim timeline, live differential (08:44 reservation claim), session-transcript audits (guard denials, Sol hazards, paloma sweep) | ~/qc-evidence/FIX1/15-claim-diagnosis.txt |
+| E-FIX1-16 | c5ffb8b87c892ee9… | check:stack exit 0 on fix/claim-channel-normalization (PR #78) | ~/qc-evidence/FIX1/16-check-stack-pr78.log |
+| E-FIX1-17 | 57e1bff2a7a858a0… | PR #78 gateway apply: business-intel allow-pinned, gateway restart OK | ~/qc-evidence/FIX1/17-gateway-fix-apply.txt |
+| E-FIX1-18 | 08c5f58f435f5e1b… | check:stack exit 0 on fix/claim-command-unwrap (PR #79; secret scanner caught real Slack id in first fixture draft — sanitized) | ~/qc-evidence/FIX1/18-check-stack-pr79.log |
+| E-FIX1-19 | 82845460ce9602db… | Owner-directed terminal review resolution: reviewer check, endpoint response, row + effect verification, health gate exit 0 | ~/qc-evidence/FIX1/19-review-resolution.txt |
+| E-FIX1-20 | 55ad89c5d85f22a5… | release:deploy #3 log — completed 11/11 @ 0af5583 | ~/qc-evidence/FIX1/20-release-deploy-3.log |
+| E-FIX1-21 | (git) | PRs #77 56c2763→b7b0b07, #78 →6dd44d2, #79 →0af5583; CI verify runs 1m5s/1m13s/1m11s; owner-run merges | github.com/lapuestadelsolresort/SocialSol PRs 77-79 |
+| E-FIX1-22 | (runtime) | job-status.json entries for the five verification runs; tracker-liveness state file with warning/failure split | ~/.openclaw/SocialSol/memory/job-status.json (runtime, not copied) |

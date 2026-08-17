@@ -264,6 +264,61 @@ edit that trips the content gate, then a post-edit suppression before the schedu
 email per override row; campaign not paused; 5 edited drafts ever, all terminal; not fired) — the
 compensating context supporting P2.
 
+## D-016 — Fix session #1 start-of-session answers (F-031/F-032 residuals + channel bindings + D-009 channel) — RECORDED 2026-08-17
+
+**Owner (2026-08-17, in-session, fix session #1):**
+
+- **F-031(i) — pre-rotation backup key ESCROWED off-host NOW.** Owner ran the pbcopy
+  runbook (separate Terminal, never through the agent session) and stored the
+  pre-rotation passphrase in their off-host password manager. The archive half of the
+  F-031 escrow gap closes owner-side; the escrow-retrieval drill (D-006 window) and
+  optional archive re-encrypt remain the named closure steps.
+- **F-031(ii) — current backup passphrase confirmed stored off-host (password manager).**
+  Post-rotation artifacts are no longer single-homed.
+- **F-032(d) — warmup state: ACCEPTED LOSS + RE-RAMP** per D-006's explicit option.
+  Accepted-risk row; no backup producer built for warmup.
+- **F-032(e) — media originals: offline copy ATTESTED to exist** (owner-maintained).
+  Consequence: the checksum-verification control lands with this session's manifest
+  work (media-backup-verify job); first full verify runs when the owner supplies the
+  mounted copy (drill session at the latest).
+- **squarespace-report bizevent notices → `business-intel`** (policy channel). The
+  installed plist's binding to the reengager-regina channel ID is dispositioned as a
+  hand-install error, corrected by the converged install this session.
+- **squarespace-report housekeeping notices → owner-designated `#housekeeper` channel**
+  (ID supplied in-session; registered in the runtime channel policy as `housekeeper`
+  via the sanctioned config path; renderer follows the policy name). Neither the
+  previously installed out-of-policy ID nor `receipts-housekeeper` is the intended
+  destination.
+- **D-009 #qc-scratch channel CREATED by owner** (ID supplied in-session; bot account
+  invited). Channel-policy entry lands via the sanctioned config path this session.
+
+## D-017 — Claim-interception outage: scope, channels, and resolution transport (fix session #1) — RECORDED 2026-08-17
+
+**Owner (2026-08-17, in-session, fix session #1):**
+
+- **Review-resolution channels — BOTH options:** add `prospector-paulina` to
+  `write_notifications.channel_ids` (immediate unblock; server reads policy fresh)
+  AND make `business-intel` plugin-bound so the configured fallback is reachable
+  (renderer change: write_notifications channels render workflow-only — PR #78).
+- **Scope extension AUTHORIZED:** the claim-handler fixes (channel-id prefix
+  normalization PR #78; metadata-wrap command parsing PR #79) added to today's
+  BUSINESS release-path work — `!wa` had been failing closed since 2026-08-15 and
+  the outage blocked resolving the review that gated the deploy. Both PRs
+  agent-run except merges (classifier block → owner-run merges, precedent
+  QC3B-13 fallback).
+- **Owner-directed terminal review resolution AUTHORIZED:** after five failed
+  Slack attempts (F-051 layers, ending at gateway event-coalescing), the owner
+  authorized resolving review 3ce3ad0f… via the server's resolve endpoint
+  (control-plane bearer token; same atomic path + audit event;
+  resolved_by = owner's Slack id; context = business-intel + the slack command
+  entrypoint label as transport claim). Recorded honestly as
+  terminal-transport-under-owner-direction; the Slack path remains F-051/F-052
+  closure work.
+- **Out-of-band policy edit ATTRIBUTED to the owner:** the 07:05–08:29 hand edit
+  of policy.json (write_notifications gaining business-intel) was the owner
+  troubleshooting; recorded (F-055), content superseded by this decision's
+  channel list.
+
 ## D-015 — F-047 severity + QC-7 phase boundary — RECORDED 2026-08-16
 
 **Owner (2026-08-16, in-session, QC-7b session 15):**
