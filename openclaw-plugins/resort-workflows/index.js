@@ -2327,13 +2327,26 @@ export function formatHelpReply(payload) {
   lines.push('*Available in every controlled channel:*');
   lines.push(...commandBullets(GLOBAL_COMMANDS));
   lines.push('');
-  lines.push('*Workflows this channel can run:*');
-  for (const definition of definitions) {
+  // Two groups (F-062, D-024): what a person can ask for here, and what runs
+  // on its own and is listed because the channel holds the capability. The
+  // generated per-surface documents carry only the surface's own workflows;
+  // this list is capability-scoped runtime truth, and without the split an
+  // operator reading both had no way to know why they disagree.
+  const askable = definitions.filter(definition => definition.autonomous !== true);
+  const automatic = definitions.filter(definition => definition.autonomous === true);
+  const bullet = definition => {
     const state = workflowExecutionState(definition, payload);
-    const autonomous = definition.autonomous && state === 'live' ? ' · runs on its own' : '';
-    lines.push(`  • \`${definition.name}\` — ${STATE_LABELS[state]}${autonomous}`);
+    return `  • \`${definition.name}\` — ${STATE_LABELS[state]}`;
+  };
+  lines.push('*Workflows you can ask for in this channel:*');
+  for (const definition of askable) lines.push(bullet(definition));
+  if (!askable.length) lines.push('  • none registered for this channel\'s capabilities');
+  if (automatic.length) {
+    lines.push('');
+    lines.push('*Workflows that run on their own (webhooks, schedules, armed policy):*');
+    for (const definition of automatic) lines.push(bullet(definition));
+    lines.push('  _Listed because this channel holds the capability — nothing starts them from a message here._');
   }
-  if (!definitions.length) lines.push('  • none registered for this channel\'s capabilities');
   lines.push('');
   lines.push(`Everything else is conversational: ask, and it runs through \`resort_workflow\`.${
     surface ? ` Full reference: \`${surface.doc}\`.` : ''

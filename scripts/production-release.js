@@ -303,6 +303,8 @@ function policyFingerprintSummary() {
     const result = checkFingerprint();
     return {
       status: result.status,
+      agreement: result.agreement?.status || null,
+      agreementViolations: result.agreement?.violations?.length ? result.agreement.violations : undefined,
       currentSha: result.current?.sha256?.slice(0, 16) || null,
       recordedSha: result.recorded?.sha256?.slice(0, 16) || null,
       recordedAt: result.recorded?.recorded_at || null,

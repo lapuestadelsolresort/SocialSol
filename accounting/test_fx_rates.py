@@ -1,19 +1,24 @@
 import sys
 import unittest
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fx_rates import _banxico_token, _fetch_exchangerate_api, apply_transaction_fx  # noqa: E402
+import fx_rates  # noqa: E402
+from fx_rates import _banxico_token, apply_transaction_fx  # noqa: E402
 
 
 class HistoricalFxSafetyTests(unittest.TestCase):
-    def test_latest_rate_endpoint_is_never_used_for_a_historical_date(self):
-        with patch('urllib.request.urlopen') as urlopen:
-            self.assertIsNone(_fetch_exchangerate_api(date.today() - timedelta(days=1)))
-        urlopen.assert_not_called()
+    def test_no_spot_rate_source_exists(self):
+        # F-037: the unreachable exchangerate-api helper was dead code and is
+        # deleted — the module's only rate sources are the local cache and
+        # Banxico FIX, and unavailable rates fail closed rather than falling
+        # back to an intraday spot quote.
+        self.assertFalse(hasattr(fx_rates, '_fetch_exchangerate_api'))
+        source = Path(fx_rates.__file__).read_text()
+        self.assertNotIn('exchangerate-api', source)
 
     def test_exact_kapital_conversion_does_not_use_banxico_fix(self):
         transaction = {

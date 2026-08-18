@@ -155,6 +155,10 @@ const observeDefinition = {
   version: 4,
   capability: 'email.read',
   mutates: false,
+  // The worker system-queues one observe run per inbound email event
+  // (queueEmailEvents), so the policy's autonomous_workflows grant is
+  // load-bearing — this declares that design registry-side (F-024).
+  autonomous: true,
   notificationChannelName: 'prospector-paulina',
   steps: [
     {

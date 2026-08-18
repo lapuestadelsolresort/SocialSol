@@ -1894,7 +1894,7 @@ test('help renders live, shadowed, read-only and quarantined states from one pay
   assert.match(text, /Paid Meta, social publishing, and Meta DMs/);
   // live_workflows exactly: the two named, and nothing else mutating
   assert.match(text, /`marketing\.change\.confirm` — live/);
-  assert.match(text, /`meta\.campaign\.autonomous` — live · runs on its own/);
+  assert.match(text, /`meta\.campaign\.autonomous` — live/);
   assert.match(text, /`meta\.audience\.sync` — shadow — simulated, nothing reaches the provider/);
   assert.match(text, /`marketing\.change\.propose` — read-only/);
   assert.match(text, /`meta\.dm\.reply` — quarantined — refused/);
@@ -1923,6 +1923,44 @@ test('help states the live set exactly, in both directions', () => {
     if (definition.name === 'meta.dm.reply') { assert.equal(state, 'quarantined'); continue; }
     if (definition.mutates === false) { assert.equal(state, 'read'); continue; }
     assert.equal(state === 'live', live.includes(definition.name), definition.name);
+  }
+});
+
+// F-062 (D-024): the list is grouped by nature — what a person can ask for
+// here vs what runs on its own — and the grouping is presentation only: the
+// same workflows appear, with the same states, as before the split.
+test('help groups askable and automatic workflows without changing rows or states', () => {
+  const text = formatHelpReply(HELP_PAYLOAD);
+  const askHeading = text.indexOf('*Workflows you can ask for in this channel:*');
+  const autoHeading = text.indexOf('*Workflows that run on their own (webhooks, schedules, armed policy):*');
+  assert.ok(askHeading >= 0, 'askable heading present');
+  assert.ok(autoHeading > askHeading, 'automatic heading follows the askable group');
+  assert.match(text, /_Listed because this channel holds the capability — nothing starts them from a message here\._/);
+
+  const askSection = text.slice(askHeading, autoHeading);
+  const autoSection = text.slice(autoHeading);
+  for (const name of ['marketing.change.confirm', 'marketing.change.propose', 'meta.dm.reply']) {
+    assert.ok(askSection.includes(`\`${name}\``), `${name} in the askable group`);
+  }
+  for (const name of ['meta.campaign.autonomous', 'meta.audience.sync']) {
+    assert.ok(autoSection.includes(`\`${name}\``), `${name} in the automatic group`);
+  }
+
+  // Presentation-only: every channel-capability definition renders exactly
+  // once, with exactly the state workflowExecutionState reports.
+  const rows = new Map([...text.matchAll(/ {2}• `([^`]+)` — (.+)$/gm)]
+    .map(match => [match[1], match[2]]));
+  const expected = HELP_PAYLOAD.definitions
+    .filter(definition => HELP_PAYLOAD.channel.capabilities.includes(definition.capability));
+  assert.equal(rows.size, expected.length, 'row count equals capability-scoped definitions');
+  const labels = {
+    live: 'live',
+    shadowed: 'shadow — simulated, nothing reaches the provider',
+    read: 'read-only',
+    quarantined: 'quarantined — refused',
+  };
+  for (const definition of expected) {
+    assert.equal(rows.get(definition.name), labels[workflowExecutionState(definition, HELP_PAYLOAD)], definition.name);
   }
 });
 

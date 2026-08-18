@@ -196,7 +196,7 @@ real or is shadowed is runtime state, not repo state: ask `!help` in the channel
 | --- | --- | --- | --- |
 | `email.activity.read` | `email.read` | read-only | agent tool |
 | `email.message.classify` | `email.send` | read-only | `!email classify` |
-| `email.message.observe` | `email.read` | read-only | agent tool |
+| `email.message.observe` | `email.read` | read-only · autonomous | agent tool |
 | `email.reply.confirm` | `email.send` | mutates | `!email confirm` or policy-armed |
 | `email.reply.propose` | `email.send` | read-only | `!email reply` |
 | `paulina.daily` | `paulina.send` | mutates · autonomous | agent tool |

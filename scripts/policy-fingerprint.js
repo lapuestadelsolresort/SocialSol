@@ -81,10 +81,40 @@ function writeRecord(entry, file = recordPath()) {
   fs.chmodSync(file, 0o600);
 }
 
+/**
+ * Policy↔registry autonomy agreement (F-024), computed lazily so importing
+ * this module never drags the workflow registry (and with it the CRM stack)
+ * into processes that only need the hash comparison.
+ *
+ * @returns {{status: 'ok'|'violations'|'unavailable', violations: string[], error?: string}}
+ */
+function agreementSummary(policy) {
+  try {
+    // eslint-disable-next-line global-require
+    const { policyRegistryAgreementViolations } = require('../crm/lib/policy-registry-agreement');
+    // eslint-disable-next-line global-require
+    const { listDefinitions } = require('../crm/workflows/registry');
+    const violations = policyRegistryAgreementViolations(policy, listDefinitions());
+    return { status: violations.length ? 'violations' : 'ok', violations };
+  } catch (error) {
+    return { status: 'unavailable', violations: [], error: String(error.message).slice(0, 300) };
+  }
+}
+
 function recordFingerprint({ note = null, file = policyPath(), target = recordPath() } = {}) {
   // Refuse to bless a policy the loader would reject — a fingerprint of an
   // invalid file would make the next check pass on something that cannot run.
-  validatePolicy(JSON.parse(fs.readFileSync(file, 'utf8')));
+  // The same bar applies to autonomy grants the registry does not account
+  // for: a recorded fingerprint is the statement that somebody meant to
+  // install exactly this policy, and an unaccounted grant is never that.
+  const parsed = validatePolicy(JSON.parse(fs.readFileSync(file, 'utf8')));
+  const agreement = agreementSummary(parsed);
+  if (agreement.status !== 'ok') {
+    const detail = agreement.status === 'violations'
+      ? agreement.violations.join('; ')
+      : `agreement check unavailable: ${agreement.error}`;
+    throw new Error(`refusing to record a fingerprint — ${detail}`);
+  }
   const entry = {
     ...fingerprint(file),
     policy_path: file,
@@ -106,12 +136,19 @@ function checkFingerprint({ file = policyPath(), target = recordPath() } = {}) {
     if (error.code !== 'ENOENT') throw error;
     return { status: 'missing_policy', current: null, recorded: readRecord(target) };
   }
+  let agreement;
+  try {
+    agreement = agreementSummary(JSON.parse(fs.readFileSync(file, 'utf8')));
+  } catch (error) {
+    agreement = { status: 'unavailable', violations: [], error: String(error.message).slice(0, 300) };
+  }
   const recorded = readRecord(target);
-  if (!recorded) return { status: 'unrecorded', current, recorded: null };
+  if (!recorded) return { status: 'unrecorded', current, recorded: null, agreement };
   return {
     status: recorded.sha256 === current.sha256 ? 'match' : 'drift',
     current,
     recorded,
+    agreement,
   };
 }
 
@@ -124,10 +161,13 @@ function main(argv) {
   }
   if (command === 'check' || command === 'show') {
     const result = checkFingerprint();
+    const violations = result.agreement?.status === 'violations' ? result.agreement.violations : [];
     const payload = {
-      ok: result.status === 'match',
+      ok: result.status === 'match' && !violations.length,
       action: command,
       status: result.status,
+      agreement: result.agreement?.status || 'unavailable',
+      agreement_violations: violations,
       current_sha256: result.current?.sha256 || null,
       recorded_sha256: result.recorded?.sha256 || null,
       recorded_at: result.recorded?.recorded_at || null,
@@ -135,6 +175,12 @@ function main(argv) {
     };
     console.log(JSON.stringify(payload, null, 2));
     if (command === 'show') return 0;
+    if (violations.length) {
+      for (const violation of violations) {
+        console.error(`policy-fingerprint: ${violation}`);
+      }
+      return 1;
+    }
     if (result.status === 'match') return 0;
     if (result.status === 'unrecorded') {
       console.error('policy-fingerprint: no fingerprint recorded — run `node scripts/policy-fingerprint.js record` after confirming the installed policy is the intended one');

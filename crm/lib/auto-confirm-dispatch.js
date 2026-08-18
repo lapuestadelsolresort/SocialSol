@@ -1,10 +1,9 @@
 'use strict';
 
 const { authorizationDecision, loadPolicy } = require('./channel-policy');
+const { AUTO_CONFIRM_TRIGGER, systemOriginAccounted } = require('./policy-registry-agreement');
 const { policySnapshot } = require('./workflow-execution-policy');
 const { startGraph } = require('./workflow-engine');
-
-const AUTO_CONFIRM_TRIGGER = 'auto_confirm_dispatch';
 
 // Auto-confirm arming is a runtime-policy decision: the confirm workflow must be
 // allowlisted in `autonomous_workflows`, the same authority layer every
@@ -35,6 +34,9 @@ async function dispatchAutoConfirm({
     context: { origin: 'system' },
   });
   if (!decision.allowed) return { dispatched: false, reason: decision.reason };
+  if (!systemOriginAccounted(confirmDefinition)) {
+    return { dispatched: false, reason: 'autonomy_not_registry_accounted' };
+  }
   if (operation !== null) {
     const allowedOperations = policy.autonomous_operations?.[confirmDefinition.name];
     if (!Array.isArray(allowedOperations) || !allowedOperations.includes(operation)) {

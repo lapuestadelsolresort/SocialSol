@@ -66,9 +66,6 @@
     "receipt.reconcile",
     "qbo.write"
   ],
-  "autonomous_operations": {
-    "marketing.change.confirm": ["campaign_activate"]
-  },
   "write_notifications": {
     "user_ids": ["REPLACE_WITH_JASON_SLACK_USER_ID", "REPLACE_WITH_SARAH_SLACK_USER_ID"],
     "channel_ids": []
