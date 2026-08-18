@@ -855,3 +855,37 @@ all three P1-path legs PASSED (QCF063-02).**
 - **F-064 opened (P3, monitor-only):** the SQLITE_BUSY review itself — first
   non-deploy-window occurrence of the F-054 contention class (1 failure vs
   181 clean paulina.daily runs that day; fail-safe worked as designed).
+
+## D-028 — QC-9 session authorization: live `!ownerrez confirm` leg — RECORDED 2026-08-18
+
+**Owner (2026-08-18, on the session's Authorizations line, session 27 / QC-9):**
+"please ensure that !ownerrez confirm leg has the session authorization, which I
+grant here" — BUSINESS-class authorization for QC-9's live OwnerRez
+confirmation leg, this session, this leg only. RO/FIXTURE core ran under the
+QC charter as usual.
+
+**Canary design (executor, per the D-026 pattern — addressing semantics
+verified RO before handoff):**
+
+- **Vehicle: `TagDefinitions_Post` then `TagDefinitions_Delete`** — a
+  guest-invisible, metadata-only pair with intrinsic cleanup (the delete IS
+  the reconciliation), exercising the full chain twice: model-tool propose →
+  immutable proposal + preflight snapshot → owner-typed exact
+  `!ownerrez confirm <id> <hash>` (the F-063 twin claim path live) →
+  same-user + hash + fresh-precondition gates → execute-once effect →
+  `created_entity` readback on round A and `deleted_entity` readback on
+  round B → reservations notification + ledger rows. Provider inventory
+  before: exactly 3 tag definitions (E-QC9-03); after cleanup it must be 3
+  again.
+- Preconditions verified RO this session: owner ∈ the 2-user
+  `ownerrez.write` allowlist (== write_notifications set); #reservations is
+  the only channel holding `ownerrez.write`; confirm workflow live and NOT
+  autonomous (D-019 standing); proposal expiry 15 min; D-026 quiet-moment
+  rule applies to the confirm paste; a provider 4xx/5xx or timeout on
+  execute fails closed (ambiguous → durable manual review + incident alert
+  — stop and reconcile with the executor before anything else).
+- **Status at recording: runbook handed to the owner; leg pending
+  owner-typed execution.** If it does not run this session, this
+  authorization is NOT carried forward — a fresh Authorizations-line grant
+  accompanies the session that runs it (D-026 consumed-by-discovery
+  precedent).
