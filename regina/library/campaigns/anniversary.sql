@@ -25,5 +25,9 @@ WHERE c.relationship_type = 'past_guest_stayed'
     WHERE s.contact_id = c.id
       AND oc.campaign_kind = 'reactivation_anniversary'
       AND s.created_at > date('now', '-300 days')
+      -- A row abandoned to a Resend rate limit was never delivered, so it must
+      -- not consume this year's anniversary. auto-send retries in-run first;
+      -- this keeps the contact selectable for a same-day re-run (F-050b).
+      AND NOT (s.status = 'cancelled' AND s.error = 'resend_rate_limit')
   )
 LIMIT :batch_size;

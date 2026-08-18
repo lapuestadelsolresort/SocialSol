@@ -30,7 +30,9 @@ WHERE c.has_private_feedback = 1
     INNER JOIN outreach_campaigns oc ON oc.id = s.campaign_id
     WHERE s.contact_id = c.id
       AND oc.campaign_kind = 'reactivation_feedback_closure'
-      AND ( s.status IN ('sent', 'rejected', 'drafted')
+      -- 'ambiguous' (provider may have accepted the send) and 'approved'
+      -- (queued, not yet dispatched) also block re-selection — F-050.
+      AND ( s.status IN ('sent', 'rejected', 'drafted', 'ambiguous', 'approved')
             OR (s.status = 'deferred' AND s.defer_until > date('now')) )
   )
 ORDER BY c.last_stay_date DESC NULLS LAST

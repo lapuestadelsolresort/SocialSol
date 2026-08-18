@@ -3,6 +3,10 @@
 //
 // regina/scripts/sent.js — handles `!sent` and `<edited text> + !sent`.
 //
+// TRANSPORT: operator terminal only. No Slack dispatch path invokes this
+// script — a `!sent` typed in a draft thread reaches no machine (F-048).
+// Run it from a shell with --slack-thread-ts. It has no send capability.
+//
 // Looks up the active drafted row by Slack thread_ts. Computes edit_distance.
 // Updates outreach_sends + voice_drafts_log (closes R3 feedback loop).
 // Replies in the thread with the ack.

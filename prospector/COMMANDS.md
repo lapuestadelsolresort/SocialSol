@@ -127,13 +127,14 @@ In the original draft thread:
 !email classify <email-event-id> hot|not_interested|ambiguous
 ```
 
-The reply command records an immutable, non-expiring proposal. When
-`email.reply.confirm` is allowlisted in the runtime policy's
-`autonomous_workflows` (auto-send armed, the production default per D-001),
-the proposal is dispatched immediately and the reply reports the verified
-send — no confirm command is needed. When auto-send is not armed, the exact
+The reply command records an immutable, non-expiring proposal. **The standing
+rule is draft-and-approve (D-019)**: `email.reply.confirm` is deliberately NOT
+allowlisted in the runtime policy's `autonomous_workflows`, so the exact
 confirm command must be posted by the same authorized Slack user anywhere in
-the same channel. In both modes Gmail acceptance and Sent readback must both
+the same channel. Allowlisting it arms auto-send — the proposal dispatches
+immediately and the reply reports the verified send with no confirm command —
+but that is an owner-initiated change through the D-019 arming procedure, not
+the production default. In both modes Gmail acceptance and Sent readback must both
 succeed before the workflow reports the message sent. Ordinary Slack replies
 do not send email. `!approve`, `!edit`, and `!reject` belong only to unsent
 outbound-draft review; they are never email conversation reply commands.

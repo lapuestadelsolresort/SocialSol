@@ -3,6 +3,10 @@
 //
 // regina/scripts/skip.js — handles `!skip [reason]`.
 //
+// TRANSPORT: operator terminal only. No Slack dispatch path invokes this
+// script — a `!skip` typed in a draft thread reaches no machine (F-048).
+// Run it from a shell with --slack-thread-ts. It has no send capability.
+//
 // Marks the draft rejected. Writes voice_drafts_log.outcome='discarded'.
 // Reason is the free text after `!skip`; if empty, stored as 'unspecified'.
 

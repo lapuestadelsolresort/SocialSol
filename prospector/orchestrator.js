@@ -15,9 +15,11 @@
  *      c. Build unsubscribe artifacts (HMAC token + List-Unsubscribe headers),
  *         render HTML body with the canonical compliance footer.
  *      d. Run evaluateCompliance(). On fail:
- *           - If isEditOverride: log compliance_failures with
- *             source='send_time_override', send anyway (skip pause matrix).
- *           - Else: log with source='send_time', cancel row, apply 3.1b pause
+ *           - If isEditOverride AND every failure is a content item (6, 7):
+ *             log compliance_failures with source='send_time_override', send
+ *             anyway (skip pause matrix).
+ *           - Else (incl. an override whose gate failed on a consent item
+ *             1-5): log with source='send_time', cancel row, apply 3.1b pause
  *             matrix. Continue to next row.
  *      e. POST to Resend.
  *           - 200: write resend_email_id, status='sent', sent_at=now();
@@ -64,6 +66,13 @@ const RESEND_SECRET_PATH = secretPath('resend.json');
 const HEALTHCHECKS_PATH = secretPath('healthchecks.json');
 
 const DRY_RUN = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
+
+// Compliance items 1-5 are consent and legal hard stops: suppression list,
+// do_not_contact, weekly cap, unsubscribe-token validity, postal address.
+// They always enforce at send time. The edit-override carve-out below is
+// scoped to the CONTENT items (6 = why-contacting disclosure, 7 = banned
+// phrase), which is what a human rewrite actually trips (F-047).
+const CONSENT_ITEMS = [1, 2, 3, 4, 5];
 
 function log(...args) {
   console.log('[orchestrator]', ...args);
@@ -267,7 +276,7 @@ async function processSend(db, config, send, contact, campaign) {
     SELECT 1 FROM compliance_failures WHERE outreach_send_id = ${sendId} AND source = 'edit_override' LIMIT 1
   `);
   const isEditOverride = overrides.length > 0;
-  if (isEditOverride) log(`  #${sendId} has edit_override marker — gate failures will be advisory`);
+  if (isEditOverride) log(`  #${sendId} has edit_override marker — content failures (items 6-7) will be advisory`);
 
   // c. Build unsubscribe artifacts + render body.
   unsubscribeLib.setSecret(loadUnsubSecret());
@@ -292,14 +301,24 @@ async function processSend(db, config, send, contact, campaign) {
   log(`  gate: pass=${gate.pass} pause=${gate.pauseCampaign} failures=[${gate.failures.join(',')}]`);
 
   if (!gate.pass) {
-    if (isEditOverride) {
+    // The carve-out covers CONTENT failures only. If any consent item (1-5)
+    // failed, the override does not apply and the normal cancel + pause path
+    // runs — a suppressed or do_not_contact address is never sent to, no
+    // matter what a human edited earlier (F-047).
+    const consentFailures = CONSENT_ITEMS.filter((i) => gate.items[i] === false);
+    const carveOutApplies = isEditOverride && consentFailures.length === 0;
+
+    if (carveOutApplies) {
       // Carve-out: log with source='send_time_override', send anyway, skip pause matrix.
       await recordComplianceFailure(db, config, {
         contactId, outreachSendId: sendId, contactEmail, campaignName,
         source: 'send_time_override',
       }, { ...gate, pauseCampaign: false }); // override pauseCampaign to false — carve-out
-      log(`  #${sendId} edit-override carve-out applied: gate fails advisory only, sending anyway`);
+      log(`  #${sendId} edit-override carve-out applied: content fails advisory only, sending anyway`);
     } else {
+      if (isEditOverride) {
+        warn(`  #${sendId} edit_override present but consent items failed (${consentFailures.map((i) => `item_${i}`).join(',')}) — carve-out NOT applied, cancelling`);
+      }
       // Normal-path: full pause matrix, cancel row.
       await recordComplianceFailure(db, config, {
         contactId, outreachSendId: sendId, contactEmail, campaignName,
@@ -558,4 +577,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { main, acquireLock, releaseLock };
+module.exports = { main, acquireLock, releaseLock, processSend, CONSENT_ITEMS };

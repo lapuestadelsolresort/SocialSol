@@ -45,6 +45,59 @@ function loadProspectorConfig() {
   return JSON.parse(fs.readFileSync(PROSPECTOR_CONFIG_PATH, 'utf8'));
 }
 
+// ─── Resend rate-limit retry (F-050b) ───────────────────────────────────────
+
+const RATE_LIMIT_MAX_RETRIES = 2;
+const RATE_LIMIT_MAX_WAIT_MS = 10_000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * How long to wait before re-POSTing after a 429. Honors Resend's
+ * `retry-after` (seconds) when present, else backs off linearly. Capped so a
+ * hostile header cannot stall the run.
+ */
+function rateLimitWaitMs(resp, attempt) {
+  const header = resp && typeof resp.headers?.get === 'function'
+    ? resp.headers.get('retry-after')
+    : null;
+  const headerSeconds = Number(header);
+  const fromHeader = Number.isFinite(headerSeconds) && headerSeconds > 0
+    ? headerSeconds * 1000
+    : null;
+  return Math.min(fromHeader || attempt * 1000, RATE_LIMIT_MAX_WAIT_MS);
+}
+
+/**
+ * POST, retrying only on 429. The caller's Idempotency-Key makes a retried
+ * request safe at the provider: Resend returns the original result rather
+ * than sending a second email. A throw propagates to the caller's
+ * network-error path unchanged.
+ *
+ * @returns {{resp: Response, body: object, retries: number}}
+ */
+async function postWithRateLimitRetry(request, options = {}) {
+  const {
+    fetchImpl = (...args) => fetch(...args),
+    sleepImpl = sleep,
+    maxRetries = RATE_LIMIT_MAX_RETRIES,
+    onRetry = null,
+  } = options;
+
+  let attempt = 0;
+  for (;;) {
+    const resp = await fetchImpl(request.url, request.init);
+    const body = await resp.json().catch(() => ({}));
+    if (resp.status !== 429 || attempt >= maxRetries) return { resp, body, retries: attempt };
+    attempt += 1;
+    const waitMs = rateLimitWaitMs(resp, attempt);
+    if (onRetry) onRetry(attempt, waitMs, maxRetries);
+    await sleepImpl(waitMs);
+  }
+}
+
 // ─── Subject line generation ────────────────────────────────────────────────
 //
 // Voice Service returns body-only. Generate a short, personal subject line
@@ -198,6 +251,7 @@ function renderHtmlBody(plainBody, physicalAddress, unsubUrl) {
 async function autoSend(db, params) {
   const {
     sendId, contact, dossier, draftText, campaignConfig, campaignId,
+    channelId = null,
     dryRun = false,
   } = params;
 
@@ -263,6 +317,8 @@ async function autoSend(db, params) {
     await recordComplianceFailure(db, pConfig, {
       contactId, outreachSendId: sendId, contactEmail, campaignName,
       source: 'send_time',
+      // Regina's own channel — the gate library defaults to Paulina's (F-049).
+      channelId,
     }, { ...gate, pauseCampaign: false }); // Don't pause Regina on gate fail — just skip this contact
     const errorTag = failureCodes.join(',');
     await db.query(sql`
@@ -293,17 +349,34 @@ async function autoSend(db, params) {
     },
   };
 
+  // Rate limits get retried in-run. For anniversary sends there is no useful
+  // "later batch": eligibility matches on the anniversary MM-DD, so a row
+  // abandoned today is not selectable again until next year (F-050b). The
+  // Idempotency-Key below is stable per send row, so a retried POST cannot
+  // produce a second email even if Resend accepted the first one.
   let resp;
+  let responseBody;
+  let rateLimitAttempt = 0;
   try {
-    resp = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'Idempotency-Key': `socialsol-outreach-${sendId}`,
+    const posted = await postWithRateLimitRetry({
+      url: 'https://api.resend.com/emails',
+      init: {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `socialsol-outreach-${sendId}`,
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
+    }, {
+      onRetry: (attempt, waitMs, max) => warn(
+        `  #${sendId} Resend 429 — retry ${attempt}/${max} in ${waitMs}ms (same Idempotency-Key)`,
+      ),
     });
+    resp = posted.resp;
+    responseBody = posted.body;
+    rateLimitAttempt = posted.retries;
   } catch (e) {
     warn(`  #${sendId} Resend network error: ${e.message}`);
     await db.query(sql`
@@ -312,10 +385,8 @@ async function autoSend(db, params) {
     return { ok: false, reason: 'resend_network_error', ambiguous: true };
   }
 
-  const responseBody = await resp.json().catch(() => ({}));
-
   if (resp.status === 429) {
-    warn(`  #${sendId} Resend 429 — cancelling this attempt so a later batch can retry safely`);
+    warn(`  #${sendId} Resend 429 after ${rateLimitAttempt} retries — cancelling; the row is excluded from the anniversary 300-day block so it stays selectable`);
     await db.query(sql`
       UPDATE outreach_sends
       SET status='cancelled', cancelled_at=datetime('now'), error='resend_rate_limit'
@@ -374,4 +445,13 @@ async function autoSend(db, params) {
   return { ok: true, resend_id: responseBody.id, subject };
 }
 
-module.exports = { autoSend, generateSubject, verifyEmail, renderHtmlBody };
+module.exports = {
+  autoSend,
+  generateSubject,
+  verifyEmail,
+  renderHtmlBody,
+  // Exported for tests:
+  postWithRateLimitRetry,
+  rateLimitWaitMs,
+  RATE_LIMIT_MAX_RETRIES,
+};

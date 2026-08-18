@@ -3,6 +3,10 @@
 //
 // regina/scripts/defer.js — handles `!defer N`.
 //
+// TRANSPORT: operator terminal only. No Slack dispatch path invokes this
+// script — a `!defer N` typed in a draft thread reaches no machine (F-048).
+// Run it from a shell with --slack-thread-ts. It has no send capability.
+//
 // Marks the draft deferred for N days; defer_until = now + N days.
 // voice_drafts_log.outcome stays 'pending' — the draft is still in flight.
 // The 14-day reminder + 3-strike auto-suppress in gmail-reconcile.js is what
