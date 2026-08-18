@@ -13,13 +13,18 @@
  *
  *   recordComplianceFailure(db, config, ctx, evaluation)
  *     The side-effecting wrapper. Writes one compliance_failures row per
- *     failed item, posts a Slack summary to #prospector-paulina, and (when
- *     evaluation.pauseCampaign is true) flips state.json to paused.
+ *     failed item, posts a Slack summary, and (when evaluation.pauseCampaign
+ *     is true) flips state.json to paused.
  *     The orchestrator (Step 3.3, replaces send.sh) calls this on hard fail.
  *     ctx.source defaults to 'send_time' per the spec §6 enum; orchestrator
  *     overrides to 'send_time_override' on the edit-override carve-out path
  *     (per step_3.3_spec.md §2.4 — gate fails on rows that already had an
- *     edit_override compliance_failures row are advisory, NOT pause-triggering).
+ *     edit_override compliance_failures row are advisory, NOT pause-triggering,
+ *     and only for content items 6-7 per F-047).
+ *     ctx.channelId names where the summary posts. Callers outside Paulina
+ *     (Regina's auto-send reuses this gate) MUST pass their own channel;
+ *     omitting it falls back to prospector/config.json, which is Paulina's
+ *     channel and would misroute the notice (F-049).
  *
  * The 7 items, mapped to their pause-on-fail semantics:
  *
@@ -385,6 +390,19 @@ function _writePauseState(reason) {
   fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2) + '\n');
 }
 
+/**
+ * Honest caption for the "not paused" case. The old text always claimed
+ * "item 7 only", which was wrong whenever a caller suppressed pausing while a
+ * consent item had actually failed — Regina always passes pauseCampaign:false,
+ * so an item_1 suppression fail was announced as a content nit (F-049).
+ */
+function describeNoPauseReason(evaluation) {
+  const items = (evaluation && evaluation.items) || {};
+  const pausingFailed = [1, 2, 3, 4, 5, 6].filter((i) => items[i] === false);
+  if (pausingFailed.length === 0) return 'item 7 only';
+  return `pause suppressed by caller; failed ${pausingFailed.map((i) => `item_${i}`).join(', ')}`;
+}
+
 async function recordComplianceFailure(db, config, ctx, evaluation) {
   const { contactId, outreachSendId, contactEmail, campaignName } = ctx;
   // source defaults to 'send_time' (Step 3.3 enum, spec §6). Callers that need
@@ -407,13 +425,15 @@ async function recordComplianceFailure(db, config, ctx, evaluation) {
     `);
   }
 
-  // Slack ping summary.
-  const channelId = _getChannelId();
+  // Slack ping summary — to the calling agent's channel, not always Paulina's.
+  const channelId = ctx.channelId || _getChannelId();
   if (channelId) {
     const lines = [
       `🛑 Compliance gate FAIL — ${contactEmail || `contact #${contactId}`} on \`${campaignName || 'unknown'}\``,
       `Failures: ${evaluation.failures.join(', ')}`,
-      evaluation.pauseCampaign ? `Campaign auto-paused. Use \`!resume\` to clear.` : `(item 7 only — campaign NOT paused.)`,
+      evaluation.pauseCampaign
+        ? `Campaign auto-paused. Use \`!resume\` to clear.`
+        : `(${describeNoPauseReason(evaluation)} — campaign NOT paused.)`,
     ];
     const post = _getSlackPost();
     try {

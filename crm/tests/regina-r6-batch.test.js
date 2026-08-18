@@ -92,14 +92,27 @@ test('resolveContactIds honors batchSize (LIMIT) over default_batch_size', async
 test('resolveContactIds uses contact_ids array when no SQL is present (smoke)', async () => {
   const db = await buildTestDb();
   try {
-    const loaded = loadCampaign('smoke');
-    // smoke.json carries [10059, 10100, 10104] — no SQL execution; truncated to batchSize.
+    // The mechanism: a strategy file with contact_ids and no eligibility SQL
+    // uses the static list directly, truncated to batchSize. Driven from a
+    // synthetic config — the shipped smoke.json deliberately carries no ids
+    // (F-050c), and this test is about the escape hatch, not that file.
+    const loaded = { config: { slug: 'smoke', contact_ids: [1, 2, 3] }, sqlText: null };
     const ids = await resolveContactIds(db, loaded, 2, '2026-05-07');
     assert.equal(ids.length, 2);
     assert.deepEqual(ids, [1, 2]);
   } finally {
     await db.dispose();
   }
+});
+
+test('the shipped smoke campaign carries no contact ids (F-050c)', async () => {
+  // `!batch` with no slug defaults to smoke, and the escape hatch skips the
+  // eligibility SQL entirely — no suppression or already-contacted filtering.
+  // Any id parked here would be dispatched to repeatedly.
+  const loaded = loadCampaign('smoke');
+  assert.ok(Array.isArray(loaded.config.contact_ids));
+  assert.equal(loaded.config.contact_ids.length, 0);
+  assert.equal(loaded.sqlText, null);
 });
 
 // ── findOrCreateCampaign: stable slug behavior ──────────────────────────

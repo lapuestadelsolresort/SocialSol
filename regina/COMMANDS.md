@@ -9,11 +9,26 @@ node regina/scripts/anniversary-cron.js --dry-run
 node regina/scripts/gmail-reconcile.js
 ```
 
-Manual draft threads support the recorded actions implemented by:
+Recorded actions on a manual draft — **operator terminal only**. These three
+scripts are run from a shell against a draft's Slack `thread_ts`; there is no
+Slack dispatch path, so typing `!sent` / `!skip` / `!defer` in a draft thread
+does nothing (F-048). They write to the DB and post a thread ack; they have no
+send capability.
 
-- `scripts/sent.js`
-- `scripts/skip.js`
-- `scripts/defer.js`
+```bash
+node regina/scripts/sent.js  --slack-thread-ts <ts> [--message '<edited text> !sent'] [--slack-user-id <id>]
+node regina/scripts/skip.js  --slack-thread-ts <ts> [--message '!skip']
+node regina/scripts/defer.js --slack-thread-ts <ts> --message '!defer <days>'
+```
+
+`--message` carries the operator text the script parses: `sent.js` measures
+edit distance against the draft, and `defer.js` reads the day count from a
+leading `!defer <N>` (1–365). `--slack-channel-id` defaults to
+`regina/config.json` `slack.channel_id`.
+
+In practice the loop closes without them: `gmail-reconcile.js` auto-marks
+manual email drafts from Gmail Sent evidence, and reminds on drafts still
+stuck after 14 days, auto-rejecting after three reminders.
 
 Email auto-send is disabled unless `auto_send.enabled` is explicitly `true`.
 Airbnb-thread-only and WhatsApp contacts always remain manual.

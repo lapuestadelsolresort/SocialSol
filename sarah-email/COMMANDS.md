@@ -31,12 +31,17 @@ Confirm an emitted proposal anywhere in the same email channel:
 ```
 
 `!email reply` records an immutable, non-expiring proposal. Whether it also
-sends depends on the runtime workflow policy: when `email.reply.confirm` is
-allowlisted in `autonomous_workflows` (auto-send armed, the production
-default per D-001), the proposal is handed to the confirm graph immediately
-and the reply reports the verified send — no confirmation command is needed.
-When auto-send is not armed, the same authorized Slack user must paste the
-exact emitted confirmation command anywhere in the same email channel. In
+sends depends on the runtime workflow policy. **The standing rule is
+draft-and-approve (D-019): a human writes and confirms every send, on both
+providers.** `email.reply.confirm` is deliberately NOT in
+`autonomous_workflows`, so the same authorized Slack user must paste the exact
+emitted confirmation command anywhere in the same email channel.
+
+The auto-send mechanism exists but is dormant and policy-gated: allowlisting
+`email.reply.confirm` in `autonomous_workflows` hands the proposal to the
+confirm graph immediately and the reply reports the verified send with no
+confirmation command. Arming is an owner-initiated decision through the D-019
+arming procedure — it is not the production default. In
 both modes the graph chooses Gmail or OwnerRez from the recorded inbound
 event, creates one durable provider effect, and requires exact provider
 readback before documenting the send in Slack. Plain Slack replies never

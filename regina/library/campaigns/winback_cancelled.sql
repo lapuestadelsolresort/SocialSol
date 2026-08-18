@@ -16,7 +16,9 @@ WHERE c.relationship_type = 'past_guest_cancelled'
     INNER JOIN outreach_campaigns oc ON oc.id = s.campaign_id
     WHERE s.contact_id = c.id
       AND oc.campaign_kind = 'reactivation_winback'
-      AND ( s.status IN ('sent', 'rejected', 'drafted')
+      -- 'ambiguous' (provider may have accepted the send) and 'approved'
+      -- (queued, not yet dispatched) also block re-selection — F-050.
+      AND ( s.status IN ('sent', 'rejected', 'drafted', 'ambiguous', 'approved')
             OR (s.status = 'deferred' AND s.defer_until > date('now')) )
   )
 LIMIT :batch_size;

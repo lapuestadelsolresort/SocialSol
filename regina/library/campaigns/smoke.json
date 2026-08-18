@@ -1,5 +1,5 @@
 {
-  "$comment": "Phase R5 smoke campaign — superseded in R6 by six real campaigns (anniversary, referral_mining, winback_cancelled, inquiry_conversion, vip, feedback_closure). Retained as the loader's escape-hatch reference: contact_ids array (no eligibility_sql_path) bypasses SQL and uses the static list. Useful for future smoke tests against new pipeline changes.",
+  "$comment": "Phase R5 smoke campaign — superseded in R6 by six real campaigns (anniversary, referral_mining, winback_cancelled, inquiry_conversion, vip, feedback_closure). Retained as the loader's escape-hatch reference: contact_ids array (no eligibility_sql_path) bypasses SQL and uses the static list. NOTE (F-050c): the list is deliberately EMPTY and must stay empty in Git. This campaign is `!batch`'s default slug, and the escape hatch skips the eligibility SQL entirely — no suppression/already-contacted filtering — so any id parked here would be dispatched to on a bare `!batch`, repeatedly. To run a smoke test, add the D-009 allowlisted test identity's contact id locally for that run only (jason@lapuestadelsolresort.com), then revert.",
   "slug": "smoke",
   "name": "regina_smoke",
   "campaign_kind": "ad_hoc",
@@ -9,6 +9,6 @@
   "language": "en",
   "description": "Synthetic smoke campaign for local pipeline verification.",
   "landing_page_url": "https://example.com/",
-  "contact_ids": [1, 2, 3],
+  "contact_ids": [],
   "prompt_context": "Write a short, friendly check-in using only verified context."
 }
