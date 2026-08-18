@@ -41,11 +41,17 @@ external-mutation step classes, so none of the 21 read workflows is in
 `live_workflows` and a literal reading would have hidden from `!help` exactly the
 workflows operators use most.
 
-**One new finding: F-062 (P3).** The social channel's policy entry grants 7
-capabilities including `crm.write`/`crm.read`, so `!help` truthfully lists five
-automatic sync/webhook workflows as things the channel "can run" — 19 rows where
-the generated document lists 12. Docs are surface-scoped repo truth, `!help` is
-capability-scoped runtime truth, and an operator cannot tell that from either.
+**One new finding: F-062 (P3), already dispositioned.** The social channel's
+policy entry grants 7 capabilities including `crm.write`/`crm.read`, so `!help`
+truthfully lists seven automatic sync/webhook/read workflows as things the
+channel "can run" — 19 rows where the generated document lists 12. Docs are
+surface-scoped repo truth, `!help` is capability-scoped runtime truth, and an
+operator cannot tell that from either. **D-024: fix by presentation (group the
+automatic ones under their own heading), not by narrowing the runtime capability
+lists** — the demonstrated problem is confusion, not reachable risk, and a policy
+narrowing would edit the highest-consequence file in the system to answer a
+least-privilege question nobody has raised. It gets its own session if ever
+wanted.
 
 ## Phase ledger — QC-0…QC-7 COMPLETE + fix sessions #1/#2(17)/#3(F-001)/#4(F-014)/#5(P2/P3 batch)/#6(F-058) COMPLETE (runtime baseline 15a41d6; prod main 15a41d6; policy sha 0dd75080 ARMED: marketing campaign_activate per-op only — unchanged this session, fingerprint still `match`)
 
@@ -83,9 +89,9 @@ recognizes the legacy embedded format.)*
    deterministic answer** instead of Sol improvising. Typing `!sent` / `!skip` /
    `!defer` in a Regina thread finally says "operator terminal only" and names
    the real script (F-048).
-4. **F-062 needs a call** (P3, cheap): either narrow the runtime channel
-   capability lists, or group automatic workflows under a "runs automatically,
-   not from here" heading in `!help`. Second option is cheaper and loses nothing.
+4. **F-062 is decided — no call needed** (D-024). `!help` gets a grouped list
+   (asked-for vs runs-automatically); runtime capability lists stay as they are.
+   It rides the P3 hygiene batch as the one code change in it.
 
 **Still open from the P2/P3 batch:**
 
@@ -157,10 +163,15 @@ the F-058 post-deploy sweep.
 ## Next
 
 **(1) The remaining P3 hygiene batch** — F-024, F-026, F-027, F-028, F-030,
-F-034, F-037, F-038, F-021, and now **F-062** — most of them one-liners (chmod,
-rm, a policy key removal, doc alignment). F-062 joins here: it is a `!help`
-presentation change or a narrowing of the runtime channel capability lists, and
-the owner picks which (the presentation change is cheaper and loses nothing).
+F-034, F-037, F-038, F-021, and **F-062** — most of them one-liners (chmod, rm, a
+policy key removal, doc alignment). **F-062 is the only code change in the
+batch** and its shape is already decided (D-024, Option A): group `!help`'s
+workflow list under two headings — workflows a person can ask for in this
+channel, and workflows that run automatically and appear only because the channel
+holds the capability — with a line saying so. Presentation only: no policy
+change, no capability change, and the states each workflow reports must not
+change. Re-verify with the F-058 both-directions live-set assertion (QCF058-03)
+still holding at the deployed SHA.
 
 **Then:** (2) QC-6c CANARY (D-004 first). (3) F-031 drill slot (D-006 window;
 F-013 gated on it). (4) **QC-8** — now opens *lighter*: F-051's live
@@ -186,10 +197,13 @@ Expected: clean `main` @ 15a41d6 (runtime baseline 15a41d648c48; newest deploy
 record 2026-08-18T02-44-26-838Z completed 11/11; policy sha 0dd75080 ARMED
 marketing-activate-only per D-020 — unchanged, standing state, and
 `node scripts/policy-fingerprint.js check` should print `match`). Then
-`cd ~/qc-worktree`, read qc/STATUS.md + D-023, and begin the P3 hygiene batch
+`cd ~/qc-worktree`, read qc/STATUS.md + D-024, and begin the P3 hygiene batch
 with its authorization stated on the Authorizations line (BUSINESS for the
-release path; the batch is doc/config hygiene plus one `!help` presentation
-change for F-062).
+release path; the batch is doc/config hygiene plus the one `!help` presentation
+change for F-062). Note the gateway reload: `!help` lives in the plugin, and
+`release:deploy` restarts only crm + worker, so the batch needs
+`/bin/launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway` after the deploy
+and a plugin-load check, exactly as this session did.
 
 Session-notes (classifier, session 21 / F-058): **no classifier blocks at all**
 — the push, PR create, merge, fast-forward, deploy, and the gateway kickstart

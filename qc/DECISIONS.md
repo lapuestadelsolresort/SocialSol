@@ -646,3 +646,32 @@ did not settle them):**
    therefore renders every workflow bound to the channel, marked with its true
    execution state — live / shadowed / read-only — and the live-marked set equals
    `live_workflows` exactly, which is the criterion actually being tested.
+
+## D-024 — F-062 disposition: `!help` presentation, not a policy narrowing — RECORDED 2026-08-17
+
+**Owner (2026-08-17, end of the F-058 session, after the finding was raised and
+both options were put to them):**
+
+- **OPTION A — change the display.** `!help` groups its workflow list under two
+  headings: the ones a person can ask for in that channel, and the ones that run
+  automatically (webhook- and schedule-driven) and are listed only because the
+  channel holds the capability. Wording to make the distinction explicit rather
+  than implied.
+- **Runtime channel capability lists are NOT narrowed.** The alternative —
+  removing `crm.write` / `crm.read` from the social channel's policy entry so the
+  channel genuinely cannot run those workflows — is **rejected for this batch**,
+  not rejected in principle. Rationale accepted: the demonstrated problem is
+  operator confusion, not reachable risk (P3), and Option A resolves the
+  confusion completely; a policy narrowing edits the highest-consequence file in
+  the system, requires the owner-run install plus fingerprint re-record, and
+  answers a least-privilege question nobody has raised. If it is ever wanted, it
+  belongs in its own session with a before/after check of what actually depends
+  on those capabilities — never bundled into a hygiene batch.
+- **Scope note:** the fix is presentation-only. No policy change, no capability
+  change, no change to what any channel is authorized to run. `!help` continues
+  to report the true live/shadow/read-only/quarantined state of every workflow it
+  lists; only the grouping and its explanatory line change.
+- **Closure:** F-062 closes when the grouped `!help` output is verified at the
+  deployed SHA against live policy — the same both-directions live-set assertion
+  used for F-058 (QCF058-03) must still hold, since the fix must not change which
+  workflows are reported or their states.
