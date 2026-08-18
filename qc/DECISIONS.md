@@ -559,3 +559,34 @@ recorded because they shape the deployed control):
   `qbo_push.QBOClient`, which already does env-aware secrets resolution +
   `.refresh.lock` flock + tmp/fsync/replace/chmod-600. This also removes
   writer #4 from F-036.
+
+## D-022 — P2/P3 batch session authorization + scope + F-048 disposition — RECORDED 2026-08-17
+
+**Owner (2026-08-17, start-of-session, P2/P3 batch session; asked because the
+session's Authorizations line was blank — D-020/D-021 precedent):**
+
+- **BUSINESS + OUTAGE AUTHORIZED — full release path.** The batch runs
+  agent-run end to end (fix branch → tests → PR create → CI verify → merge →
+  fast-forward of production main → `release:deploy` incl. crm/worker
+  restarts). Merges/ff owner-run via `!` commands if the permission
+  classifier blocks (QCFS2-01/QCFS3-01/QCFS4 precedent). Live-state preflight
+  + stated rollback/abort criteria still precede the deploy (plan §5).
+- **SCOPE: the batch MINUS F-058.** In scope: F-039, F-047, F-052 remainder,
+  F-053, F-054, F-055, F-056, F-057 doc residual, F-019 threshold, F-042,
+  F-043, F-046, F-048 (docs), F-049, F-050, F-032(c) residual, F-060.
+  **F-058 gets its own follow-on session** — it is a generation pipeline
+  (COMMANDS.md emitted from `/api/workflows/definitions`, regenerated in the
+  release path) plus a new Slack surface (`!help` + unknown-command
+  guidance) plus a marketing command reference; bundling it here would put a
+  docs-generation build and behavior fixes in one release.
+- **F-048 — CORRECT THE DOCS.** Regina's `!sent`/`!skip`/`!defer` are
+  operator-terminal-only; `regina/COMMANDS.md` + the three script headers are
+  corrected to say so rather than wiring a Slack dispatch path. Rationale
+  accepted: the compensating sweeps already close the loop in production
+  (gmail-reconcile pass-1 auto-marks from Gmail Sent evidence; pass-2 reminds
+  every 14d then auto-rejects after 3 — the May-era drafts were all actioned
+  that way), and a new interception path would inherit the F-051(iii)
+  coalescing caveat. No new Slack surface is built.
+- **D-004 still not answered** (the authorization question was answered on its
+  own). The explicit OUTAGE grant supplies this session's window; D-004
+  remains open for a standing answer (load-bearing at QC-6c and QC-10).
