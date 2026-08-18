@@ -742,3 +742,58 @@ models); (3) `workflow/policy.example.json`'s current half-armed shape (dead
 `autonomous_operations` entry without the `autonomous_workflows` membership it
 needs) is fixed to the D-019 un-armed default — completing the D-019 item-2
 example residual that the P2/P3 batch did not reach.
+
+## D-026 — F-051(iii) disposition + QC-8b live-canary authorization — RECORDED 2026-08-18
+
+**Owner (2026-08-18, start-of-session, QC-8b; asked because F-051(iii) was an
+explicitly flagged owner decision and the session's Authorizations line was
+blank):**
+
+1. **F-051(iii) gateway event-coalescing — OPERATOR GUIDANCE.** Accepted as a
+   documented operational constraint rather than pursuing an upstream OpenClaw
+   gateway change. The quiet-moment rule (type exact commands top-level,
+   unmentioned, in a quiet moment; if the bot does not acknowledge within ~30s
+   the command did NOT execute — check state before retyping any mutation
+   command) becomes durable operator documentation on the command surfaces
+   (COMMANDS.md prose + docs/commands pages) via a small docs fix-list item
+   (doc-only; batches per Amendment 3). F-051(iii) dispositions as
+   accepted-risk-with-guidance; the standing STATUS.md advisory converts to
+   the durable doc text. An upstream gateway fix remains available to a future
+   owner decision but nothing in QC blocks on it.
+2. **Owner-phone `!wa` live canary — AUTHORIZED (CANARY-class, this session,
+   this vehicle only).** Owner texts the resort WhatsApp number from their
+   personal phone (D-009 allowlisted test identity — genuine passive inbound,
+   zero guest exposure), then in a quiet moment types the `!wa` reply the
+   executor prepares. Purpose: the one LIVE mutation-class exact-command
+   ledger corroboration F-051 still needs, doubling as QC-8's live WhatsApp
+   positive leg. Terms: executor verifies addressing semantics RO and hands
+   the owner exact steps before anything is typed; the raw phone number never
+   enters Git (aliased per §4.1/D-009; raw only in `~/qc-evidence/`);
+   test-created contact/lead rows are flagged and reconciled per the session
+   cleanup plan; the send's recipient is the owner's own device.
+3. **F-052 live leg — cannot run this session** (verified RO at session start:
+   zero open manual reviews exist; all 6 historical reviews resolved). It
+   waits for the next genuine review; STATUS.md carries the verification
+   procedure. Recorded here so the deferral is an owner-seen fact, not an
+   executor omission.
+
+**Addendum — canary outcome, same session (2026-08-18):** the authorized
+canary's command leg COULD NOT COMPLETE and that failure is the session's
+finding: both owner-typed `!wa` attempts fell through to the channel agent
+with zero runs — root cause F-063 (in the deployed gateway, `inbound_claim`
+never dispatches for ordinary channel conversations; only surfaces with a
+`reply_dispatch` twin work, and `!wa` has none). Fail-closed held: nothing
+sent, zero effects, residue = the two marked inbound rows attached to the
+pre-existing test-identity lead. Consequences the owner should note:
+(a) item 1's quiet-moment guidance stands for the surfaces that work, but it
+CANNOT restore the twinless commands — until the F-063 fix deploys,
+`!wa`, `!meta confirm`, `!ownerrez confirm`, `!receipt confirm`,
+`!review resolve`, and `!help` do not execute at all (they reach Sol, who
+refuses/cannot run them; `!email …` and the read surfaces still work);
+guest-bound WhatsApp sends are therefore currently impossible (inbound
+keeps flowing normally). (b) The F-051 live-corroboration leg this canary
+was authorized to close is BLOCKED on the F-063 fix; the D-026 canary
+design is reusable as that fix session's live verification, and this
+authorization is recorded as consumed-by-discovery (a fresh session-level
+authorization accompanies the fix session per D-008). (c) F-063 is P1 →
+dedicated fix session through the full release path per D-008.
