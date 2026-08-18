@@ -116,7 +116,8 @@ async function run(args = process.argv.slice(2), injected = {}) {
   const secrets = injected.squarespaceSecrets || readJson(path.join(SECRETS_DIR, 'squarespace.json'));
   if (!secrets.api_key) throw new Error('squarespace.json does not contain api_key');
   const client = injected.client || createSquarespaceClient({ apiKey: secrets.api_key });
-  const db = injected.db || new Database(DB_PATH);
+  // --dry-run performs no writes, so it takes a read-only handle (F-042).
+  const db = injected.db || new Database(DB_PATH, dryRun ? { readonly: true } : {});
   const ownsDb = !injected.db;
   const startedAt = new Date().toISOString();
   const now = new Date().toISOString();

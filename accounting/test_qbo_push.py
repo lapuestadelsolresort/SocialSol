@@ -343,6 +343,127 @@ class QBOIntegrityTests(unittest.TestCase):
             [(2105, 'commission'), (2105, 'iva'), (4700, 'commission'), (4700, 'iva')],
         )
 
+    def test_legacy_embedded_fee_lines_count_as_already_recorded(self):
+        """F-039: pre-cutover records carry SPEI fees as Bank Fee split lines
+        inside the parent Purchase. The standalone matcher could not see them,
+        so re-processing a legacy statement would have pushed a duplicate,
+        standalone copy of every embedded fee."""
+        parent = {
+            'date': date(2026, 7, 22), 'amount': 25000, 'amount_usd': 1450.96,
+            'reference': 'Clave: 136-22/07/2026/22-9911',
+            'vendor_name': 'Sergio Gracia',
+            'spei_fees': [
+                {'amount': 6, 'amount_usd': 0.35, 'is_spei_iva': False},
+                {'amount': 0.96, 'amount_usd': 0.06, 'is_spei_iva': True},
+            ],
+        }
+        legacy_purchase = {
+            'Id': '2365', 'TxnDate': '2026-07-22', 'TotalAmt': 1451.37,
+            'PrivateNote': 'SPEI to Sergio Gracia | Clave: 136-22/07/2026/22-9911',
+            'EntityRef': {'name': 'Sergio Gracia'},
+            'Line': [
+                {'Amount': 1450.96, 'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': '1150040020', 'name': 'Contract Labor'}}},
+                {'Amount': 0.35, 'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': '1150040012', 'name': 'Bank Fee'}}},
+                {'Amount': 0.06, 'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': '1150040012', 'name': 'Bank Fee'}}},
+            ],
+        }
+
+        missing, existing = find_missing_spei_fees(
+            [parent],
+            lambda _sql: {'QueryResponse': {'Purchase': [legacy_purchase]}},
+        )
+        self.assertEqual(missing, [])
+        self.assertEqual(len(existing), 2)
+        self.assertEqual({item['source'] for item in existing}, {'embedded_line'})
+        self.assertEqual({item['qbo_id'] for item in existing}, {'2365'})
+
+    def test_embedded_fee_lines_are_consumed_once_each(self):
+        """Two same-amount fees on one day need two embedded lines, not one."""
+        parents = [
+            {
+                'date': date(2026, 7, 22), 'amount': 25000, 'amount_usd': 1450.96,
+                'reference': f'Clave: 136-22/07/2026/22-{index}',
+                'vendor_name': 'Sergio Gracia',
+                'spei_fees': [{'amount': 6, 'amount_usd': 0.35, 'is_spei_iva': False}],
+            }
+            for index in (1, 2)
+        ]
+        one_line_only = {
+            'Id': '2365', 'TxnDate': '2026-07-22', 'TotalAmt': 1451.31,
+            'PrivateNote': 'SPEI to Sergio Gracia',
+            'EntityRef': {'name': 'Sergio Gracia'},
+            'Line': [
+                {'Amount': 0.35, 'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': '1150040012', 'name': 'Bank Fee'}}},
+            ],
+        }
+
+        missing, existing = find_missing_spei_fees(
+            parents,
+            lambda _sql: {'QueryResponse': {'Purchase': [one_line_only]}},
+        )
+        self.assertEqual(len(existing), 1)
+        self.assertEqual(len(missing), 1)
+
+    def test_unrelated_bank_fee_lines_do_not_absorb_a_fee(self):
+        """A Bank Fee line on a different day or amount is not this fee."""
+        parent = {
+            'date': date(2026, 7, 22), 'amount': 25000, 'amount_usd': 1450.96,
+            'reference': 'Clave: 136-22/07/2026/22-9911',
+            'vendor_name': 'Sergio Gracia',
+            'spei_fees': [{'amount': 6, 'amount_usd': 0.35, 'is_spei_iva': False}],
+        }
+        unrelated = {
+            'Id': '9000', 'TxnDate': '2026-07-21', 'TotalAmt': 0.35,
+            'PrivateNote': 'monthly account fee',
+            'EntityRef': {'name': 'Kapital'},
+            'Line': [
+                {'Amount': 0.35, 'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': '1150040012', 'name': 'Bank Fee'}}},
+            ],
+        }
+        wrong_amount = {
+            'Id': '9001', 'TxnDate': '2026-07-22', 'TotalAmt': 12.00,
+            'PrivateNote': 'SPEI to Sergio Gracia | Clave: 136-22/07/2026/22-9911',
+            'EntityRef': {'name': 'Sergio Gracia'},
+            'Line': [
+                {'Amount': 12.00, 'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': '1150040012', 'name': 'Bank Fee'}}},
+            ],
+        }
+
+        missing, existing = find_missing_spei_fees(
+            [parent],
+            lambda _sql: {'QueryResponse': {'Purchase': [unrelated, wrong_amount]}},
+        )
+        self.assertEqual(existing, [])
+        self.assertEqual(len(missing), 1)
+
+    def test_standalone_records_still_win_over_embedded_lines(self):
+        """The modern format keeps its exact parent-reference binding."""
+        parent = {
+            'date': date(2026, 8, 6), 'amount': 2800, 'amount_usd': 162.51,
+            'reference': 'Clave: 136-06/08/2026/06-1',
+            'vendor_name': 'Sergio Gracia',
+            'spei_fees': [{'amount': 4, 'amount_usd': 0.23, 'is_spei_iva': False}],
+        }
+        standalone = {
+            'Id': '500', 'TxnDate': '2026-08-06', 'TotalAmt': 0.23,
+            'PrivateNote': 'SPEI Commission on transfer to Sergio Gracia | Parent ref: Clave: 136-06/08/2026/06-1',
+        }
+
+        missing, existing = find_missing_spei_fees(
+            [parent],
+            lambda _sql: {'QueryResponse': {'Purchase': [standalone]}},
+        )
+        self.assertEqual(missing, [])
+        self.assertEqual(len(existing), 1)
+        self.assertEqual(existing[0]['source'], 'standalone')
+        self.assertEqual(existing[0]['qbo_id'], '500')
+
     def test_new_spei_fee_memo_is_bound_to_exact_parent_reference(self):
         client = self.client()
         client._resolve_account_id = lambda _key: '1150040012'

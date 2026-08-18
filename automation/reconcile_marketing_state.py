@@ -196,6 +196,13 @@ def main():
     snapshot = fetch_live_snapshot(registry)
     reconciled_at = datetime.now(timezone.utc).isoformat()
     updated_registry = apply_snapshot(registry, snapshot, reconciled_at)
+    # A declared status contradicting live effective status used to pass
+    # silently: reporting prefers meta_effective_status, so a row reading
+    # PAUSED while the campaign spent said nothing (F-046).
+    divergences = [
+        {"campaign_name": row.get("campaign_name") or row.get("campaign_id"), **row["status_divergence"]}
+        for row in updated_registry if row.get("status_divergence")
+    ]
     experiments = campaign_experiments(updated_registry)
     con = sqlite3.connect(DB_PATH, timeout=20)
     try:
@@ -214,6 +221,7 @@ def main():
             print(json.dumps({
                 "dry_run": True,
                 "campaigns_seen": len(snapshot),
+                "status_divergences": divergences,
                 "active_campaigns": sum(1 for row in snapshot if row["effective_status"] == "ACTIVE"),
                 "registry_records_changed": changed,
                 "active_daily_budget_usd": round(sum(
@@ -228,10 +236,17 @@ def main():
             con.commit()
             if os.path.realpath(registry_path) == os.path.realpath(REGISTRY_PATH):
                 backup_registry(updated_registry, registry_path)
-            record(JOB_NAME, True, f"{len(snapshot)} campaigns; {sum(1 for row in snapshot if row['effective_status'] == 'ACTIVE')} active")
+            detail = f"{len(snapshot)} campaigns; {sum(1 for row in snapshot if row['effective_status'] == 'ACTIVE')} active"
+            if divergences:
+                detail += f"; {len(divergences)} declared-status divergence(s): " + ", ".join(
+                    f"{item['campaign_name']} declared {item['declared']} but live {item['live']}"
+                    for item in divergences
+                )
+            record(JOB_NAME, True, detail)
             print(json.dumps({
                 "reconciled_at": reconciled_at,
                 "campaigns_seen": len(snapshot),
+                "status_divergences": divergences,
                 "active_campaigns": sum(1 for row in snapshot if row["effective_status"] == "ACTIVE"),
                 "active_daily_budget_usd": round(sum(
                     row.get("daily_budget_usd") or 0

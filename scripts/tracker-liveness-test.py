@@ -46,6 +46,14 @@ TEST_SID_PREFIX = "testlv-"
 # Cold-start: flag destinations active >24h with zero real sessions in last 48h
 COLD_START_HOURS = 24
 COLD_START_WINDOW_HOURS = 48
+# Below this many 7-day impressions, zero CRM sessions is a delivery story,
+# not a tracking one: a handful of impressions rarely produces a click at
+# all, so alarming on capture would be noise (F-019). Both live failures
+# seen at validation were in this band (1-4 impressions/7d) while sibling
+# ads took 2,400+.
+MIN_IMPRESSIONS_FOR_CAPTURE_ALARM = int(
+    os.environ.get('TRACKER_MIN_IMPRESSIONS_FOR_CAPTURE_ALARM', '20')
+)
 
 # How long to wait between beacon POST and DB read (seconds)
 VERIFY_WAIT_SECS = 2.5
@@ -316,6 +324,20 @@ def cold_start_check(destinations, secrets, now_utc):
                     "message": (
                         f"Delivery warning (not a tracking failure): {dest_url} has zero Meta "
                         f"impressions in 7d, so zero CRM sessions is expected — check ad delivery"
+                    ),
+                })
+            elif impressions_7d is not None and impressions_7d < MIN_IMPRESSIONS_FOR_CAPTURE_ALARM:
+                warnings.append({
+                    "type": "near_zero_delivery",
+                    "url": dest_url,
+                    "utm_campaign": utm_campaign,
+                    "active_days": round(age_days, 1),
+                    "impressions_7d": impressions_7d,
+                    "message": (
+                        f"Delivery warning (not a tracking failure): {dest_url} took only "
+                        f"{impressions_7d} Meta impressions in 7d (below "
+                        f"{MIN_IMPRESSIONS_FOR_CAPTURE_ALARM}), so zero CRM sessions is not "
+                        f"evidence of a tracking problem — check ad delivery"
                     ),
                 })
             elif impressions_7d is None:

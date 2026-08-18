@@ -76,10 +76,15 @@ async function run(args = process.argv.slice(2), injected = {}) {
     if (through < asOf) throw new Error('--through must be on or after --as-of');
   }
 
-  const db = injected.db || new Database(DB_PATH);
+  // "Canonical, read-only" was true of the queries but not of the handle: the
+  // report opened the CRM write-capable and ran an unconditional schema
+  // ensure, taking write locks during a read and able to create a database at
+  // a wrong path. Only --apply-reconciliation writes (F-042).
+  const writes = args.includes('--apply-reconciliation');
+  const db = injected.db || new Database(DB_PATH, writes ? {} : { readonly: true });
   const ownsDb = !injected.db;
   try {
-    ensureSchemaBetterSqlite(db);
+    if (writes) ensureSchemaBetterSqlite(db);
     const apiGet = injected.apiGet || createApiGet({
       token: (injected.ownerrezSecrets || readJson(path.join(SECRETS_DIR, 'ownerrez.json'))).access_token,
     });

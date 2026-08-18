@@ -20,8 +20,29 @@ Squarespace orders; they enter accounting only through Kapital statements.
 | `run_classify.py` | Main entry point. Dry-run by default. |
 | `fx_cache/` | Cached daily FX rates (auto-created). |
 | `tests.py` | The weekly integrity control (see below). |
-| `slack_scan.py` | Read-only Slack channel reads used by the weekly control. |
+| `slack_scan.py` | Read-only Slack channel reads used by the weekly control. See the CLI capture rule below. |
 | `run_weekly_tests.sh` | LaunchAgent entry point for the weekly control. |
+
+## Reading bulk data from the OpenClaw CLI
+
+`openclaw … --json` **must be captured to a file, never through a pipe.** The
+CLI exits without draining a piped stdout, so any response larger than the pipe
+buffer (~64 KB) arrives truncated — invalid JSON at best, a short but parseable
+result at worst. Redirecting the same command to a file returns the whole
+payload (347 KB observed).
+
+```python
+# Right: capture to a temp file, then parse.
+subprocess.run([...OPENCLAW, "message", "read", ..., "--json"], stdout=handle, check=True)
+# Wrong: capture_output=True / stdout=PIPE on a bulky read.
+```
+
+`slack_scan.py` does this, and treats an unparseable body as an error rather
+than as a short result — a silent truncation would read as "no more messages"
+and quietly narrow the control's window. Existing callers that only capture
+small `message send` acknowledgements are unaffected; any new consumer reading
+channel history, member lists, or search results must follow the rule (F-060,
+upstream CLI behaviour rather than SocialSol code).
 
 ## Weekly integrity control
 

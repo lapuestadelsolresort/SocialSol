@@ -90,14 +90,19 @@ function post(channel, message) {
   ], { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function run(args = process.argv.slice(2)) {
+function run(args = process.argv.slice(2), injected = {}) {
   const requested = optionValue(args, '--audience');
   const audiences = args.includes('--all') ? Object.keys(AUDIENCES) : [requested || 'business-intel'];
   const live = args.includes('--post');
   const enabled = process.env.SQUARESPACE_SLACK_ENABLED === '1';
-  const db = new Database(DB_PATH);
+  const postImpl = injected.post || post;
+  // Preview mode only reads; only --post updates the notification outbox.
+  // Opening write-capable for a preview took write locks and ran a schema
+  // ensure on a read path (F-042).
+  const db = injected.db || new Database(DB_PATH, live ? {} : { readonly: true });
+  const ownsDb = !injected.db;
   try {
-    ensureSchemaBetterSqlite(db);
+    if (live) ensureSchemaBetterSqlite(db);
     for (const audience of audiences) {
       if (!Object.hasOwn(AUDIENCES, audience)) throw new Error(`Unknown audience: ${audience}`);
       const report = buildAudienceReport(db, audience);
@@ -112,14 +117,25 @@ function run(args = process.argv.slice(2)) {
       }
       const channel = AUDIENCES[audience];
       if (!channel || !SLACK_ACCOUNT) throw new Error(`Slack is not configured for ${audience}`);
-      post(channel, report.message);
       const placeholders = report.ids.map(() => '?').join(',');
+      try {
+        postImpl(channel, report.message);
+      } catch (error) {
+        // Only the success path wrote attempts/last_error, so a failed Slack
+        // post left its evidence in job stderr alone: the rows stayed pending
+        // with attempts=0 and nothing recorded why (F-043). Retry semantics
+        // are unchanged — the rows stay pending and the run still fails.
+        db.prepare(`UPDATE squarespace_notification_outbox SET
+          attempts=attempts+1, last_error=?
+          WHERE id IN (${placeholders})`).run(String(error.message).slice(0, 500), ...report.ids);
+        throw error;
+      }
       db.prepare(`UPDATE squarespace_notification_outbox SET
-        status='delivered', delivered_at=datetime('now'), attempts=attempts+1
+        status='delivered', delivered_at=datetime('now'), attempts=attempts+1, last_error=NULL
         WHERE id IN (${placeholders})`).run(...report.ids);
     }
   } finally {
-    db.close();
+    if (ownsDb) db.close();
   }
 }
 

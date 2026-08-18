@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Nightly encrypted backup of the small non-CRM state stores (F-032a/b):
-paloma/data/tasks.db, workflow/policy.json, and the OpenClaw gateway config.
+paloma/data/tasks.db, workflow/policy.json, the OpenClaw gateway config,
+and the untracked accounting config.
 Rides the crm_backup pipeline: same passphrase file, same offsite Drive
 folder, same job_health/watchdog wiring."""
 
@@ -21,6 +22,13 @@ from job_health import get_status, record
 ROOT = Path(__file__).resolve().parent.parent
 TASKS_DB = Path(os.environ.get("PALOMA_TASKS_DB", ROOT / "paloma" / "data" / "tasks.db"))
 POLICY_PATH = Path(os.environ.get("RESORT_WORKFLOW_POLICY_PATH", ROOT / "workflow" / "policy.json"))
+# Untracked runtime config with no other backup control: it carries the
+# receipt channels, QBO account/vendor maps, salary patterns and the weekly
+# control's thresholds. Losing it means rebuilding all of that by hand
+# (F-032c). The receipts and statements themselves stay covered by their
+# compensating controls — re-downloadable from Slack, with Kapital and QBO
+# authoritative.
+ACCOUNTING_CONFIG = Path(os.environ.get("ACCOUNTING_CONFIG_PATH", ROOT / "accounting" / "config.json"))
 OPENCLAW_CONFIG = Path(os.environ.get(
     "OPENCLAW_CONFIG_PATH",
     Path.home() / ".openclaw" / "openclaw.json",
@@ -91,12 +99,16 @@ def main():
             "policy.json": POLICY_PATH,
             "openclaw.json": OPENCLAW_CONFIG,
         }
+        # Optional so a host without the accounting config still backs up.
+        if ACCOUNTING_CONFIG.is_file():
+            members["accounting-config.json"] = ACCOUNTING_CONFIG
         metadata = {
             "captured_at": datetime.now(timezone.utc).isoformat(),
             "sources": {
                 "tasks.db": str(TASKS_DB),
                 "policy.json": str(POLICY_PATH),
                 "openclaw.json": str(OPENCLAW_CONFIG),
+                **({"accounting-config.json": str(ACCOUNTING_CONFIG)} if ACCOUNTING_CONFIG.is_file() else {}),
             },
             "sha256": {name: sha256_file(path) for name, path in members.items()},
             "bytes": {name: path.stat().st_size for name, path in members.items()},
