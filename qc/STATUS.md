@@ -1,11 +1,27 @@
 # QC status
 
-Updated: 2026-08-17 (PDT) — session 22 (P3 hygiene batch, D-025). **All ten batch
-findings closed — F-024, F-026, F-027, F-028, F-030, F-034, F-037, F-038, F-021,
-F-062; runtime baseline MOVED `15a41d6` → `b7f2690`** (PRs #89 + #90, CI verify
-green on both PRs and on merged main both times, everything agent-run with no
-classifier block on the release path, deploy record 2026-08-18T04-30-14-757Z
-completed 11/11, gateway reloaded 8184 → 43276).
+Updated: 2026-08-18 (PDT) — session 23 (**QC-8a: WhatsApp `!wa` send-gate
+invariant battery + Meta inbound-webhook probes**). RO/FIXTURE session, no
+release-path work, runtime baseline UNCHANGED at `b7f2690`, policy sha `0dd75080`
+(fingerprint `match` + `agreement: ok`, verified at start ritual).
+
+**Delivered:** (1) the D-001 WhatsApp invariant proven by attempted violation —
+14 fixture cases, all refused with zero Twilio calls / zero queued runs, at the
+deployed SHA (QC8-01); (2) durable-ledger sweep — the human-`!wa` invariant
+holds across every send in system history (1 send ever, actor+channel bound;
+0 `whatsapp.send` effects outside `whatsapp.reply`) (QC8-02); (3) **QC2B-10
+CLOSED** — Meta inbound-webhook mounted-route auth probes all pass (GET
+handshake, POST HMAC, fail-closed) against the real server on loopback:3999
+(QC8-03); (4) F-051 ledger corroboration recorded honestly (QC8-04).
+
+**⚠️ SELF-DISCLOSED INCIDENT (QC8-INC-01):** a broad `pkill -f "crm/server.js"`
+during fixture teardown SIGTERM'd BOTH production servers on this host (SocialSol
+crm 3456 + goldroute co-tenant 3458) — an unauthorized OUTAGE-class action in an
+RO/FIXTURE session. launchd KeepAlive auto-recovered both within ~1-3s (lstart
+06:32:33 PDT). Containment verified clean: CRM+goldroute DB `integrity_check` ok,
+0 workflow runs stuck, workflow-worker untouched (pattern didn't match its
+filename → no in-flight workflow disrupted), 0 durable impact, no send/mutation.
+Corrective rule now standing (see method notes). Owner disclosure below.
 
 **F-024 was closed by NOT doing what the finding said** (plan §2 — reality wins,
 owner-ratified in the D-025 addendum). The recorded fix — remove
@@ -47,7 +63,7 @@ production checkout dirty (`accounting/*.csv` doesn't cover subdirs) and
 `release:check` refused to proceed — the control worked as designed; the
 one-line `.gitignore` entry rode PR #90 before the deploy.
 
-## Phase ledger — QC-0…QC-7 COMPLETE + fix sessions #1/#2(17)/#3(F-001)/#4(F-014)/#5(P2/P3 batch)/#6(F-058)/#7(P3 hygiene batch) COMPLETE (runtime baseline b7f2690; prod main b7f2690; policy sha 0dd75080 ARMED: marketing campaign_activate per-op only — unchanged this session, fingerprint `match` + agreement `ok`)
+## Phase ledger — QC-0…QC-7 COMPLETE + fix sessions #1/#2(17)/#3(F-001)/#4(F-014)/#5(P2/P3 batch)/#6(F-058)/#7(P3 hygiene batch) COMPLETE + **QC-8a IN PROGRESS** (WhatsApp send-gate battery + Meta webhook probes done; Sarah Email / Meta DM re-verify / Sarah Coach / F-051(iii) + F-052 live-path = QC-8b) (runtime baseline b7f2690; prod main b7f2690; policy sha 0dd75080 ARMED: marketing campaign_activate per-op only — unchanged this session, fingerprint `match` + agreement `ok`)
 
 ## ⚠️ Standing advisory (until F-051(iii) dispositioned)
 
@@ -63,7 +79,22 @@ risk is (iii) coalescing only. Ledger corroboration deferred to QC-8.)
 
 ## Owner follow-ups
 
-**New this session (P3 batch):**
+**⚠️ DISCLOSURE — new this session (QC-8a):**
+
+0. **I briefly restarted your production CRM server (and the goldroute co-tenant)
+   by mistake.** During QC fixture cleanup I used a too-broad process-kill
+   (`pkill -f "crm/server.js"`) that matched both live servers on the host, not
+   just my throwaway test server. Both were down for ~1-3 seconds at 06:32:33
+   PDT and launchd automatically brought them back. I verified afterward: both
+   databases pass integrity checks, no in-flight work was lost (the workflow
+   worker was never touched), and nothing was sent or written. Net effect: a
+   couple-second blip that inbound providers retry through. It was not an
+   authorized action for a read-only session; I've recorded it in full
+   (QC8-INC-01) and adopted a standing rule to only ever kill test servers by
+   their exact process id. Nothing is needed from you — flagging it because you
+   should know any time production is touched.
+
+**New earlier (P3 batch):**
 
 1. **F-024 ended up needing no action from you** — the "remove the grant" step
    you approved became void once the trace showed the grant powers inbound
@@ -106,38 +137,54 @@ risk is (iii) coalescing only. Ledger corroboration deferred to QC-8.)
 None. Open D-rows: D-004 (blackout windows — load-bearing at QC-6c/QC-10),
 D-007 (accounting validator), D-010 (CI scope confirm).
 
-Open P1s: **F-051 only** (only the (iii) coalescing disposition remains — QC-8
-opener).
+Open P1s: **F-051 only** ((iii) coalescing disposition + live mutation-path
+corroboration remain — QC-8b; QC8-04 refined the corroboration status this
+session). QC-8a's WhatsApp send-gate leg surfaced NO new finding — the D-001
+invariant holds by attempted violation and across all durable history.
 Open P2s: F-013 (gated on F-031 drill), F-023, F-025, F-006, F-029, F-033,
 F-035 (remainder), F-036 (three writers remain), F-040, F-044, F-052
-(**engine half closed; live Slack-path verification rides QC-8**), F-059,
+(**engine half closed; live Slack-path verification rides QC-8b**), F-059,
 F-061.
 Open P3s: F-019 (**threshold closed; browser page-JS leg is QC-6c CANARY**)
-— and nothing else: **the entire P3 hygiene backlog closed this session**
-(F-024, F-026, F-027, F-028, F-030, F-034, F-037, F-038, F-021, F-062).
+— and nothing else.
+Closed this session: **QC2B-10** (Meta inbound-webhook mounted-route probes —
+was OPEN owner-assigned-to-QC-8; now PASS, QC8-03).
 Housekeeping: `~/fix-worktree` carries `fix/p3-statements-gitignore` (merged,
 removable); 1 pending gmail email_reply_proposal exists (inert); the goldroute
-`crm/server.js` (port 3458) remains out-of-scope.
+`crm/server.js` (port 3458) remains out-of-scope (but shares this host — see the
+QC8-INC-01 lesson on process-kill blast radius).
 
 ## Next
 
-**(1) QC-8 — WhatsApp, Sarah Email, Meta DM quarantine re-verify, Sarah Coach.**
-Opens with the `!wa` fixture battery (attempted violations per D-001's
-invariant: prose in #whatsapp, wrong channel/user `!wa`, programmatic paths to
-the Twilio adapter) plus the F-051(iii) coalescing disposition and its
-ack-corroboration ledger pull; then Sarah email (audits the standing
-draft-and-approve config per D-019), Meta DM quarantine re-verify (`!help`
-renders `meta.dm.reply` as "quarantined — refused" — re-verify surface), and
-Sarah Coach (suggestion-only, no send path). F-052's live Slack-path
-verification and F-051's ledger corroboration ride this phase.
+**(1) QC-8b — Sarah Email, Meta DM quarantine re-verify, Sarah Coach, +
+F-051(iii)/F-052 live legs.** QC-8a closed the WhatsApp send-gate invariant
+battery (QC8-01/02), the Meta inbound-webhook probes (QC8-03, QC2B-10 CLOSED),
+and the F-051 ledger-corroboration status (QC8-04). Remaining QC-8 legs:
+  - **Sarah Email** — audit the standing DRAFT-AND-APPROVE config per D-019
+    (whole `email.reply` surface, both providers; auto-send mechanism is dormant
+    + policy-gated, must stay so): one Slack root per provider conversation,
+    conservative CRM inquiry logic, immutable proposal + same-user confirm,
+    execute-once, Gmail-Sent/OwnerRez readback, retry-without-second-send, mailbox
+    reads never mark read. FIXTURE-class.
+  - **Meta DM quarantine re-verify** — `!help` renders `meta.dm.reply` as
+    quarantined/refused; re-verify the surface at the deployed SHA (F-020 residual).
+  - **Sarah Coach** — suggestion-only; voice-corpus retrieval works; prove NO
+    send path exists; outcome/edit capture correct.
+  - **F-051(iii)** — OWNER decision needed (document operator "quiet-moment"
+    guidance vs upstream gateway fix); plus a LIVE mutation-class exact-command
+    success (`!wa`/`!email confirm`/`!receipt confirm`/`!review resolve`) to
+    corroborate interception in the durable ledger — none exists post-fix yet
+    (QC8-04). Needs a quiet-channel live command (owner-typed) or an approved canary.
+  - **F-052** — live Slack-path manual-review resolution verification (engine
+    half already closed).
 
 **Then:** (2) QC-6c CANARY (D-004 first — still unanswered and load-bearing).
 (3) F-031 drill slot (D-006 window; F-013 gated on it). (4) **QC-9** (OwnerRez +
 Paloma) — the RO map is the audit target; all 34 mutations confirmation-gated
 per D-019.
 
-Definition-of-Done #3 note: F-051 remains the only open P1, one disposition from
-closing. The F-031 drill must still run before baseline stamps.
+Definition-of-Done #3 note: F-051 remains the only open P1. The F-031 drill must
+still run before baseline stamps.
 
 **Exact next command** (start ritual, §8):
 
@@ -149,21 +196,45 @@ Expected: clean `main` @ b7f2690 (runtime baseline b7f2690cef37; newest deploy
 record 2026-08-18T04-30-14-757Z completed 11/11; policy sha 0dd75080 ARMED
 marketing-activate-only per D-020 — unchanged, standing state;
 `node scripts/policy-fingerprint.js check` should print `match` with
-`agreement: ok`). Then `cd ~/qc-worktree`, read qc/STATUS.md, and open QC-8
-with the plan §9 QC-8 section; the `!wa` fixture battery is FIXTURE-class, but
-state the Authorizations line for anything beyond RO/FIXTURE (the coalescing
-ledger pull is RO; any production webhook negative test needs its own approved
-zero-side-effect plan per plan §7/QC-2 rules).
+`agreement: ok`). Then `cd ~/qc-worktree`, read qc/STATUS.md, and open QC-8b
+with the plan §9 QC-8 section. Sarah Email / Sarah Coach / Meta DM re-verify are
+FIXTURE/RO; state the Authorizations line for anything beyond RO/FIXTURE — the
+F-051(iii) live command and F-052 live-path both need a live Slack action (owner
+authorization + a quiet-channel plan), and any production webhook negative test
+needs its own approved zero-side-effect plan (plan §7/QC-2).
 
-Session-notes (classifier, session 22 / P3 batch): **zero classifier blocks on
-the release path** — pushes, both PR creates, both merges, both fast-forwards,
-the deploy, and the gateway kickstart were all agent-run (fourth session
-running). The one block hit was a COMPOUND host-hygiene Bash (many rm/chmod
-plus a secrets-path copy in one command); re-issued as single-action commands,
-every piece ran agent-side without complaint. Lesson: keep host mutations one
-action per command.
+**⚠️ Standing QC-executor rule (QC8-INC-01, this session):** never terminate
+processes with a broad `pkill -f "<substring>"`. On this host `crm/server.js`
+is a substring of BOTH production servers' command lines. Kill FIXTURE servers
+ONLY by exact recorded PID (`echo $! > pidfile` at launch → `kill "$(cat
+pidfile)"`), and give fixture processes a marker that cannot collide with
+production (e.g. a unique `--title`/env tag, or bind an obviously-non-prod port
+and match on that). When a fixture server lingers, look up its exact PID by port
+(`lsof -nP -iTCP:<port>`), never by a shared script name.
 
-Method notes worth keeping (session 22):
+Method notes worth keeping (session 23):
+
+- **A broad `pkill -f` is an OUTAGE weapon.** The fixture teardown pattern
+  `crm/server.js` matched both production servers (SocialSol + goldroute
+  co-tenant, F-023). launchd KeepAlive is why it was a 1-3s blip and not a
+  page-out — the compensating control did its job — but the plan is explicit
+  (§1) that OUTAGE actions need authorization I did not have. Recorded honestly
+  (QC8-INC-01), not buried. The habit that would have prevented it: kill by PID,
+  never by shared name.
+- **The send-gate story is a defense-in-depth stack, and each layer refuses on
+  its own.** The `!wa` battery proves it: parser anchor (`^!wa`), channel-scoped
+  `whatsapp.send` capability, restricted-actor identity, `allowedTriggers`
+  command-only, `COMMAND_ONLY_WORKFLOWS` model-tool refusal, shadow gate, and
+  the F-024 agreement invariant on the system-origin path — a spoof has to beat
+  all of them, and the fixture cases show each one saying no independently.
+- **The durable ledger tells the truth about what "verified live" means.** F-051
+  looked one disposition from closed, but the ledger showed the met live
+  positive was `!help` — a read that never creates a run — so a real
+  mutation-class command still has zero post-fix corroboration. "A green Slack
+  reply is not evidence" (plan §7) cuts here too: `!help` replying proves the
+  claim path fires for reads, not that a guest-affecting command was intercepted.
+
+Prior method notes (session 22):
 
 - **A finding can be exactly backwards.** F-024 called the grant "latent, no
   effect today"; the trace showed it load-bearing for all inbound email, and
