@@ -675,3 +675,70 @@ both options were put to them):**
   deployed SHA against live policy — the same both-directions live-set assertion
   used for F-058 (QCF058-03) must still hold, since the fix must not change which
   workflows are reported or their states.
+
+## D-025 — Remaining P3 hygiene batch: authorization + F-034(a)/F-034(b)/F-021 dispositions — RECORDED 2026-08-17
+
+**Owner (2026-08-17, start-of-session, P3 hygiene batch session; asked because the
+session's Authorizations line was blank — D-020/D-021/D-022 precedent):**
+
+- **BUSINESS + OUTAGE AUTHORIZED — scoped to the 10-finding P3 batch** (F-024,
+  F-026, F-027, F-028, F-030, F-034, F-037, F-038, F-021, F-062). Full release
+  path agent-run (fix branch → tests → PR create → CI verify → merge →
+  fast-forward of production main → `release:deploy` incl. crm/worker restarts)
+  **plus** the post-deploy gateway kickstart (`!help` lives in the gateway
+  plugin — F-058 precedent) **plus** runtime-host hygiene (chmod/rm/renames and
+  the `accounting/config.json` FX-key alignment via the QCFS4-05
+  escrow-then-atomic pattern). Merges/ff owner-run via `!` commands if the
+  permission classifier blocks. Live-state preflight + stated rollback/abort
+  criteria still precede the deploy (plan §5).
+- **F-024 runtime policy edit split:** executor prepares and validates the
+  candidate (remove `email.message.observe` from `autonomous_workflows`), the
+  **owner installs it** (runtime `workflow/policy.json` writes stay owner-run —
+  D-019 arming-procedure/D-020 precedent), executor re-records the policy
+  fingerprint afterward.
+- **F-034(a) pre-scrub git bundle — CHMOD 600, KEEP IN PLACE.** Reversible
+  minimum: the only pre-scrub archive survives; deletion stays available to the
+  owner any time.
+- **F-021 legacy `workspace-resort` tree — ARCHIVE THEN DELETE, AGENT-RUN.**
+  tar.gz to `~/.openclaw/backups/` (mode 600), archive verified, then the tree
+  is removed. (SECRETS.md/TOOLS.md there were already proven free of real
+  credential values — E-QC2B-06.)
+- **F-034(b) offsite Drive duplicates + missing retention policy — ACCEPT AND
+  RECORD.** No remote change now; accepted residual with a revisit note
+  (1.06 GB / 17 days is harmless for years). The local retention fix (code)
+  rides the batch PR regardless.
+- **D-004 still not answered** (the authorization question was answered on its
+  own). The explicit OUTAGE grant supplies this session's window; D-004 remains
+  open for a standing answer (load-bearing at QC-6c and QC-10).
+
+**Addendum — F-024 corrected fix RATIFIED (owner, same session, after the RO
+trace):** the recorded removal of `email.message.observe` from
+`autonomous_workflows` is factually wrong at current code — the worker
+authorizes a system-origin observe run for every pending inbound email
+(`crm/scripts/workflow-worker.js:147-160`, `authorizeSystemRun` →
+`authorize({origin:'system'})`, allowed only via that policy entry), so removal
+would halt Gmail/Resend reply classification and direct-inquiry projection.
+The finding's "latent grant, no effect today" premise predated the D-023
+shadow-mode correction; two sanctioned configure scripts
+(`configure-email-replies.js`, `configure-sarah-email.js`) deliberately install
+the entry. **Owner chose the corrected fix:** no runtime policy edit (the
+owner-run install step in this decision's first bullet is VOID — the policy is
+already correct); repo-side only: (1) the observe definition declares
+`autonomous: true` (registry agrees with policy and worker reality); (2) a
+policy↔registry agreement invariant lands — every `autonomous_workflows` entry
+must exist in the registry AND be registry-accounted (declare `autonomous: true`,
+or accept the `auto_confirm_dispatch` trigger, the declaration the D-019 arming
+procedure relies on), and every `autonomous_operations` key must be reachable
+(present in `autonomous_workflows`) and dispatch-capable. **As built** (executor
+wiring decision, same session): enforced at every system-origin authorization
+site (server `/api/workflows/execute`, worker `authorizeSystemRun`, auto-confirm
+dispatch), refused at `scripts/policy-fingerprint.js record`, reported with
+exit 1 by `policy-fingerprint check` (surfaced by `release:check`), and
+reported at worker boot — report-only there, because a boot refusal would take
+every other workflow down with the one bad grant; deliberately NOT requiring
+live-ness
+(autonomous-but-shadow is a sanctioned staging shape the example policy itself
+models); (3) `workflow/policy.example.json`'s current half-armed shape (dead
+`autonomous_operations` entry without the `autonomous_workflows` membership it
+needs) is fixed to the D-019 un-armed default — completing the D-019 item-2
+example residual that the P2/P3 batch did not reach.
