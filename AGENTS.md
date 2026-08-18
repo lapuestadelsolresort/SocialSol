@@ -50,9 +50,37 @@ Service command references live in:
 - `prospector/COMMANDS.md`
 - `regina/COMMANDS.md`
 - `sarah-coach/COMMANDS.md`
+- `sarah-email/COMMANDS.md`
 
-The committed LaunchAgents are templates. Rendering them is safe; installing
-or loading them is a separate production cutover.
+LaunchAgents are rendered from `deploy/launchagents/templates` and installed
+only through `npm run install:launchagents` (which `release:deploy` runs)
+against `deploy/launchagents/service-manifest.json`. Rendering is safe;
+installing is a production cutover. Never hand-place a plist.
+
+## Under pressure
+
+Incidents are where guidance fails. When a command does not work, the
+temptation is to find a way around the control rather than to report that the
+control is holding. These are not judgment calls:
+
+1. **Never redirect a privileged command to another channel.** Exact commands
+   (`!wa`, `!email confirm`, `!review resolve`, `!receipt confirm`,
+   `!meta confirm`, `!ownerrez confirm`) are bound to specific channels by the
+   runtime policy. Suggesting an operator paste one somewhere else does not
+   grant access — the server rejects it — and it teaches a habit that would be
+   dangerous if it ever did work.
+2. **Never invent workflow names, inputs, or capabilities.** If a call is
+   rejected as `capability_not_granted` or an unknown workflow, that is the
+   answer. Read `GET /api/workflows/definitions` for what actually exists
+   rather than guessing a plausible-looking variant.
+3. **Never write to a database directly, and never suggest that someone else
+   does.** No raw SQL against `crm.db`, no `sqlite3` shell, no ad-hoc UPDATE to
+   "unstick" a row. Every mutation goes through its workflow so that the
+   durable effect, evidence, and readback exist. A stuck row is a finding to
+   report, not a row to edit.
+4. **Report the blockage.** "The command is failing and I do not have an
+   authorized path" is a complete, correct answer. State what was tried, what
+   the system said, and stop.
 
 ## Deterministic owner cash-flow answers
 
