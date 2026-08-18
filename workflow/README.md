@@ -158,6 +158,31 @@ its effect/evidence transition are one atomic transaction; a conflicting
 second resolution receives a conflict and changes nothing. Resolution is
 evidence, not permission to claim delivery or read status.
 
+A run started without a channel — every scheduled graph — has no thread to
+post into, so the notice falls back to the first `write_notifications` channel
+that the policy also binds under `channels`. When nothing resolves, the review
+is still opened and a `manual_review_unnotified` event is written against the
+run, so an unannounced review is attributable instead of silent.
+
+## Policy changes
+
+`workflow/policy.json` is runtime state, not tracked in Git, so a hand edit
+leaves no trace the checkout guard can see. The sanctioned path is: copy the
+current file aside → build the candidate → validate it with `validatePolicy`
+→ review the diff → install atomically at mode 600 → record the fingerprint:
+
+```bash
+node scripts/policy-fingerprint.js record --note "<why this changed>"
+```
+
+`node scripts/policy-fingerprint.js check` compares the installed file against
+that record and exits nonzero on drift; `release:check` reports the same
+status, and the health monitor carries it as `runtime_policy_unrecorded`
+(reported, not paging — a five-minute job must not alarm forever because a
+legitimate install skipped the record step). The record holds a hash, never
+policy content. The server picks up an installed policy by mtime and the
+worker reads it fresh per step, so no restart is required.
+
 ## Operational thresholds
 
 The health monitor fails closed when a queued run is older than one minute, a

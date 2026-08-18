@@ -220,6 +220,16 @@ async function recoverStaleRuns(db) {
               message: `⚠️ Workflow ${row.id} stopped after an expired non-idempotent step lease. Do not repeat the mutation until review ${review.id} is resolved. After checking the provider console, use \`!review resolve ${review.id} sent <provider-id>\`, \`!review resolve ${review.id} not-sent\`, or \`!review resolve ${review.id} abandon\`.`,
             },
           });
+        } else {
+          // No channel resolved — record the missing notice rather than
+          // dropping it silently (F-052).
+          await workflowStore.recordEvent(db, {
+            runId: row.id,
+            stepKey: row.step_key,
+            type: 'manual_review_unnotified',
+            payload: { reviewId: review.id, reason: 'no_review_channel_resolved' },
+          });
+          console.warn(`[workflow-worker] run ${row.id} opened manual review ${review.id} with no notification channel — set write_notifications.channel_ids`);
         }
         summary.manualReview += 1;
       } else {

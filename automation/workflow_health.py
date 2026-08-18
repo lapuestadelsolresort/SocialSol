@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fail closed on stalled durable workflows, dead outbox rows, or DB damage."""
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -146,6 +147,37 @@ def runtime_integrity():
         "runtime_process_missing": len(targets) - len(starts),
         "runtime_code_drift": drift,
         "runtime_process_check_error": 0,
+    }
+
+
+def policy_fingerprint_integrity(policy_path=None, record_path=None):
+    """Detect a runtime policy that nobody recorded installing (F-055).
+
+    workflow/policy.json is gitignored, so checkout_integrity cannot see it
+    change. scripts/policy-fingerprint.js records a sha after each sanctioned
+    install; a mismatch means the running policy is not the one last blessed.
+
+    Deliberately NOT part of hard_failure_count: this job runs every 5
+    minutes, and a legitimate hand-install that skipped the record step would
+    otherwise page continuously. It is reported in the metrics detail, and
+    `release:check` fails on the same condition, where a human is present.
+    """
+    policy_path = Path(policy_path) if policy_path else POLICY_PATH
+    record_path = Path(record_path) if record_path else Path(
+        os.environ.get("RESORT_POLICY_FINGERPRINT_PATH", ROOT / "runtime" / "state" / "policy-fingerprint.json")
+    )
+    try:
+        digest = hashlib.sha256(policy_path.read_bytes()).hexdigest()
+    except Exception:
+        # A missing/unreadable policy is already runtime_policy_error.
+        return {"runtime_policy_unrecorded": 0, "runtime_policy_sha": None}
+    try:
+        recorded = json.loads(record_path.read_text(encoding="utf-8")).get("sha256")
+    except Exception:
+        recorded = None
+    return {
+        "runtime_policy_unrecorded": int(recorded != digest),
+        "runtime_policy_sha": digest[:16],
     }
 
 
@@ -338,6 +370,7 @@ def main(check_only=False):
     alert_config_missing = alert_configuration_missing(check_only)
     metrics.update(runtime_integrity())
     metrics.update(checkout_integrity())
+    metrics.update(policy_fingerprint_integrity())
     try:
         if policy is None:
             raise RuntimeError("workflow policy is unavailable")

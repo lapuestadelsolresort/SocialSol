@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from workflow_health import (
     incident_alert_active,
     inspect,
     notify_incident_once,
+    policy_fingerprint_integrity,
     scheduled_graph_integrity,
     set_incident_alert_active,
 )
@@ -208,6 +210,46 @@ class WorkflowHealthTests(unittest.TestCase):
             "scheduled_graph_stale": 0,
             "scheduled_graph_failed": 0,
         })
+
+
+class PolicyFingerprintTests(unittest.TestCase):
+    """F-055: workflow/policy.json is gitignored, so the dirty-checkout guard
+    cannot see a hand edit. The fingerprint makes one detectable."""
+
+    def _scratch(self, policy_text='{"version": 1}'):
+        directory = Path(tempfile.mkdtemp())
+        policy = directory / "policy.json"
+        policy.write_text(policy_text, encoding="utf-8")
+        return policy, directory / "policy-fingerprint.json"
+
+    def test_matching_record_is_not_flagged(self):
+        import hashlib
+        policy, record = self._scratch()
+        digest = hashlib.sha256(policy.read_bytes()).hexdigest()
+        record.write_text(json.dumps({"sha256": digest}), encoding="utf-8")
+        metrics = policy_fingerprint_integrity(policy, record)
+        self.assertEqual(metrics["runtime_policy_unrecorded"], 0)
+        self.assertEqual(metrics["runtime_policy_sha"], digest[:16])
+
+    def test_out_of_band_edit_is_flagged(self):
+        policy, record = self._scratch()
+        record.write_text(json.dumps({"sha256": "0" * 64}), encoding="utf-8")
+        self.assertEqual(policy_fingerprint_integrity(policy, record)["runtime_policy_unrecorded"], 1)
+
+    def test_missing_record_is_flagged(self):
+        policy, record = self._scratch()
+        self.assertEqual(policy_fingerprint_integrity(policy, record)["runtime_policy_unrecorded"], 1)
+
+    def test_missing_policy_defers_to_runtime_policy_error(self):
+        policy, record = self._scratch()
+        policy.unlink()
+        metrics = policy_fingerprint_integrity(policy, record)
+        self.assertEqual(metrics["runtime_policy_unrecorded"], 0)
+        self.assertIsNone(metrics["runtime_policy_sha"])
+
+    def test_drift_does_not_page_the_five_minute_job(self):
+        # Reported, not hard-failing: release:check surfaces it to a human.
+        self.assertEqual(hard_failure_count({"runtime_policy_unrecorded": 1}), 0)
 
 
 if __name__ == "__main__":

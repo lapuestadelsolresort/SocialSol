@@ -2,6 +2,8 @@
 
 const { sql } = require('@databases/sqlite');
 const { startGraph } = require('../lib/workflow-engine');
+const { loadPolicy } = require('../lib/channel-policy');
+const { policySnapshot } = require('../lib/workflow-execution-policy');
 const { definition: publishDefinition } = require('./social-publish');
 
 const definition = {
@@ -26,6 +28,16 @@ const definition = {
       key: 'publish_each', effectClass: 'external_idempotent', maxAttempts: 3,
       async run({ db, run, state, services }) {
         const results = [];
+        // Each child run needs its own creation-time policy snapshot: the
+        // worker's stepExecutionDecision reads `allowedAtCreation` from it, so
+        // a child started without one has every external step denied as
+        // external_effect_not_authorized_at_creation (F-056). Prefer the
+        // caller's policy provider — same idiom as auto-confirm dispatch — so
+        // the child sees exactly the policy this run is executing under.
+        const policy = typeof services?.policyProvider === 'function'
+          ? services.policyProvider()
+          : loadPolicy({ fresh: true });
+        const childSnapshot = policySnapshot(policy, publishDefinition);
         for (const content of state.load_due.content) {
           const publishNow = new Date(content.scheduled_for).getTime() <= Date.now() + 2 * 60_000;
           const child = await startGraph(db, publishDefinition, {
@@ -37,6 +49,7 @@ const definition = {
             input: publishNow
               ? { contentId: content.id, publishNow: true }
               : { contentId: content.id, scheduledFor: content.scheduled_for },
+            policySnapshot: childSnapshot,
           }, services);
           if (child.status !== 'completed') {
             const error = new Error(`social publish child ${child.id} is ${child.status}`);

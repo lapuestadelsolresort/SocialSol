@@ -164,6 +164,20 @@ async function executeGraph(db, definition, runId, services = {}) {
               message: `⚠️ Workflow ${runId} has an external-effect result requiring human review (${reasonCode}). Do not resend or repeat the mutation until review ${review.id} is resolved. After checking the provider console, use \`!review resolve ${review.id} sent <provider-id>\`, \`!review resolve ${review.id} not-sent\`, or \`!review resolve ${review.id} abandon\`.`,
             },
           });
+        } else {
+          // A channel-less run (a scheduled graph) whose policy resolves no
+          // write_notifications channel opens a review nobody is told about —
+          // the silence that made F-052 hard to see. The review still exists
+          // and workflow-health still alerts on open reviews; this records the
+          // missing notice durably so the gap is attributable instead of
+          // invisible.
+          await store.recordEvent(db, {
+            runId,
+            stepKey: stepDefinition.key,
+            type: 'manual_review_unnotified',
+            payload: { reviewId: review.id, reasonCode, reason: 'no_review_channel_resolved' },
+          });
+          console.warn(`[workflow-engine] run ${runId} opened manual review ${review.id} with no notification channel — set write_notifications.channel_ids`);
         }
       }
       if (error?.code === 'workflow_lease_lost') return store.getRun(db, runId);
