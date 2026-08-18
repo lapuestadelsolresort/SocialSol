@@ -218,6 +218,46 @@ def build_snapshot(start_day=None, end_day=None):
     }
 
 
+def format_commands(snapshot):
+    """The exact commands that apply to the campaigns in this report.
+
+    A report that names a problem without naming the control that fixes it
+    leaves the operator to remember a command surface nobody documents at the
+    moment of need (F-058). Campaign ids are real because the alternative is a
+    placeholder the reader has to resolve by hand.
+    """
+    campaigns = snapshot["campaigns"]
+    if not campaigns:
+        return []
+    lines = ["", "*Commands for these campaigns:*"]
+    for campaign in campaigns:
+        short = campaign["campaign_name"].replace("LPDS — ", "")
+        lines.append(f"  • *{short}* — `{campaign['campaign_id']}`")
+        briefs = campaign["committed_brief_ids"]
+        if briefs:
+            for brief_id in briefs:
+                lines.append(
+                    "      drift check: `python3 automation/meta_campaign_control.py "
+                    f"assert --brief campaigns/{brief_id}.json`"
+                )
+        else:
+            lines.append(
+                "      no committed brief — the gated change path and autonomy are both "
+                "blocked until one exists at `campaigns/<brief-id>.json`"
+            )
+    lines += [
+        "  • To pause or lower a budget, ask here and name the campaign. The proposal "
+        "replies with the exact `!meta confirm <request-id> <hash>` to type back, from "
+        "the same person, within fifteen minutes.",
+        "  • Activation stays refused until a review approval is bound to the brief: "
+        "`python3 automation/campaign_approval.py record --brief-id <brief-id> "
+        "--slack-ts <approval-ts> --apply`.",
+        "  • Raising the aggregate daily budget is owner-only and never automatic.",
+        "  • `!help` lists everything this channel can run right now.",
+    ]
+    return lines
+
+
 def format_report(snapshot):
     window = snapshot["window"]
     label = window["start"] if window["start"] == window["end"] else f"{window['start']} through {window['end']}"
@@ -289,6 +329,7 @@ def format_report(snapshot):
             "",
             f"⚠️ *Autonomy blocked for {len(unmanaged)} live campaign(s):* no committed brief matches the runtime registry.",
         ]
+    parts += format_commands(snapshot)
     parts += ["", "_WA taps are button clicks. Verified WA leads are actual first inbound conversations._"]
     return "\n".join(parts)
 

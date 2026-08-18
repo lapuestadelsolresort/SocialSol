@@ -133,3 +133,59 @@ test('workflow HTTP route authorizes and queues without executing provider effec
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('the definitions endpoint answers per channel so the help surface need not guess (F-058)', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-definitions-'));
+  const previousPolicy = process.env.RESORT_WORKFLOW_POLICY_PATH;
+  const policyPath = path.join(directory, 'policy.json');
+  fs.writeFileSync(policyPath, JSON.stringify({
+    version: 1,
+    shadow_mode: true,
+    live_workflows: ['whatsapp.reply', 'qbo.write'],
+    channels: {
+      'C-WA': { name: 'whatsapp', capabilities: ['whatsapp.send', 'whatsapp.read'] },
+      'C-IDLE': { name: 'random-ops', capabilities: [] },
+    },
+    autonomous_workflows: [],
+    write_notifications: { user_ids: ['U-JASON'] },
+  }));
+  process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
+  const token = 'definitions-test-control-token-long-enough';
+  try {
+    const app = express();
+    app.use('/api/workflows', buildRouter(() => null, { controlPlaneToken: token }));
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const plain = await request(app, '/api/workflows/definitions', { headers });
+    assert.equal(plain.status, 200);
+    assert.equal(plain.payload.shadow_mode, true);
+    assert.deepEqual(plain.payload.live_workflows, ['whatsapp.reply', 'qbo.write']);
+    assert.ok(plain.payload.definitions.length > 40);
+    // an unrequested channel is absent rather than null — the shape says "not asked"
+    assert.equal('channel' in plain.payload, false);
+
+    const scoped = await request(app, '/api/workflows/definitions?channel=C-WA', { headers });
+    assert.equal(scoped.status, 200);
+    assert.deepEqual(scoped.payload.channel, {
+      id: 'C-WA', name: 'whatsapp', capabilities: ['whatsapp.send', 'whatsapp.read'],
+    });
+    assert.deepEqual(scoped.payload.live_workflows, plain.payload.live_workflows);
+
+    // the gateway's `channel:` conversation-id prefix is accepted (F-051 lesson)
+    const prefixed = await request(app, `/api/workflows/definitions?channel=${encodeURIComponent('channel:C-WA')}`, { headers });
+    assert.equal(prefixed.payload.channel.id, 'C-WA');
+
+    const capabilityless = await request(app, '/api/workflows/definitions?channel=C-IDLE', { headers });
+    assert.deepEqual(capabilityless.payload.channel, { id: 'C-IDLE', name: 'random-ops', capabilities: [] });
+
+    const unknown = await request(app, '/api/workflows/definitions?channel=C-NOWHERE', { headers });
+    assert.equal(unknown.payload.channel, null);
+
+    const unauthorized = await request(app, '/api/workflows/definitions?channel=C-WA', {});
+    assert.equal(unauthorized.status, 401);
+  } finally {
+    if (previousPolicy === undefined) delete process.env.RESORT_WORKFLOW_POLICY_PATH;
+    else process.env.RESORT_WORKFLOW_POLICY_PATH = previousPolicy;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

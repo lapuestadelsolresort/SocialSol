@@ -105,12 +105,27 @@ function buildRouter(getDb, services = {}) {
   router.use(requireLoopback);
   router.use(requireControlToken(controlToken));
 
-  router.get('/definitions', (_req, res) => {
+  // `?channel=` narrows the answer to one channel's authority. The operator
+  // help surface needs it: without the channel's capability list it can only
+  // guess which workflows a channel may run, and a guess is what the hand-
+  // written command docs already got wrong (F-058).
+  router.get('/definitions', (req, res) => {
     const policy = loadPolicy();
+    const requested = typeof req.query?.channel === 'string' ? req.query.channel.replace(/^channel:/, '') : '';
+    const configured = requested ? policy.channels?.[requested] : null;
     res.json({
       definitions: listDefinitions(),
       shadow_mode: policy.shadow_mode === true,
       live_workflows: Array.isArray(policy.live_workflows) ? policy.live_workflows : [],
+      ...(requested ? {
+        channel: configured
+          ? {
+            id: requested,
+            name: configured.name || null,
+            capabilities: Array.isArray(configured.capabilities) ? configured.capabilities : [],
+          }
+          : null,
+      } : {}),
     });
   });
 
