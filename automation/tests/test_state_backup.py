@@ -66,11 +66,12 @@ class MainPipelineTests(unittest.TestCase):
         passphrase = base / "pass"
         passphrase.write_text("secret\n")
         backups = base / "backups"
-        return tasks, policy, openclaw, passphrase, backups
+        accounting = base / "accounting-config.json"
+        return tasks, policy, openclaw, passphrase, backups, accounting
 
     def test_main_builds_verified_archive_and_uploads(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tasks, policy, openclaw, passphrase, backups = self._fixture(tmp)
+            tasks, policy, openclaw, passphrase, backups, accounting = self._fixture(tmp)
             uploads = []
             records = []
 
@@ -80,6 +81,7 @@ class MainPipelineTests(unittest.TestCase):
             with mock.patch.object(state_backup, "TASKS_DB", tasks), \
                  mock.patch.object(state_backup, "POLICY_PATH", policy), \
                  mock.patch.object(state_backup, "OPENCLAW_CONFIG", openclaw), \
+                 mock.patch.object(state_backup, "ACCOUNTING_CONFIG", accounting), \
                  mock.patch.object(state_backup, "BACKUP_DIR", backups), \
                  mock.patch.object(state_backup, "load_config", return_value={"passphrase_file": str(passphrase)}), \
                  mock.patch.object(state_backup, "encrypt", side_effect=fake_encrypt), \
@@ -99,9 +101,37 @@ class MainPipelineTests(unittest.TestCase):
                 metadata = json.loads(archive.extractfile("metadata.json").read())
                 self.assertEqual(sorted(metadata["sha256"]), ["openclaw.json", "policy.json", "tasks.db"])
 
+    def test_accounting_config_is_backed_up_when_present(self):
+        """F-032c: the untracked accounting config had no backup control."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks, policy, openclaw, passphrase, backups, accounting = self._fixture(tmp)
+            accounting.write_text('{"receipt_channels": {}}\n')
+
+            def fake_encrypt(source, destination, passphrase_file):
+                Path(destination).write_bytes(Path(source).read_bytes())
+
+            with mock.patch.object(state_backup, "TASKS_DB", tasks), \
+                 mock.patch.object(state_backup, "POLICY_PATH", policy), \
+                 mock.patch.object(state_backup, "OPENCLAW_CONFIG", openclaw), \
+                 mock.patch.object(state_backup, "ACCOUNTING_CONFIG", accounting), \
+                 mock.patch.object(state_backup, "BACKUP_DIR", backups), \
+                 mock.patch.object(state_backup, "load_config", return_value={"passphrase_file": str(passphrase)}), \
+                 mock.patch.object(state_backup, "encrypt", side_effect=fake_encrypt), \
+                 mock.patch.object(state_backup, "upload", side_effect=lambda path, config: None), \
+                 mock.patch.object(state_backup, "get_status", return_value={}), \
+                 mock.patch.object(state_backup, "record", side_effect=lambda *args: None):
+                state_backup.main()
+
+            artifact = next(iter(backups.glob("state-*.tar.gz.enc")))
+            with tarfile.open(artifact, "r:gz") as archive:
+                self.assertIn("accounting-config.json", archive.getnames())
+                metadata = json.loads(archive.extractfile("metadata.json").read())
+                self.assertIn("accounting-config.json", metadata["sha256"])
+                self.assertEqual(metadata["sources"]["accounting-config.json"], str(accounting))
+
     def test_main_skips_when_already_done_today(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tasks, policy, openclaw, passphrase, backups = self._fixture(tmp)
+            tasks, policy, openclaw, passphrase, backups, accounting = self._fixture(tmp)
             backups.mkdir()
             from datetime import datetime, timezone
             stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -111,6 +141,7 @@ class MainPipelineTests(unittest.TestCase):
             with mock.patch.object(state_backup, "TASKS_DB", tasks), \
                  mock.patch.object(state_backup, "POLICY_PATH", policy), \
                  mock.patch.object(state_backup, "OPENCLAW_CONFIG", openclaw), \
+                 mock.patch.object(state_backup, "ACCOUNTING_CONFIG", accounting), \
                  mock.patch.object(state_backup, "BACKUP_DIR", backups), \
                  mock.patch.object(state_backup, "load_config", return_value={"passphrase_file": str(passphrase)}), \
                  mock.patch.object(state_backup, "upload", side_effect=lambda path, config: uploads.append(path)), \
@@ -122,7 +153,7 @@ class MainPipelineTests(unittest.TestCase):
 
     def test_missing_store_fails_loudly(self):
         with tempfile.TemporaryDirectory() as tmp:
-            tasks, policy, openclaw, passphrase, backups = self._fixture(tmp)
+            tasks, policy, openclaw, passphrase, backups, accounting = self._fixture(tmp)
             tasks.unlink()
             with mock.patch.object(state_backup, "TASKS_DB", tasks), \
                  mock.patch.object(state_backup, "POLICY_PATH", policy), \

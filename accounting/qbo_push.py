@@ -670,6 +670,48 @@ def _fee_kind(value: Dict) -> str:
     return 'iva' if value.get('is_spei_iva') else 'commission'
 
 
+def _bank_fee_account() -> Tuple[Optional[str], str]:
+    """(account id, normalized account name) for the configured bank-fee account."""
+    try:
+        with open(str(Path(__file__).parent / 'config.json')) as handle:
+            account = json.load(handle).get('qbo_accounts', {}).get('expenses', {}).get('bank_fee', {})
+    except Exception:
+        return None, _normalized_text('Bank Fee')
+    return (
+        str(account.get('id')) if account.get('id') else None,
+        _normalized_text(account.get('name') or 'Bank Fee'),
+    )
+
+
+def _embedded_fee_lines(row: Dict, account_id: Optional[str], account_name: str) -> List[Dict]:
+    """Bank-fee split lines carried INSIDE a parent Purchase.
+
+    The pipeline pushes SPEI fees as separate Purchases, but the pre-cutover
+    flow recorded them as split lines on the parent (principal + Bank Fee +
+    Bank Fee). Those lines are invisible to the standalone matcher, so
+    re-processing a legacy-format statement would have pushed a second,
+    standalone copy of every embedded fee (F-039).
+    """
+    lines = []
+    for index, line in enumerate(row.get('Line') or []):
+        detail = line.get('AccountBasedExpenseLineDetail') or {}
+        ref = detail.get('AccountRef') or {}
+        matches_account = (
+            (account_id and str(ref.get('value') or '') == account_id)
+            or (_normalized_text(ref.get('name')) == account_name)
+        )
+        if not matches_account:
+            continue
+        try:
+            amount = round(float(line.get('Amount') or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        lines.append({'line_index': index, 'amount': amount})
+    return lines
+
+
 def find_missing_spei_fees(
     transactions: List[Dict],
     query_qbo,
@@ -695,17 +737,32 @@ def find_missing_spei_fees(
         return [], []
 
     dates = [str(item['parent'].get('date') or '') for item in expected]
+    # SELECT * — a field list makes QBO return Line stubs with no account
+    # reference, which would make every embedded fee line below invisible.
     sql = (
-        "SELECT Id, TxnDate, TotalAmt, PrivateNote FROM Purchase "
+        "SELECT * FROM Purchase "
         f"WHERE TxnDate >= '{min(dates)}' AND TxnDate <= '{max(dates)}'"
     )
     from dedup import query_all_qbo
     rows = query_all_qbo(query_qbo, sql, 'Purchase')
+    bank_fee_id, bank_fee_name = _bank_fee_account()
     actual = []
+    embedded = []
     for row in rows:
         note = str(row.get('PrivateNote') or '')
         kind_match = re.search(r'\bSPEI\s+(Commission|IVA)\s+on transfer to\s+([^|]+)', note, re.IGNORECASE)
         if not kind_match:
+            # Not a standalone fee record — it may still be a parent carrying
+            # its fees as split lines (the legacy format).
+            for line in _embedded_fee_lines(row, bank_fee_id, bank_fee_name):
+                embedded.append({
+                    'row': row,
+                    'amount': line['amount'],
+                    'line_index': line['line_index'],
+                    'date': str(row.get('TxnDate') or ''),
+                    'note': _normalized_text(note),
+                    'vendor': _normalized_text((row.get('EntityRef') or {}).get('name')),
+                })
             continue
         parent_match = re.search(r'\bParent ref:\s*([^|]+)', note, re.IGNORECASE)
         actual.append({
@@ -716,6 +773,7 @@ def find_missing_spei_fees(
         })
 
     used = set()
+    used_embedded = set()
     missing = []
     matched = []
     for item in expected:
@@ -740,7 +798,35 @@ def find_missing_spei_fees(
             and candidate['destination'] == destination
         ), None)
         if legacy_index is None:
-            missing.append(item)
+            # Legacy embedded format: the fee is already a Bank Fee split line
+            # on its parent Purchase. Same date, same amount, and the parent
+            # identified by its Clave in the memo or by vendor (F-039).
+            embedded_index = next((
+                index for index, candidate in enumerate(embedded)
+                if index not in used_embedded
+                and candidate['date'] == txn_date
+                and candidate['amount'] == amount_usd
+                and (
+                    (parent_reference and parent_reference in candidate['note'])
+                    or (destination and destination == candidate['vendor'])
+                    or (destination and destination in candidate['note'])
+                )
+            ), None)
+            if embedded_index is None:
+                missing.append(item)
+                continue
+            used_embedded.add(embedded_index)
+            candidate = embedded[embedded_index]
+            matched.append({
+                'date': txn_date,
+                'kind': item['kind'],
+                'amount': fee.get('amount'),
+                'amount_usd': amount_usd,
+                'parent_reference': parent.get('reference'),
+                'qbo_id': str(candidate['row'].get('Id') or '') or None,
+                'source': 'embedded_line',
+                'line_index': candidate['line_index'],
+            })
             continue
         used.add(legacy_index)
         row = actual[legacy_index]['row']
@@ -751,6 +837,7 @@ def find_missing_spei_fees(
             'amount_usd': amount_usd,
             'parent_reference': parent.get('reference'),
             'qbo_id': str(row.get('Id') or '') or None,
+            'source': 'standalone',
         })
     return missing, matched
 

@@ -394,6 +394,24 @@ def group_registry(records=None, active_only=False):
     return sorted(output, key=lambda row: row["campaign_name"])
 
 
+def status_divergence(declared, live_effective_status):
+    """The declared `status` field reads as intent; live effective status is truth.
+
+    A registry row declaring PAUSED while the campaign is live and spending
+    (or the reverse) is a silent contradiction — reporting prefers
+    meta_effective_status, so nothing ever surfaced it (F-046). Compared
+    coarsely on ACTIVE-ness so Meta's richer vocabulary (CAMPAIGN_PAUSED,
+    WITH_ISSUES, IN_PROCESS…) cannot manufacture false divergences.
+    """
+    declared_text = str(declared or "").strip().upper()
+    live_text = str(live_effective_status or "").strip().upper()
+    if not declared_text or not live_text or live_text == "UNKNOWN":
+        return None
+    if (declared_text == "ACTIVE") == (live_text == "ACTIVE"):
+        return None
+    return {"declared": declared_text, "live": live_text}
+
+
 def apply_snapshot(records, snapshot, reconciled_at):
     by_id = {str(row["campaign_id"]): row for row in snapshot}
     updated = []
@@ -405,6 +423,11 @@ def apply_snapshot(records, snapshot, reconciled_at):
             row["meta_effective_status"] = live["effective_status"]
             row["meta_reconciled_at"] = reconciled_at
             row["active_ad_count"] = live["active_ad_count"]
+            divergence = status_divergence(row.get("status"), live["effective_status"])
+            if divergence:
+                row["status_divergence"] = {**divergence, "observed_at": reconciled_at}
+            else:
+                row.pop("status_divergence", None)
             row["destinations"] = live["destinations"]
             row["utm_aliases"] = [tag for tag in live["utm_tags"] if tag != row.get("utm_campaign")]
             if live.get("daily_budget_usd") is not None and row.get("budget_level") == "campaign":
