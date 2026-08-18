@@ -289,9 +289,32 @@ function deploy(args) {
   }
 }
 
+/**
+ * Non-fatal summary of the runtime policy fingerprint (F-055). Reported, not
+ * enforced: `check` also runs where workflow/policy.json is deliberately
+ * absent (CI points RESORT_WORKFLOW_POLICY_PATH at a nonexistent file), and a
+ * legitimate hand-install that skipped the record step should be visible
+ * rather than blocking.
+ */
+function policyFingerprintSummary() {
+  try {
+    // eslint-disable-next-line global-require
+    const { checkFingerprint } = require('./policy-fingerprint');
+    const result = checkFingerprint();
+    return {
+      status: result.status,
+      currentSha: result.current?.sha256?.slice(0, 16) || null,
+      recordedSha: result.recorded?.sha256?.slice(0, 16) || null,
+      recordedAt: result.recorded?.recorded_at || null,
+    };
+  } catch (error) {
+    return { status: 'check_error', error: error.message };
+  }
+}
+
 function main(args = process.argv.slice(2)) {
   const action = args[0] || 'check';
-  if (action === 'check') return inspectCheckout();
+  if (action === 'check') return { ...inspectCheckout(), policyFingerprint: policyFingerprintSummary() };
   if (action === 'deploy') return deploy(args.slice(1));
   if (action === 'unlock') return clearStaleLock(args.slice(1));
   throw new Error('usage: production-release.js check | deploy --confirm-production | unlock --confirm-stale-lock');

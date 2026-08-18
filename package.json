@@ -34,7 +34,7 @@
     "test:automation": "PYTHONPATH=automation python3 -m unittest discover -s automation/tests -p 'test_*.py'",
     "test:accounting": "python3 -m unittest discover -s accounting -p 'test_*.py'",
     "test:evals": "node --test evals/*.test.js && node evals/run.js --responses evals/responses.fixture.json",
-    "test:release": "node --test scripts/production-release.test.js scripts/install-launchagents.test.js",
+    "test:release": "node --test scripts/production-release.test.js scripts/install-launchagents.test.js scripts/policy-fingerprint.test.js",
     "eval:fixture": "node evals/run.js --responses evals/responses.fixture.json",
     "eval:workflows": "test -n \"$EVAL_RESPONSES_FILE\" && node evals/run.js --responses \"$EVAL_RESPONSES_FILE\"",
     "check:javascript": "node scripts/check-javascript.js",
