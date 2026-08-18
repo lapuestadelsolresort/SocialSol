@@ -5,6 +5,10 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 const { stageSlackAccountingStatement } = require('../../crm/lib/accounting-slack-inbox.js');
+const {
+  GLOBAL_COMMANDS, TERMINAL_ONLY_COMMANDS, surfaceByName, commandsFor,
+} = require('../../lib/command-surfaces.js');
+const { QUARANTINED_LIVE_WORKFLOWS } = require('../../lib/quarantined-workflows.js');
 const { buildTaskReport, loadUsers } = require('../../paloma/lib/task-report.js');
 
 const WORKFLOW_SCHEMA = {
@@ -2248,6 +2252,188 @@ export function createAccountingStatementReplyDispatchHandler(options = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Operator help surface (F-058)
+//
+// The command catalog is generated from the workflow registry into the
+// per-surface COMMANDS.md files; `!help` answers the half of the question those
+// documents deliberately cannot — what is armed in THIS channel right now.
+// Both read lib/command-surfaces.js, so they can report different states but
+// never different commands.
+
+export const HELP_COMMAND = '!help';
+
+function helpChannelIds(config) {
+  const ids = new Set(config.controlledChannelIds);
+  for (const key of [
+    'whatsappChannelIds', 'socialChannelIds', 'emailChannelIds', 'ownerrezChannelIds',
+    'reservationsChannelIds', 'receiptChannelIds', 'ownerExpenseChannelIds', 'accountingChannelIds',
+  ]) {
+    for (const id of config[key]) ids.add(id);
+  }
+  return ids;
+}
+
+export function workflowExecutionState(definition, payload) {
+  if (QUARANTINED_LIVE_WORKFLOWS.includes(definition.name)) return 'quarantined';
+  if (definition.mutates === false) return 'read';
+  if (payload?.shadow_mode !== true) return 'live';
+  const live = Array.isArray(payload?.live_workflows) ? payload.live_workflows : [];
+  return live.includes(definition.name) ? 'live' : 'shadowed';
+}
+
+const STATE_LABELS = {
+  live: 'live',
+  shadowed: 'shadow — simulated, nothing reaches the provider',
+  read: 'read-only',
+  quarantined: 'quarantined — refused',
+};
+
+function commandBullets(commands) {
+  const lines = [];
+  for (const info of commands) {
+    for (const usage of info.usage) lines.push(`  • \`${usage}\``);
+    lines.push(`     ${info.detail}`);
+  }
+  return lines;
+}
+
+export function formatHelpReply(payload) {
+  const channel = payload?.channel || null;
+  if (!channel) {
+    return 'This channel has no entry in the workflow policy, so no durable workflow runs here.';
+  }
+  const capabilities = new Set(Array.isArray(channel.capabilities) ? channel.capabilities : []);
+  const surface = surfaceByName(channel.name);
+  const heading = `*${surface ? surface.title : channel.name || 'This channel'}*`;
+  if (!capabilities.size) {
+    return [
+      heading,
+      '',
+      'This channel has no business-system capability. Nothing here reads or mutates'
+      + ' CRM, OwnerRez, accounting, messaging, or marketing systems.',
+    ].join('\n');
+  }
+  const definitions = (Array.isArray(payload.definitions) ? payload.definitions : [])
+    .filter(definition => capabilities.has(definition.capability))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const commands = commandsFor(definitions, { exclude: QUARANTINED_LIVE_WORKFLOWS });
+  const lines = [heading, ''];
+  if (commands.length) {
+    lines.push('*Type these exactly:*');
+    lines.push(...commandBullets(commands));
+    lines.push('');
+  }
+  lines.push('*Available in every controlled channel:*');
+  lines.push(...commandBullets(GLOBAL_COMMANDS));
+  lines.push('');
+  lines.push('*Workflows this channel can run:*');
+  for (const definition of definitions) {
+    const state = workflowExecutionState(definition, payload);
+    const autonomous = definition.autonomous && state === 'live' ? ' · runs on its own' : '';
+    lines.push(`  • \`${definition.name}\` — ${STATE_LABELS[state]}${autonomous}`);
+  }
+  if (!definitions.length) lines.push('  • none registered for this channel\'s capabilities');
+  lines.push('');
+  lines.push(`Everything else is conversational: ask, and it runs through \`resort_workflow\`.${
+    surface ? ` Full reference: \`${surface.doc}\`.` : ''
+  }`);
+  return lines.join('\n');
+}
+
+export function formatUnknownCommandReply(text, payload) {
+  const word = String(text || '').trim().split(/\s+/)[0].toLowerCase();
+  const terminal = TERMINAL_ONLY_COMMANDS[word];
+  const lines = [];
+  if (terminal) {
+    lines.push(`\`${word}\` has no Slack path — it is an operator terminal command.`);
+    lines.push(`  ${terminal}`);
+  } else {
+    lines.push(`\`${word}\` is not a command in this channel, so nothing ran.`);
+  }
+  const channel = payload?.channel || null;
+  const capabilities = new Set(Array.isArray(channel?.capabilities) ? channel.capabilities : []);
+  const definitions = (Array.isArray(payload?.definitions) ? payload.definitions : [])
+    .filter(definition => capabilities.has(definition.capability));
+  const commands = commandsFor(definitions, { exclude: QUARANTINED_LIVE_WORKFLOWS });
+  lines.push('');
+  if (commands.length) {
+    lines.push('*Commands that do work here:*');
+    lines.push(...commandBullets(commands));
+  } else {
+    lines.push('No typed command belongs to this channel.');
+  }
+  lines.push('');
+  lines.push(`Type \`${HELP_COMMAND}\` for everything this channel can run.`);
+  return lines.join('\n');
+}
+
+async function fetchChannelDefinitions(config, channelId, fetchImpl = fetch) {
+  const token = controlPlaneToken(config);
+  if (!token || token.length < 32) {
+    const error = new Error('workflow control-plane token is missing or too short in the configured environment/file');
+    error.code = 'workflow_control_token_missing';
+    throw error;
+  }
+  const url = `${config.crmBaseUrl}/api/workflows/definitions?channel=${encodeURIComponent(channelId)}`;
+  const response = await fetchImpl(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `workflow control plane returned ${response.status}`);
+    error.code = payload.code || `workflow_http_${response.status}`;
+    throw error;
+  }
+  return payload;
+}
+
+export function createHelpClaimHandler({ config, fetchImpl = fetch, logger = null } = {}) {
+  const channels = helpChannelIds(config);
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
+    if (!channels.has(channelId)) return undefined;
+    const text = claimCommandText(event);
+    if (!/^!help(?:\s|$)/i.test(text)) return undefined;
+    try {
+      const payload = await fetchChannelDefinitions(config, channelId, fetchImpl);
+      return { handled: true, reply: { text: formatHelpReply(payload) } };
+    } catch (error) {
+      logger?.warn?.(`resort-workflows help lookup failed: ${error.message}`);
+      return {
+        handled: true,
+        reply: { text: 'The workflow control plane did not answer, so this channel\'s live command list is unavailable right now.' },
+      };
+    }
+  };
+}
+
+// Runs last on purpose: any `!`-prefixed message still unclaimed here reached
+// no command handler at all, and the operator deserves to be told that rather
+// than watch the conversational agent improvise over it. This does NOT rescue a
+// command lost to gateway coalescing (F-051 iii) — that message never becomes
+// an inbound event, so no handler, including this one, ever sees it.
+export function createUnknownCommandClaimHandler({ config, fetchImpl = fetch, logger = null } = {}) {
+  return async (event, ctx) => {
+    if (event?.channel !== 'slack') return undefined;
+    if (config.slackAccountId && event.accountId && event.accountId !== config.slackAccountId) return undefined;
+    const channelId = String(event.conversationId || ctx?.conversationId || '').replace(/^channel:/, '');
+    if (!config.controlledChannelIds.has(channelId)) return undefined;
+    const text = claimCommandText(event);
+    if (!/^!/.test(text)) return undefined;
+    let payload = {};
+    try {
+      payload = await fetchChannelDefinitions(config, channelId, fetchImpl);
+    } catch (error) {
+      logger?.warn?.(`resort-workflows unknown-command lookup failed: ${error.message}`);
+    }
+    return { handled: true, reply: { text: formatUnknownCommandReply(text, payload) } };
+  };
+}
+
 const plugin = {
   id: 'resort-workflows',
   name: 'Resort Workflows',
@@ -2279,6 +2465,10 @@ const plugin = {
     api.on('inbound_claim', createEmailClaimHandler({ config, logger: api.logger }), { priority: 206, timeoutMs: 70_000 });
     api.on('inbound_claim', createMarketingConfirmClaimHandler({ config, logger: api.logger }), { priority: 207, timeoutMs: 70_000 });
     api.on('inbound_claim', createManualReviewClaimHandler({ config, logger: api.logger }), { priority: 220, timeoutMs: 35_000 });
+    api.on('inbound_claim', createHelpClaimHandler({ config, logger: api.logger }), { priority: 225, timeoutMs: 20_000 });
+    // Lowest priority in the plugin: every real command handler has already
+    // declined by the time this one sees a `!` message.
+    api.on('inbound_claim', createUnknownCommandClaimHandler({ config, logger: api.logger }), { priority: 10, timeoutMs: 20_000 });
     api.on('inbound_claim', createReceiptConfirmClaimHandler({ config, logger: api.logger }), { priority: 215, timeoutMs: 70_000 });
     api.on('message_received', createReceiptHandler({ config, logger: api.logger }), { priority: 100, timeoutMs: 70_000 });
     api.on('before_agent_finalize', createFinalizeHandler({ config }), { priority: 100, timeoutMs: 5_000 });

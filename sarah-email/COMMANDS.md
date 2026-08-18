@@ -83,3 +83,45 @@ installs the five-minute unified Gmail poller, retires the legacy 15-minute
 inbound scanner, restarts the workflow worker and gateway, verifies the resort
 Slack Socket Mode connection, and requires an acknowledged welcome post in the
 channel.
+
+<!-- BEGIN GENERATED: durable workflows on the sarah-email surface — regenerate with `npm run docs:commands` -->
+
+### Durable workflows — Sarah Email
+
+Generated from the workflow registry. Whether a mutating workflow executes for
+real or is shadowed is runtime state, not repo state: ask `!help` in the channel.
+
+| Workflow | Capability | Effects | How it runs |
+| --- | --- | --- | --- |
+| `email.activity.read` | `email.read` | read-only | agent tool |
+| `email.message.classify` | `email.send` | read-only | `!email classify` |
+| `email.message.observe` | `email.read` | read-only | agent tool |
+| `email.reply.confirm` | `email.send` | mutates | `!email confirm` or policy-armed |
+| `email.reply.propose` | `email.send` | read-only | `!email reply` |
+
+**Exact Slack commands on this surface**
+
+- `!email classify <conversation-id> <hot|not_interested|ambiguous>`
+
+  Records a reply classification; sends nothing.
+
+- `!email confirm <request-id> <hash>`
+
+  The exact emitted command, from the same user; this is the send.
+
+- `!email reply <text>`
+
+  Typed in the recorded conversation thread; creates an immutable proposal and sends nothing.
+
+**Available in every controlled channel**
+
+- `!review resolve <review-id> sent <provider-ref>`
+- `!review resolve <review-id> <not-sent|abandon>`
+
+  Resolves an open manual review from any controlled channel.
+
+- `!help`
+
+  Lists the commands and workflows this channel can actually run right now.
+
+<!-- END GENERATED -->

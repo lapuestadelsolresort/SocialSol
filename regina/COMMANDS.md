@@ -39,3 +39,28 @@ completed `regina.campaign` runs since the prior daily summary. Workflow-managed
 scripts suppress their own routine completion summaries; manual-draft threads
 and immediate failure or skip alerts still post when operator action is needed.
 Successful auto-send notices are included only in the aggregate summary.
+
+<!-- BEGIN GENERATED: durable workflows on the reengager-regina surface — regenerate with `npm run docs:commands` -->
+
+### Durable workflows — Reengager Regina
+
+Generated from the workflow registry. Whether a mutating workflow executes for
+real or is shadowed is runtime state, not repo state: ask `!help` in the channel.
+
+| Workflow | Capability | Effects | How it runs |
+| --- | --- | --- | --- |
+| `regina.campaign` | `regina.send` | mutates | agent tool |
+| `regina.daily` | `regina.send` | mutates · autonomous | agent tool |
+
+**Available in every controlled channel**
+
+- `!review resolve <review-id> sent <provider-ref>`
+- `!review resolve <review-id> <not-sent|abandon>`
+
+  Resolves an open manual review from any controlled channel.
+
+- `!help`
+
+  Lists the commands and workflows this channel can actually run right now.
+
+<!-- END GENERATED -->

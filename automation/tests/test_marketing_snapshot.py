@@ -1,6 +1,11 @@
 import unittest
 
-from marketing_snapshot import derive_authorized_actions, inclusive_window_days
+from marketing_snapshot import (
+    derive_authorized_actions,
+    format_commands,
+    format_report,
+    inclusive_window_days,
+)
 
 
 def campaign(*, spend, budget=10, ctr=1.0, cpc=1.0, taps=0, leads=0, status="ACTIVE"):
@@ -48,3 +53,73 @@ class MarketingSnapshotAutonomyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PointOfNeedCommandsTest(unittest.TestCase):
+    """F-058: the daily paid report names the controls that act on its own rows."""
+
+    def _snapshot(self, campaigns):
+        return {"campaigns": campaigns}
+
+    def test_each_campaign_gets_its_real_id_and_its_brief_drift_check(self):
+        lines = format_commands(self._snapshot([
+            {
+                "campaign_name": "LPDS — Weddings",
+                "campaign_id": "120210000000123",
+                "committed_brief_ids": ["weddings"],
+            },
+        ]))
+        body = "\n".join(lines)
+        self.assertIn("`120210000000123`", body)
+        self.assertIn("assert --brief campaigns/weddings.json", body)
+        self.assertIn("!meta confirm <request-id> <hash>", body)
+        self.assertIn("owner-only", body)
+        self.assertIn("`!help`", body)
+
+    def test_a_campaign_with_no_committed_brief_is_told_why_it_is_blocked(self):
+        body = "\n".join(format_commands(self._snapshot([
+            {
+                "campaign_name": "LPDS — Retarget Hot",
+                "campaign_id": "120210000000999",
+                "committed_brief_ids": [],
+            },
+        ])))
+        self.assertIn("no committed brief", body)
+        self.assertNotIn("assert --brief campaigns/.json", body)
+
+    def test_multiple_briefs_each_get_their_own_command(self):
+        body = "\n".join(format_commands(self._snapshot([
+            {
+                "campaign_name": "LPDS — Milestones",
+                "campaign_id": "120210000000777",
+                "committed_brief_ids": ["milestones", "corporate-retreats"],
+            },
+        ])))
+        self.assertIn("campaigns/milestones.json", body)
+        self.assertIn("campaigns/corporate-retreats.json", body)
+
+    def test_a_report_with_no_campaigns_appends_nothing(self):
+        self.assertEqual(format_commands(self._snapshot([])), [])
+
+    def test_the_commands_reach_the_rendered_report(self):
+        snapshot = {
+            "window": {"start": "2026-08-16", "end": "2026-08-16"},
+            "totals": {"spend": 40.0, "sessions": 10, "wa_taps": 3, "verified_wa_leads": 1},
+            "tracking_health": {"healthy": True},
+            "campaigns": [{
+                "campaign_name": "LPDS — Weddings",
+                "campaign_id": "120210000000123",
+                "committed_brief_ids": ["weddings"],
+                "delivery_flags": [],
+                "meta": {"spend": 40.0, "link_clicks": 12, "landing_page_views": 9},
+                "crm": {"sessions": 10, "wa_taps": 3, "verified_wa_leads": 1},
+            }],
+            "unattributed_verified_leads": 0,
+            "squarespace_commerce": {"available": False},
+            "authorized_actions": [],
+        }
+        report = format_report(snapshot)
+        self.assertIn("*Commands for these campaigns:*", report)
+        self.assertIn("`120210000000123`", report)
+        # the trailing definition line stays last so the report still ends on it
+        self.assertTrue(report.rstrip().endswith("actual first inbound conversations._"))

@@ -195,3 +195,69 @@ schema migrations, Slack alert configuration, runtime processes, or a running
 process whose loaded source predates checkout edits are also unhealthy.
 Live paid-media report and audience-sync graphs must each have a completed run
 within 30 hours, and their LaunchAgents must remain loaded.
+
+<!-- BEGIN GENERATED: full workflow catalog — regenerate with `npm run docs:commands` -->
+
+### Full workflow catalog
+
+53 registered definitions. "Surface" is the operator command
+reference that documents the workflow; a workflow with no surface has no
+operator entry point and the reason is stated.
+
+| Workflow | Capability | Effects | Surface |
+| --- | --- | --- | --- |
+| `accounting.classify` | `accounting.write` | mutates · autonomous | accounting |
+| `accounting.reconciliation.read` | `qbo.read` | read-only | accounting |
+| `business.snapshot.read` | `business.read` | read-only | _none — cross-domain read, available from the business-intel channel through the agent tool_ |
+| `crm.contacts.read` | `crm.read` | read-only | _none — cross-domain read, available from the business-intel channel through the agent tool_ |
+| `crm.pipeline.read` | `crm.read` | read-only | _none — cross-domain read, available from the business-intel channel through the agent tool_ |
+| `crm.sync` | `crm.write` | mutates · autonomous | _none — automatic ingestion and sync — provider webhooks and scheduled syncs, no operator entry point_ |
+| `email.activity.read` | `email.read` | read-only | prospector-paulina, sarah-email |
+| `email.message.classify` | `email.send` | read-only | prospector-paulina, sarah-email |
+| `email.message.observe` | `email.read` | read-only | prospector-paulina, sarah-email |
+| `email.reply.confirm` | `email.send` | mutates | prospector-paulina, sarah-email |
+| `email.reply.propose` | `email.send` | read-only | prospector-paulina, sarah-email |
+| `guest.reply.draft` | `guest_messages.draft` | mutates | sarah-coach |
+| `marketing.change.confirm` | `marketing.write` | mutates | social-sol |
+| `marketing.change.propose` | `marketing.write` | read-only | social-sol |
+| `marketing.report.daily` | `marketing.read` | mutates · autonomous | social-sol |
+| `marketing.snapshot.read` | `marketing.read` | read-only | social-sol |
+| `meta.audience.sync` | `marketing.write` | mutates · autonomous | social-sol |
+| `meta.campaign.autonomous` | `marketing.write` | mutates · autonomous | social-sol |
+| `meta.dm.reply` | `social.write` | **quarantined** | social-sol |
+| `ownerrez.crm.sync` | `crm.write` | mutates · autonomous | _none — automatic ingestion and sync — provider webhooks and scheduled syncs, no operator entry point_ |
+| `ownerrez.mutation.confirm` | `ownerrez.write` | mutates | reservations |
+| `ownerrez.mutation.propose` | `ownerrez.write` | read-only | reservations |
+| `ownerrez.occupancy.read` | `ownerrez.read` | read-only | reservations |
+| `ownerrez.webhook.process` | `crm.write` | mutates · autonomous | _none — automatic ingestion and sync — provider webhooks and scheduled syncs, no operator entry point_ |
+| `paulina.daily` | `paulina.send` | mutates · autonomous | prospector-paulina |
+| `paulina.performance.read` | `paulina.read` | read-only | prospector-paulina |
+| `paulina.prepare_daily` | `paulina.prepare` | mutates · autonomous | prospector-paulina |
+| `qbo.bank_balances.read` | `qbo.read` | read-only | accounting |
+| `qbo.report.read` | `qbo.read` | read-only | accounting |
+| `qbo.write` | `qbo.write` | mutates · autonomous | accounting |
+| `receipt.annotate` | `receipts.write` | mutates | accounting |
+| `receipt.ingest` | `receipts.submit` | mutates | accounting |
+| `receipt.owner_expense.confirm` | `qbo.owner_expense.write` | mutates | accounting |
+| `receipt.owner_expense.ingest` | `qbo.owner_expense.write` | mutates | accounting |
+| `receipt.owner_expense.process` | `qbo.owner_expense.write` | mutates | accounting |
+| `receipt.owner_expense.reconcile` | `qbo.owner_expense.write` | mutates | accounting |
+| `receipt.payment_source.select` | `receipts.write` | mutates | accounting |
+| `receipt.process` | `receipts.write` | mutates | accounting |
+| `receipt.reconcile` | `accounting.write` | mutates · autonomous | accounting |
+| `receipts.scoped.read` | `accounting.read_scoped` | read-only | accounting |
+| `receipts.status.read` | `receipts.read` | read-only | accounting |
+| `regina.campaign` | `regina.send` | mutates | reengager-regina |
+| `regina.daily` | `regina.send` | mutates · autonomous | reengager-regina |
+| `social.content.publish` | `social.publish` | mutates | social-sol |
+| `social.content.read` | `social.read` | read-only | social-sol |
+| `social.content.upsert` | `social.write` | mutates | social-sol |
+| `social.publish_due` | `social.publish` | mutates · autonomous | social-sol |
+| `social.publish_routine` | `social.publish` | mutates · autonomous | social-sol |
+| `squarespace.crm.sync` | `crm.write` | mutates · autonomous | _none — automatic ingestion and sync — provider webhooks and scheduled syncs, no operator entry point_ |
+| `squarespace.summary.read` | `squarespace.read` | read-only | _none — cross-domain read, available from the business-intel channel through the agent tool_ |
+| `whatsapp.inbound.process` | `crm.write` | mutates · autonomous | _none — automatic ingestion and sync — provider webhooks and scheduled syncs, no operator entry point_ |
+| `whatsapp.reply` | `whatsapp.send` | mutates | whatsapp |
+| `whatsapp.status.read` | `whatsapp.read` | read-only | whatsapp |
+
+<!-- END GENERATED -->

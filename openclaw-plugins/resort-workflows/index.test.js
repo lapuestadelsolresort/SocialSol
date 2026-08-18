@@ -4,7 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { TRIGGERS, GLOBAL_COMMANDS } from '../../lib/command-surfaces.js';
 import {
+  createHelpClaimHandler,
+  createUnknownCommandClaimHandler,
+  formatHelpReply,
+  formatUnknownCommandReply,
+  workflowExecutionState,
   accountingCsvSignalFromFinalizedContext,
   createAccountingTransactionReplyDispatchHandler,
   createAccountingReconciliationClaimHandler,
@@ -1848,4 +1854,227 @@ test('exact commands intercept when the gateway wraps the body in metadata pream
   assert.equal(review.handled, true);
   assert.equal(resolutions.length, 1);
   assert.equal(resolutions[0].resolution, 'confirmed_not_sent');
+});
+
+// --- F-058: operator help surface -------------------------------------------
+
+const HELP_PAYLOAD = {
+  shadow_mode: true,
+  live_workflows: ['marketing.change.confirm', 'meta.campaign.autonomous'],
+  definitions: [
+    { name: 'marketing.change.confirm', capability: 'marketing.write', mutates: true, autonomous: false, allowed_triggers: ['slack_meta_campaign_confirm_command', 'auto_confirm_dispatch'] },
+    { name: 'marketing.change.propose', capability: 'marketing.write', mutates: false, autonomous: false, allowed_triggers: null },
+    { name: 'meta.campaign.autonomous', capability: 'marketing.write', mutates: true, autonomous: true, allowed_triggers: null },
+    { name: 'meta.audience.sync', capability: 'marketing.write', mutates: true, autonomous: true, allowed_triggers: null },
+    { name: 'meta.dm.reply', capability: 'social.write', mutates: true, autonomous: false, allowed_triggers: ['slack_meta_dm_command'] },
+    { name: 'regina.daily', capability: 'regina.send', mutates: true, autonomous: true, allowed_triggers: null },
+  ],
+  channel: { id: 'C-SOCIAL', name: 'social-sol', capabilities: ['marketing.write', 'marketing.read', 'social.write'] },
+};
+
+function helpConfig(overrides = {}) {
+  return pluginConfig({
+    slackAccountId: 'resort',
+    crmBaseUrl: 'http://127.0.0.1:3456',
+    socialChannelIds: ['C-SOCIAL'],
+    controlledChannelIds: ['C-SOCIAL', 'C-QUIET'],
+    ...overrides,
+  });
+}
+
+function helpFetch(payload = HELP_PAYLOAD, calls = []) {
+  return async (url, options) => {
+    calls.push({ url: String(url), options });
+    return { ok: true, status: 200, json: async () => payload };
+  };
+}
+
+test('help renders live, shadowed, read-only and quarantined states from one payload', () => {
+  const text = formatHelpReply(HELP_PAYLOAD);
+  assert.match(text, /Paid Meta, social publishing, and Meta DMs/);
+  // live_workflows exactly: the two named, and nothing else mutating
+  assert.match(text, /`marketing\.change\.confirm` — live/);
+  assert.match(text, /`meta\.campaign\.autonomous` — live · runs on its own/);
+  assert.match(text, /`meta\.audience\.sync` — shadow — simulated, nothing reaches the provider/);
+  assert.match(text, /`marketing\.change\.propose` — read-only/);
+  assert.match(text, /`meta\.dm\.reply` — quarantined — refused/);
+  // a workflow outside this channel's capabilities never appears
+  assert.doesNotMatch(text, /regina\.daily/);
+  // the quarantined command is never offered as typeable
+  assert.doesNotMatch(text, /!dm </);
+  assert.match(text, /!meta confirm <request-id> <hash>/);
+  assert.match(text, /!review resolve <review-id> sent <provider-ref>/);
+  assert.match(text, /campaigns\/COMMANDS\.md/);
+});
+
+test('help marks every mutating workflow live when shadow mode is off', () => {
+  const text = formatHelpReply({ ...HELP_PAYLOAD, shadow_mode: false, live_workflows: [] });
+  assert.match(text, /`meta\.audience\.sync` — live/);
+  assert.doesNotMatch(text, /shadow — simulated/);
+  // quarantine outranks shadow_mode: it is a repo-level guard, not a policy toggle
+  assert.match(text, /`meta\.dm\.reply` — quarantined — refused/);
+});
+
+test('help states the live set exactly, in both directions', () => {
+  const live = HELP_PAYLOAD.live_workflows;
+  for (const definition of HELP_PAYLOAD.definitions) {
+    if (definition.capability !== 'marketing.write' && definition.capability !== 'social.write') continue;
+    const state = workflowExecutionState(definition, HELP_PAYLOAD);
+    if (definition.name === 'meta.dm.reply') { assert.equal(state, 'quarantined'); continue; }
+    if (definition.mutates === false) { assert.equal(state, 'read'); continue; }
+    assert.equal(state === 'live', live.includes(definition.name), definition.name);
+  }
+});
+
+test('help declines a channel with no policy entry and one with no capability', () => {
+  assert.match(formatHelpReply({ definitions: [], channel: null }), /no entry in the workflow policy/);
+  const bare = formatHelpReply({ ...HELP_PAYLOAD, channel: { id: 'C-X', name: 'random-ops', capabilities: [] } });
+  assert.match(bare, /no business-system capability/);
+  assert.doesNotMatch(bare, /marketing\.change\.confirm/);
+});
+
+test('!help claims only in bound channels and asks the control plane for that channel', async () => {
+  const previous = process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+  process.env.RESORT_WORKFLOW_CONTROL_TOKEN = 'x'.repeat(40);
+  try {
+    const calls = [];
+    const handler = createHelpClaimHandler({ config: helpConfig(), fetchImpl: helpFetch(HELP_PAYLOAD, calls) });
+    const claimed = await handler({ channel: 'slack', accountId: 'resort', conversationId: 'channel:C-SOCIAL', bodyForAgent: '!help' }, {});
+    assert.equal(claimed.handled, true);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /\/api\/workflows\/definitions\?channel=C-SOCIAL$/);
+    assert.match(claimed.reply.text, /Type these exactly/);
+
+    assert.equal(await handler({ channel: 'slack', accountId: 'resort', conversationId: 'C-ELSEWHERE', bodyForAgent: '!help' }, {}), undefined);
+    assert.equal(await handler({ channel: 'slack', accountId: 'resort', conversationId: 'C-SOCIAL', bodyForAgent: 'help me' }, {}), undefined);
+    assert.equal(await handler({ channel: 'whatsapp', conversationId: 'C-SOCIAL', bodyForAgent: '!help' }, {}), undefined);
+    assert.equal(await handler({ channel: 'slack', accountId: 'other-workspace', conversationId: 'C-SOCIAL', bodyForAgent: '!help' }, {}), undefined);
+  } finally {
+    if (previous === undefined) delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+    else process.env.RESORT_WORKFLOW_CONTROL_TOKEN = previous;
+  }
+});
+
+test('!help survives an unreachable control plane without pretending to know', async () => {
+  const previous = process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+  process.env.RESORT_WORKFLOW_CONTROL_TOKEN = 'x'.repeat(40);
+  try {
+    const handler = createHelpClaimHandler({
+      config: helpConfig(),
+      fetchImpl: async () => { throw new Error('ECONNREFUSED'); },
+    });
+    const result = await handler({ channel: 'slack', accountId: 'resort', conversationId: 'C-SOCIAL', bodyForAgent: '!help' }, {});
+    assert.equal(result.handled, true);
+    assert.match(result.reply.text, /did not answer/);
+  } finally {
+    if (previous === undefined) delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+    else process.env.RESORT_WORKFLOW_CONTROL_TOKEN = previous;
+  }
+});
+
+test('!help wrapped in the gateway metadata preamble still claims', async () => {
+  const previous = process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+  process.env.RESORT_WORKFLOW_CONTROL_TOKEN = 'x'.repeat(40);
+  try {
+    const handler = createHelpClaimHandler({ config: helpConfig(), fetchImpl: helpFetch() });
+    const result = await handler({
+      channel: 'slack', accountId: 'resort', conversationId: 'C-SOCIAL',
+      bodyForAgent: '```\nConversation info\n```\n!help',
+    }, {});
+    assert.equal(result.handled, true);
+  } finally {
+    if (previous === undefined) delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+    else process.env.RESORT_WORKFLOW_CONTROL_TOKEN = previous;
+  }
+});
+
+test('unknown-command guidance names the terminal-only Regina commands', () => {
+  const text = formatUnknownCommandReply('!defer 7', HELP_PAYLOAD);
+  assert.match(text, /`!defer` has no Slack path/);
+  assert.match(text, /regina\/scripts\/defer\.js/);
+  assert.match(text, /!meta confirm/);
+  assert.match(text, /Type `!help`/);
+});
+
+test('unknown-command guidance answers an invented command without offering a quarantined one', () => {
+  const text = formatUnknownCommandReply('!publish everything now', HELP_PAYLOAD);
+  assert.match(text, /`!publish` is not a command in this channel, so nothing ran/);
+  assert.match(text, /Commands that do work here/);
+  assert.doesNotMatch(text, /!dm </);
+});
+
+test('unknown-command guidance still answers when the control plane is unreachable', () => {
+  const text = formatUnknownCommandReply('!wat', {});
+  assert.match(text, /not a command in this channel/);
+  assert.match(text, /No typed command belongs to this channel/);
+  assert.match(text, /Type `!help`/);
+});
+
+test('unknown-command handler claims only unclaimed ! text in controlled channels', async () => {
+  const previous = process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+  process.env.RESORT_WORKFLOW_CONTROL_TOKEN = 'x'.repeat(40);
+  try {
+    const handler = createUnknownCommandClaimHandler({ config: helpConfig(), fetchImpl: helpFetch() });
+    const claimed = await handler({ channel: 'slack', accountId: 'resort', conversationId: 'channel:C-QUIET', bodyForAgent: '!nope' }, {});
+    assert.equal(claimed.handled, true);
+    // ordinary prose is never claimed — the agent still owns the conversation
+    assert.equal(await handler({ channel: 'slack', accountId: 'resort', conversationId: 'C-QUIET', bodyForAgent: 'what commands exist?' }, {}), undefined);
+    // an uncontrolled channel is left alone entirely
+    assert.equal(await handler({ channel: 'slack', accountId: 'resort', conversationId: 'C-PUBLIC', bodyForAgent: '!nope' }, {}), undefined);
+  } finally {
+    if (previous === undefined) delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+    else process.env.RESORT_WORKFLOW_CONTROL_TOKEN = previous;
+  }
+});
+
+test('every documented command usage string parses with the real command parser', () => {
+  // The threaded `!wa` form is only valid inside a guest thread, which is
+  // exactly what its documented detail says; parse each usage in the context
+  // the documentation claims for it.
+  const samples = {
+    '!wa': (text, usage) => parseWhatsAppCommand(text, { hasThread: !usage.includes('<wa-id>') }),
+    '!dm': text => parseMetaDmCommand(text),
+    '!email': text => parseEmailCommand(text, { hasThread: true }),
+    '!meta': text => parseMarketingConfirmCommand(text),
+    '!ownerrez': text => parseOwnerRezConfirmCommand(text),
+    '!receipt': text => parseReceiptConfirmCommand(text),
+    '!review': text => parseManualReviewCommand(text),
+  };
+  const uuid = '4df5fc31-c9f8-4b30-8dcc-0a13482beedd';
+  const hash = 'a1b2c3d4e5f6';
+  const concrete = usage => usage
+    .replace('<wa-id>', '5215551234567')
+    .replace('<page-scoped-id>', '1234567890')
+    .replace('<request-id>', uuid)
+    .replace('<review-id>', uuid)
+    .replace('<receipt-id>', uuid)
+    .replace('<conversation-id>', '42')
+    .replace('<hash>', hash)
+    .replace('<provider-ref>', 'SM1234567890')
+    .replace('<hot|not_interested|ambiguous>', 'hot')
+    .replace('<not-sent|abandon>', 'not-sent')
+    .replace('<YYYY-MM-DD>', '2026-08-17')
+    .replace('<MXN|USD>', 'MXN')
+    .replace('<amount>', '1234.50')
+    .replace('<account-code>', 'supplies')
+    .replace('<description>', 'Tienda de pinturas')
+    .replace('<message>', 'Hola, confirmamos su reservación')
+    .replace('<text>', 'Thanks for reaching out')
+    .replace('<days>', '7');
+  const usages = [
+    ...Object.values(TRIGGERS).flatMap(info => info.usage),
+    ...GLOBAL_COMMANDS.flatMap(info => info.usage),
+  ];
+  assert.ok(usages.length >= 10, 'the command table should document at least ten usage shapes');
+  let checked = 0;
+  for (const usage of usages) {
+    const word = usage.split(/\s+/)[0];
+    const parse = samples[word];
+    if (!parse) { assert.equal(word, '!help', `undocumented command word ${word}`); continue; }
+    const parsed = parse(concrete(usage), usage);
+    assert.ok(parsed, `parser returned nothing for documented usage: ${usage}`);
+    assert.ok(!parsed.error, `documented usage does not parse: ${usage} → ${parsed.error}`);
+    checked += 1;
+  }
+  assert.ok(checked >= 9, `expected to verify at least nine usage shapes, verified ${checked}`);
 });

@@ -45,12 +45,27 @@ named stash or separate worktree, restore clean `main` immediately, and handle
 them in a separate pull request. Never leave uncommitted source changes in the
 serving checkout.
 
-Service command references live in:
+Operator command references live in:
 
+- `accounting/COMMANDS.md`
+- `campaigns/COMMANDS.md` (paid Meta, social publishing, Meta DMs)
+- `docs/commands/reservations.md`
+- `docs/commands/whatsapp.md`
 - `prospector/COMMANDS.md`
 - `regina/COMMANDS.md`
 - `sarah-coach/COMMANDS.md`
 - `sarah-email/COMMANDS.md`
+
+Each carries a generated block listing the durable workflows on that surface;
+`workflow/README.md` carries the full catalog. Never hand-edit inside the
+`BEGIN GENERATED` / `END GENERATED` markers — run `npm run docs:commands` and
+commit the result. `npm run check:docs` (part of `check:stack`, so CI and every
+deploy run it) fails when the committed blocks and the registry disagree.
+Adding a workflow whose capability belongs to no surface fails that check until
+the surface is assigned or the absence of an operator surface is recorded.
+
+What is armed *right now* is runtime state and deliberately absent from these
+documents: `!help` in the channel answers that.
 
 LaunchAgents are rendered from `deploy/launchagents/templates` and installed
 only through `npm run install:launchagents` (which `release:deploy` runs)

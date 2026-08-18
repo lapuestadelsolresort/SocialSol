@@ -7,9 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { ROOT, OPENCLAW_BIN } = require('../lib/runtime-paths');
 
-// Owner quarantine (F-020, qc/DECISIONS.md D-002, 2026-08-15): these workflows
-// must never be armed as live in a rendered production config.
-const QUARANTINED_LIVE_WORKFLOWS = ['meta.dm.reply'];
+const { QUARANTINED_LIVE_WORKFLOWS } = require('../lib/quarantined-workflows');
 
 function assertNoQuarantinedLiveWorkflows(patch) {
   const live = patch?.plugins?.entries?.['resort-workflows']?.config?.liveWorkflowNames;
