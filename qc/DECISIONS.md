@@ -797,3 +797,61 @@ design is reusable as that fix session's live verification, and this
 authorization is recorded as consumed-by-discovery (a fresh session-level
 authorization accompanies the fix session per D-008). (c) F-063 is P1 →
 dedicated fix session through the full release path per D-008.
+
+## D-027 — F-063 fix session authorization + live battery — RECORDED 2026-08-18
+
+**Owner (2026-08-18, on the session's Authorizations line — session 25, F-063
+fix session):**
+
+- **BUSINESS + OUTAGE AUTHORIZED — scoped to the F-063 fix session.** Full
+  release path agent-run (fix branch → tests → PR create → CI verify → merge →
+  fast-forward of production main → `release:deploy` incl. crm/worker restarts)
+  **plus** the post-deploy gateway kickstart (the seven twins live in the
+  gateway plugin — F-058/P3-batch precedent) **plus** the live battery per the
+  D-026 canary design (owner-typed `!help` and the owner-phone `!wa` rerun
+  against the existing test-identity inbound rows). Merges/ff owner-run via
+  `!` if the permission classifier blocks (D-020/D-021 precedent).
+- **Executed in-session:** PR #91 (`fix/f063-reply-dispatch-twins`, 9ba2eb4)
+  merged by the owner via `! gh pr merge 91 --merge` after the classifier
+  blocked the agent merge; production main fast-forwarded b7f2690 → ba47469
+  by the owner via `! git -C ~/.openclaw/SocialSol merge --ff-only origin/main`
+  (classifier blocked the agent ff; ancestry + incoming-files proofs recorded
+  first). Scope note: the fix is repo-code + docs only — no policy change, no
+  capability change, no arming; Meta DM deliberately received no twin (F-020
+  quarantine preserved).
+- **Deploy-window fact surfaced to the owner:** a genuine `paulina.daily`
+  manual review 70c0a77a… (SQLITE_BUSY at 15:02:13Z, F-054 contention class,
+  pre-existing — not caused by this session) was OPEN at deploy preflight and
+  blocks the paulina.daily cadence until resolved. It is the "next genuine
+  review" F-052's live leg was waiting for; the owner-typed
+  `!review resolve` after this deploy doubles as F-052's live Slack-path
+  verification.
+
+**Addendum — session executed same day (2026-08-18): live battery COMPLETE,
+all three P1-path legs PASSED (QCF063-02).**
+
+- Deployed ba47469; deploy record steps 1–10 completed, step 11
+  `workflow_health` red solely on the pre-existing review (post-resolution
+  rerun exit 0 all-zeros); gateway kickstarted (PID 43276→15064). Owner then
+  typed, in order: `!help` (claimed; zero preceding agent bootstrap),
+  `!wa 62 [QC] F-063 twin verified — canary 2026-08-18` (durable run
+  8103063a, `slack_whatsapp_command`, actor-bound; Twilio effect verified
+  accepted→sent→delivered→READ on the owner's own device 15:30:42Z), and
+  `!review resolve 70c0a77a… not-sent` (resolved 15:37:53Z from
+  prospector-paulina; paulina.daily cadence resumed 15:42:14).
+  **Consequences: F-063 verified-fixed; F-051 CLOSED; F-052 CLOSED; zero
+  open P0/P1 findings as of this session.**
+- **Executor instruction error, recorded honestly:** the executor told the
+  owner the resolve command would work "in any controlled channel — #whatsapp
+  is fine." The owner pasted it in BOTH #whatsapp and #prospector-paulina:
+  #whatsapp answered `Review not changed (workflow_http_403)` (the twin
+  CLAIMED it; the server's D-017 permitted-channel gate — review channel +
+  write_notifications only — correctly refused; zero state change),
+  #prospector-paulina resolved it. The owner did nothing wrong; the double
+  paste was harmless (one resolution, execute-once held) and the 403 became
+  an unplanned fail-closed negative probe of the authorization boundary.
+  Standing-rule lesson recorded in STATUS.md: claim surface ≠ authorization
+  surface.
+- **F-064 opened (P3, monitor-only):** the SQLITE_BUSY review itself — first
+  non-deploy-window occurrence of the F-054 contention class (1 failure vs
+  181 clean paulina.daily runs that day; fail-safe worked as designed).
