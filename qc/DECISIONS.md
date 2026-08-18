@@ -590,3 +590,59 @@ session's Authorizations line was blank — D-020/D-021 precedent):**
 - **D-004 still not answered** (the authorization question was answered on its
   own). The explicit OUTAGE grant supplies this session's window; D-004
   remains open for a standing answer (load-bearing at QC-6c and QC-10).
+
+## D-023 — F-058 command-surface session: authorization + doc shape + coverage + unknown-command scope — RECORDED 2026-08-17
+
+**Owner (2026-08-17, start-of-session, F-058 session; authorization supplied on the
+Authorizations line, the three design forks asked because F-058's closure criteria
+did not settle them):**
+
+- **BUSINESS + OUTAGE AUTHORIZED — F-058 only, full release path agent-run.**
+  Branch → tests → PR create → CI verify → merge → fast-forward of production main
+  → `release:deploy` including crm/worker restarts and any gateway reload.
+  Merges/ff owner-run via `!` if the permission classifier blocks (D-022 precedent).
+  Live-state preflight + stated rollback/abort criteria still precede the deploy.
+
+- **Doc shape — PROSE + GENERATED BLOCK.** Existing `COMMANDS.md` prose is kept
+  verbatim; the generator owns a delimited `BEGIN/END GENERATED` region carrying the
+  machine truth (workflows bound to the surface, capability, mutates/autonomous,
+  allowed triggers, exact Slack command). CI regenerates and fails on any byte
+  difference inside the markers. Rationale: full generation would delete real
+  operator knowledge (Regina's gmail-reconcile loop, the receipt payment-source
+  rules) that no payload contains, and the byte-identical closure criterion is met
+  either way.
+
+- **Coverage — ALL EIGHT SURFACES.** The four existing files (prospector, regina,
+  sarah-coach, sarah-email) plus marketing/Meta (the $40/day gap F-058 names) and
+  whatsapp, accounting, reservations — every channel surface in the render script's
+  `CHANNEL_MUTATION_WORKFLOWS` map. Executor's routine call on paths (recorded here
+  so the mapping is reviewable): marketing → `campaigns/COMMANDS.md` (beside the
+  committed briefs its commands act on), accounting → `accounting/COMMANDS.md`,
+  and the two surfaces with no code directory of their own → `docs/commands/
+  whatsapp.md` and `docs/commands/reservations.md`.
+
+- **Unknown-command guidance — ALL CONTROLLED CHANNELS.** A lowest-priority
+  `inbound_claim` fallback claims any `^!` message in the 37 controlled channels
+  that no other handler claimed, and replies with the real commands for that
+  channel. Sol no longer improvises over stray `!` text there. Side benefit:
+  `!sent`/`!skip`/`!defer` typed in a Regina thread finally answer
+  "operator-terminal only, no Slack dispatch path" (F-048) instead of silence.
+  **Explicitly NOT a fix for F-051(iii):** a coalesced command is never delivered
+  as its own event, so no handler fires — including this one. The advisory stands.
+
+**Two recorded corrections to F-058's own text (plan §2 — reality wins):**
+
+1. **Seven Slack commands exist, not eight.** `!raw` is a false positive in the
+   finding: every `!raw` hit is `if (!raw)`, a negation of a variable named `raw`
+   (`openclaw-plugins/resort-workflows/index.js:394,1085,1993,2027` and six more in
+   crm/). The real set is `!wa`, `!dm`, `!email`, `!meta`, `!ownerrez`, `!receipt`,
+   `!review`.
+2. **"`!help` renders only policy-live workflows" cannot be applied literally.**
+   Shadow mode gates only *external mutation* step classes
+   (`crm/lib/workflow-execution-policy.js:5-22`); read workflows are `read` /
+   `external_read` and execute fully whether or not they are listed. None of the 21
+   read workflows is in `live_workflows` (32 of 53 definitions are), so a literal
+   reading would hide from `!help` exactly the workflows operators use most. `!help`
+   therefore renders every workflow bound to the channel, marked with its true
+   execution state — live / shadowed / read-only — and the live-marked set equals
+   `live_workflows` exactly, which is the criterion actually being tested.

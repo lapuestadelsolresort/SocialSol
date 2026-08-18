@@ -1,33 +1,53 @@
 # QC status
 
-Updated: 2026-08-17 (PDT) — session 20 (P2/P3 batch, D-022). **Sixteen findings
-closed in one batch through the full release path; runtime baseline MOVED
-`fca87c2` → `b9ea4fe`** (PRs #85/#86/#87, CI verify green on each PR *and* on
-merged main before `release:check`, all three merges agent-run with no
-classifier block, ff after ancestry + incoming-files proofs, deploy record
-2026-08-18T01-22-04-532Z @ b9ea4fe completed 11/11). Closed: F-039, F-042,
-F-043, F-046, F-047, F-048, F-049, F-050, F-053, F-054, F-055, F-056, F-057,
-F-060, F-032(c) — plus the F-052 engine half and the F-019 threshold.
+Updated: 2026-08-17 (PDT) — session 21 (F-058 command surface, D-023). **F-058
+CLOSED verified-fixed; runtime baseline MOVED `b9ea4fe` → `15a41d6`** (PR #88, CI
+verify green on the PR *and* on merged main before `release:check`, merge and
+fast-forward both agent-run with no classifier block, deploy record
+2026-08-18T02-44-26-838Z completed 11/11, gateway reloaded 96571 → 8184).
 
-The two that mattered most: **F-047** — the send-time `edit_override` carve-out
-downgraded *every* failed compliance item to advisory, so a contact suppressed
-or marked do_not_contact after a human edit was sent to; it is now scoped to
-content items 6-7 while items 1-5 always enforce. **F-039** — legacy QBO records
-carry SPEI fees as Bank Fee split lines *inside* the parent Purchase, invisible
-to a matcher that only knew standalone fee records, so re-uploading a June/July
-statement would have created ~60 duplicate fee Purchases. The matcher now reads
-embedded lines, which **retires the standing pre-August statement advisory**.
+**The system now documents its own controls.** `scripts/generate-command-docs.js`
+renders a delimited block into eight per-surface command references plus the
+53-row catalog in `workflow/README.md`, and `npm run check:docs` runs inside
+`check:stack` — so CI and every deploy fail when the committed blocks and the
+registry disagree. Generation reads the registry, never runtime policy: the
+deploy runs `check:stack` with `RESORT_WORKFLOW_POLICY_PATH` pointed at a
+nonexistent file, so a policy-derived document could not be reproduced
+byte-identically. Adding a workflow whose capability belongs to no surface fails
+the check until a surface is assigned or the absence of an operator surface is
+recorded — so a new workflow forces a docs change rather than quietly escaping
+documentation.
 
-**One recorded correction (plan §2 — reality wins):** F-052's remaining item was
-"engine notice fallback for channel-less runs". That fallback already existed,
-and has since the cutover commit `4cad390` — `reviewChannelId` falls through run
-channel → definition channel → first `write_notifications` channel bound in
-`policy.channels`. What the incident actually hit was an *empty* `channel_ids`,
-since filled by D-017 (RO check at close: 2 configured, both bound). The gap
-genuinely open was that a review opened with no resolvable channel left no trace
-at all; both review paths now record a `manual_review_unnotified` event.
+**`!help` owns the other half.** What is armed *right now* is runtime state and
+deliberately absent from the documents; `!help` answers it from
+`/api/workflows/definitions?channel=`, which now scopes to one channel's
+capabilities so the help surface no longer guesses which workflows a channel may
+run — guessing is exactly what the hand-written docs got wrong. Verified at the
+deployed SHA against live policy: its live-marked set equals `live_workflows`
+**exactly, compared in both directions**.
 
-## Phase ledger — QC-0…QC-7 COMPLETE + fix sessions #1/#2(17)/#3(F-001)/#4(F-014)/#5(P2/P3 batch) COMPLETE (runtime baseline b9ea4fe; prod main b9ea4fe; policy sha 0dd75080 ARMED: marketing campaign_activate per-op only — unchanged this session)
+**F-051 moved without being touched.** The owner typed `!help` in the social
+channel and it claimed and replied — the **first live exact-command
+(`^!`-anchored) success since the interception outage**, whose last claim of that
+class was 2026-08-14 15:06 PDT. That satisfies F-051's "one live exact-command
+success in a quiet channel" criterion; only the (iii) coalescing disposition
+remains before it closes.
+
+**Two corrections to F-058's own text (plan §2 — reality wins), recorded in
+D-023:** `!raw` was a false positive — every hit is `if (!raw)`, a variable
+negation — so seven Slack commands exist, not eight. And "`!help` renders only
+policy-live workflows" could not be applied literally: shadow mode gates only
+external-mutation step classes, so none of the 21 read workflows is in
+`live_workflows` and a literal reading would have hidden from `!help` exactly the
+workflows operators use most.
+
+**One new finding: F-062 (P3).** The social channel's policy entry grants 7
+capabilities including `crm.write`/`crm.read`, so `!help` truthfully lists five
+automatic sync/webhook workflows as things the channel "can run" — 19 rows where
+the generated document lists 12. Docs are surface-scoped repo truth, `!help` is
+capability-scoped runtime truth, and an operator cannot tell that from either.
+
+## Phase ledger — QC-0…QC-7 COMPLETE + fix sessions #1/#2(17)/#3(F-001)/#4(F-014)/#5(P2/P3 batch)/#6(F-058) COMPLETE (runtime baseline 15a41d6; prod main 15a41d6; policy sha 0dd75080 ARMED: marketing campaign_activate per-op only — unchanged this session, fingerprint still `match`)
 
 ## ⚠️ Standing advisory (until F-051(iii) dispositioned)
 
@@ -38,7 +58,11 @@ them into the next message's history and no interception fires. Until verified
 fixed: type commands top-level, unmentioned, in a quiet moment; if the bot
 doesn't acknowledge within ~30s, the command did NOT execute — check before
 retyping mutation commands. (Owner reported one post-0af5583 command WITH ack —
-interim positive, D-018; ledger corroboration deferred to QC-8.)
+interim positive, D-018. **Session 21: an owner-typed `!help` claimed and replied
+at 20:23 PDT — the first `^!` success since the outage, so the interception path
+itself is proven working at 15a41d6.** The swallow risk that remains is (iii)
+coalescing only: a command typed while Sol is mid-reply still never becomes an
+inbound event. Ledger corroboration deferred to QC-8.)
 
 *(The June/July Kapital statement advisory is RETIRED — F-039 closed. Re-posting
 a pre-August statement no longer creates duplicate fee Purchases; the matcher
@@ -46,7 +70,24 @@ recognizes the legacy embedded format.)*
 
 ## Owner follow-ups
 
-**New this session:**
+**New this session (F-058):**
+
+1. **Never hand-edit inside `BEGIN GENERATED` / `END GENERATED` markers.** Eight
+   command references plus `workflow/README.md` carry them. Run
+   `npm run docs:commands` and commit; `npm run check:docs` (inside
+   `check:stack`) fails the build otherwise.
+2. **`!help` works in every channel the plugin is bound to** and is the honest
+   answer to "what is armed right now" — the documents deliberately do not
+   answer that.
+3. **A `!`-prefixed message in a controlled channel now always gets a
+   deterministic answer** instead of Sol improvising. Typing `!sent` / `!skip` /
+   `!defer` in a Regina thread finally says "operator terminal only" and names
+   the real script (F-048).
+4. **F-062 needs a call** (P3, cheap): either narrow the runtime channel
+   capability lists, or group automatic workflows under a "runs automatically,
+   not from here" heading in `!help`. Second option is cheaper and loses nothing.
+
+**Still open from the P2/P3 batch:**
 
 1. **A policy fingerprint now exists.** After any hand edit of the runtime
    `workflow/policy.json` (arming, un-arming, troubleshooting), finish with
@@ -96,43 +137,44 @@ recognizes the legacy embedded format.)*
 None. Open D-rows: D-004 (blackout windows — load-bearing at QC-6c/QC-10),
 D-007 (accounting validator), D-010 (CI scope confirm).
 
-Open P1s: **F-051 only** (fixes deployed; live exact-command verify +
-coalescing disposition remain — QC-8 opener).
+Open P1s: **F-051 only** (fixes deployed; **live exact-command verify DONE
+2026-08-17 20:23 PDT — QCF058-05**; only the (iii) coalescing disposition remains
+— QC-8 opener).
 Open P2s: F-013 (gated on F-031 drill), F-023, F-025, F-006, F-029, F-033,
 F-035 (remainder), F-036 (three writers remain), F-040, F-044, F-052
 (**engine half closed; live Slack-path verification rides QC-8**), F-059,
 F-061.
 Open P3s: F-024, F-026, F-021, F-027, F-028, F-030, F-034, F-037, F-038,
-F-058, F-019 (**threshold closed; browser page-JS leg is QC-6c CANARY**).
-Housekeeping: `~/fix-worktree` carries `fix/p2p3-batch-accounting` and
+**F-062 (new)**, F-019 (**threshold closed; browser page-JS leg is QC-6c
+CANARY**). F-058 CLOSED this session.
+Housekeeping: `~/fix-worktree` carries `fix/f058-command-surface` and
 `~/fix-worktree2` carries `fix/p2p3-batch-workflow` (both merged, removable);
-1 pending gmail email_reply_proposal exists (inert).
+1 pending gmail email_reply_proposal exists (inert). A third `crm/server.js`
+(pid 6989, Aug 7) belongs to the separate `workspace-goldroute` project on port
+3458 with its own DB — not a SocialSol producer, out of scope, verified during
+the F-058 post-deploy sweep.
 
 ## Next
 
-**(1) F-058** — the command-surface session, deferred from this batch by D-022
-because it is a build rather than a fix: `COMMANDS.md` per surface generated
-from `GET /api/workflows/definitions` and regenerated in the release path so
-drift is structurally impossible; a marketing/Meta command reference (none
-exists today for the $40/day surface); Slack `!help` rendering only
-policy-live workflows plus unknown-command guidance on the `^!` interception
-path; and the daily paid report appending the exact applicable commands with
-real campaign ids. Re-verify: regenerated docs byte-identical in CI, `!help`
-output matching `live_workflows` exactly.
+**(1) The remaining P3 hygiene batch** — F-024, F-026, F-027, F-028, F-030,
+F-034, F-037, F-038, F-021, and now **F-062** — most of them one-liners (chmod,
+rm, a policy key removal, doc alignment). F-062 joins here: it is a `!help`
+presentation change or a narrowing of the runtime channel capability lists, and
+the owner picks which (the presentation change is cheaper and loses nothing).
 
-**Then:** (2) the remaining P3 hygiene batch not scoped into D-022 — F-024,
-F-026, F-027, F-028, F-030, F-034, F-037, F-038, F-021 — most of them
-one-liners (chmod, rm, a policy key removal, doc alignment). (3) QC-6c CANARY
-(D-004 first). (4) F-031 drill slot (D-006 window; F-013 gated on it).
-(5) **QC-8** — OPEN with the F-051 live verification (`!wa` fixture battery in
-a quiet channel) + F-051 ack-corroboration ledger pull, then Sarah email
-(audits the standing draft-and-approve config per D-019), Meta DM quarantine
-re-verify, Sarah Coach. (6) **QC-9** (OwnerRez + Paloma) — the RO map is the
-audit target; all 34 mutations confirmation-gated per D-019.
+**Then:** (2) QC-6c CANARY (D-004 first). (3) F-031 drill slot (D-006 window;
+F-013 gated on it). (4) **QC-8** — now opens *lighter*: F-051's live
+exact-command leg is done (QCF058-05), so the opener is the `!wa` fixture
+battery plus the F-051(iii) coalescing disposition and its ack-corroboration
+ledger pull, then Sarah email (audits the standing draft-and-approve config per
+D-019), Meta DM quarantine re-verify — note `!help` now renders `meta.dm.reply`
+as quarantined, which is itself a re-verify surface — and Sarah Coach.
+(5) **QC-9** (OwnerRez + Paloma) — the RO map is the audit target; all 34
+mutations confirmation-gated per D-019.
 
-Definition-of-Done #3 note: F-051 is the only open P1 left to reach
-verified-fixed (or accepted-risk with the advisory); the F-031 drill must still
-run before baseline stamps.
+Definition-of-Done #3 note: F-051 is still the only open P1, and it is one
+disposition away from closing. The F-031 drill must still run before baseline
+stamps.
 
 **Exact next command** (start ritual, §8):
 
@@ -140,21 +182,43 @@ run before baseline stamps.
 git -C ~/.openclaw/SocialSol status
 ```
 
-Expected: clean `main` @ b9ea4fe (runtime baseline b9ea4fe085cc; newest deploy
-record 2026-08-18T01-22-04-532Z completed 11/11; policy sha 0dd75080 ARMED
-marketing-activate-only per D-020 — unchanged, standing state; the policy
-fingerprint record now exists and `node scripts/policy-fingerprint.js check`
-should print `match`). Then `cd ~/qc-worktree`, read qc/STATUS.md + D-022, and
-begin the F-058 session with its authorization stated on the Authorizations
-line (BUSINESS for the release path; F-058 adds a generated-docs pipeline and a
-new Slack `!help` surface).
+Expected: clean `main` @ 15a41d6 (runtime baseline 15a41d648c48; newest deploy
+record 2026-08-18T02-44-26-838Z completed 11/11; policy sha 0dd75080 ARMED
+marketing-activate-only per D-020 — unchanged, standing state, and
+`node scripts/policy-fingerprint.js check` should print `match`). Then
+`cd ~/qc-worktree`, read qc/STATUS.md + D-023, and begin the P3 hygiene batch
+with its authorization stated on the Authorizations line (BUSINESS for the
+release path; the batch is doc/config hygiene plus one `!help` presentation
+change for F-062).
 
-Session-notes (classifier, session 20 / P2/P3 batch): **no classifier blocks at
-all** — three pushes, three PR creates, three merges, the fast-forward, the
-deploy, and the runtime `policy-fingerprint record` were every one agent-run.
-Second session running with no owner-run fallback.
+Session-notes (classifier, session 21 / F-058): **no classifier blocks at all**
+— the push, PR create, merge, fast-forward, deploy, and the gateway kickstart
+were every one agent-run. Third session running with no owner-run fallback. The
+only owner action needed was typing `!help` into Slack, which is not a
+permissions matter: a bot-posted message cannot exercise the interception path
+at all, because rendered channel configs set `allowBots: false`.
 
-Method notes worth keeping:
+Method notes worth keeping (session 21):
+
+- **Generate from the source the checker can reach.** The docs had to derive
+  from the registry rather than the runtime policy, because the deploy runs
+  `check:stack` with the policy path deliberately pointed at nothing. Getting
+  that wrong would have produced a check that passes locally and fails only in
+  production's own deploy.
+- **A finding is a hypothesis about code that has since moved — twice over
+  here.** `!raw` never existed (a grep artifact), and the "only policy-live
+  workflows" criterion, applied literally, would have hidden every read
+  workflow. Both were caught by reading current code rather than the finding
+  text. Third consecutive session where that habit changed the design.
+- **Make the docs testable, not just generated.** Every documented command
+  string is fed to the real parser in the test suite. The threaded `!wa` case
+  failed on the first run — proof the assertion has teeth rather than
+  restating what the generator just produced.
+- **The drift check was proven to fail before being trusted** (the F-056
+  discipline from last session, reapplied): one generated cell flipped, exit 1
+  with the right message; restored, exit 0.
+
+Method notes worth keeping (session 20):
 
 - **Three PRs, not one.** Splitting the batch by subsystem (outreach / durable
   boundary / accounting+reads) kept each diff reviewable and let CI run while
