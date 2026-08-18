@@ -30,8 +30,17 @@ Write access is restricted by trusted Slack user id in the control-plane policy.
 There is no generic URL or method exposed — the operation catalog is fixed, and
 an unknown operation or unknown key is rejected before any provider call.
 
-If the bot does not acknowledge within about thirty seconds, the command did not
-execute — check before retyping (standing advisory, F-051).
+## Command timing (quiet-moment rule)
+
+Exact `!` commands are claimed by a deterministic pre-model layer in the
+gateway. Type them as their own top-level message, unmentioned, in a quiet
+moment — not while the bot is mid-turn in the channel. A message that arrives
+during an active bot turn can be coalesced into the next turn's conversation
+history and never becomes a command event for any handler (D-026; F-051 iii,
+accepted as an operational constraint). If the bot does not acknowledge within
+about thirty seconds, the command did not execute: check the state it would
+have changed — proposal, review, queue, or send ledger — before retyping any
+mutation command.
 
 <!-- BEGIN GENERATED: durable workflows on the reservations surface — regenerate with `npm run docs:commands` -->
 

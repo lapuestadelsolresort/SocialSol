@@ -2447,6 +2447,84 @@ export function createUnknownCommandClaimHandler({ config, fetchImpl = fetch, lo
   };
 }
 
+// ---------------------------------------------------------------------------
+// reply_dispatch twins (F-063)
+//
+// The running gateway dispatches `inbound_claim` only for plugin-bound
+// conversations, and no conversation on this host is plugin-bound — so a
+// command surface registered there alone never fires for ordinary Slack
+// channel messages. `reply_dispatch` is the terminal pre-model hook that does
+// fire; a claim there also ends the turn before the model can improvise over
+// a command it cannot run. Each twin reuses its claim handler unchanged: only
+// the boundary differs. Registration priorities mirror the inbound_claim
+// ladder so relative precedence is identical, with the unknown-command twin
+// lowest so every real command handler declines before it claims. Meta DM
+// deliberately has no twin — the surface is quarantined (F-020), and leaving
+// `!dm` to the unknown-command guidance keeps it dead by default.
+function createReplyDispatchTwin(claimFactory, { reason, label }) {
+  return (options = {}) => {
+    const claim = claimFactory(options);
+    const logger = options.logger || null;
+    return async (event, ctx) => {
+      if (event?.isTailDispatch) return undefined;
+      const inboundEvent = reservationClaimEventFromFinalizedContext(event?.ctx);
+      const result = await claim(inboundEvent, {
+        channelId: inboundEvent.channel,
+        accountId: inboundEvent.accountId,
+        conversationId: inboundEvent.conversationId,
+        messageId: inboundEvent.messageId,
+        senderId: inboundEvent.senderId,
+      });
+      if (!result?.handled) return undefined;
+      let queuedFinal = false;
+      if (!event.suppressUserDelivery && event.sendPolicy !== 'deny' && result.reply) {
+        try {
+          await ctx.onReplyStart?.();
+          queuedFinal = ctx.dispatcher.sendFinalReply(result.reply);
+        } catch (error) {
+          logger?.error?.(`resort-workflows deterministic ${label} reply delivery failed: ${error.message}`);
+        }
+      }
+      ctx.recordProcessed?.('completed', { reason });
+      ctx.markIdle?.('message_completed');
+      return {
+        handled: true,
+        queuedFinal,
+        counts: ctx.dispatcher.getQueuedCounts(),
+      };
+    };
+  };
+}
+
+export const createWhatsAppReplyDispatchHandler = createReplyDispatchTwin(
+  createInboundClaimHandler,
+  { reason: 'whatsapp_workflow_reply_dispatch', label: 'WhatsApp command' },
+);
+export const createMarketingConfirmReplyDispatchHandler = createReplyDispatchTwin(
+  createMarketingConfirmClaimHandler,
+  { reason: 'marketing_confirm_reply_dispatch', label: 'paid-media confirmation' },
+);
+export const createOwnerRezReplyDispatchHandler = createReplyDispatchTwin(
+  createOwnerRezClaimHandler,
+  { reason: 'ownerrez_workflow_reply_dispatch', label: 'OwnerRez confirmation' },
+);
+export const createReceiptConfirmReplyDispatchHandler = createReplyDispatchTwin(
+  createReceiptConfirmClaimHandler,
+  { reason: 'receipt_confirm_reply_dispatch', label: 'owner-expense confirmation' },
+);
+export const createManualReviewReplyDispatchHandler = createReplyDispatchTwin(
+  createManualReviewClaimHandler,
+  { reason: 'manual_review_reply_dispatch', label: 'manual-review resolution' },
+);
+export const createHelpReplyDispatchHandler = createReplyDispatchTwin(
+  createHelpClaimHandler,
+  { reason: 'help_reply_dispatch', label: 'help' },
+);
+export const createUnknownCommandReplyDispatchHandler = createReplyDispatchTwin(
+  createUnknownCommandClaimHandler,
+  { reason: 'unknown_command_reply_dispatch', label: 'unknown-command guidance' },
+);
+
 const plugin = {
   id: 'resort-workflows',
   name: 'Resort Workflows',
@@ -2470,6 +2548,15 @@ const plugin = {
     api.on('reply_dispatch', createTaskListReplyDispatchHandler({ config, logger: api.logger }), { priority: 185, timeoutMs: 10_000 });
     api.on('reply_dispatch', createReservationReplyDispatchHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('reply_dispatch', createEmailReplyDispatchHandler({ config, logger: api.logger }), { priority: 195, timeoutMs: 70_000 });
+    api.on('reply_dispatch', createWhatsAppReplyDispatchHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });
+    api.on('reply_dispatch', createMarketingConfirmReplyDispatchHandler({ config, logger: api.logger }), { priority: 207, timeoutMs: 70_000 });
+    api.on('reply_dispatch', createOwnerRezReplyDispatchHandler({ config, logger: api.logger }), { priority: 210, timeoutMs: 70_000 });
+    api.on('reply_dispatch', createReceiptConfirmReplyDispatchHandler({ config, logger: api.logger }), { priority: 215, timeoutMs: 70_000 });
+    api.on('reply_dispatch', createManualReviewReplyDispatchHandler({ config, logger: api.logger }), { priority: 220, timeoutMs: 35_000 });
+    api.on('reply_dispatch', createHelpReplyDispatchHandler({ config, logger: api.logger }), { priority: 225, timeoutMs: 20_000 });
+    // Mirrors the inbound_claim fallback: lowest reply_dispatch priority in
+    // the plugin, so it only sees `!` text every real command declined.
+    api.on('reply_dispatch', createUnknownCommandReplyDispatchHandler({ config, logger: api.logger }), { priority: 10, timeoutMs: 20_000 });
     api.on('before_tool_call', createControlledChannelToolGuard({ config }), { priority: 50, timeoutMs: 5_000 });
     api.on('inbound_claim', createReservationReadClaimHandler({ config, logger: api.logger }), { priority: 190, timeoutMs: 70_000 });
     api.on('inbound_claim', createInboundClaimHandler({ config, logger: api.logger }), { priority: 200, timeoutMs: 70_000 });

@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { TRIGGERS, GLOBAL_COMMANDS } from '../../lib/command-surfaces.js';
-import {
+import plugin, {
   createHelpClaimHandler,
+  createHelpReplyDispatchHandler,
   createUnknownCommandClaimHandler,
+  createUnknownCommandReplyDispatchHandler,
   formatHelpReply,
   formatUnknownCommandReply,
   workflowExecutionState,
@@ -22,12 +24,17 @@ import {
   createEmailClaimHandler,
   createEmailReplyDispatchHandler,
   createInboundClaimHandler,
+  createWhatsAppReplyDispatchHandler,
   createMetaDmClaimHandler,
   createMarketingConfirmClaimHandler,
+  createMarketingConfirmReplyDispatchHandler,
   claimCommandText,
   createManualReviewClaimHandler,
+  createManualReviewReplyDispatchHandler,
   createOwnerRezClaimHandler,
+  createOwnerRezReplyDispatchHandler,
   createReceiptConfirmClaimHandler,
+  createReceiptConfirmReplyDispatchHandler,
   createReservationReadClaimHandler,
   createReservationReplyDispatchHandler,
   createTaskListClaimHandler,
@@ -2115,4 +2122,393 @@ test('every documented command usage string parses with the real command parser'
     checked += 1;
   }
   assert.ok(checked >= 9, `expected to verify at least nine usage shapes, verified ${checked}`);
+});
+
+// --- F-063: reply_dispatch twins for every exact-command surface -------------
+// `inbound_claim` fires only for plugin-bound conversations in the running
+// gateway, and none exist — so each command surface must also claim at the
+// reply_dispatch boundary. These tests drive the twins with the finalized-
+// context event shape the gateway actually delivers (prefixed conversation
+// ids, metadata-wrapped bodies, bare text) and assert the claim, the durable
+// execute, and the turn finalization.
+
+function dispatchHarness() {
+  const sent = [];
+  const state = { finalized: null, idleReason: null };
+  const ctx = {
+    dispatcher: {
+      sendFinalReply(payload) { sent.push(payload); return true; },
+      getQueuedCounts() { return { final: sent.length }; },
+    },
+    recordProcessed(outcome, details) { state.finalized = { outcome, details }; },
+    markIdle(reason) { state.idleReason = reason; },
+  };
+  return { sent, state, ctx };
+}
+
+test('WhatsApp reply dispatch claims a top-level !wa before the model runs (F-063)', async () => {
+  const config = pluginConfig({
+    whatsappChannelIds: ['C-WA'], slackAccountId: 'ig-drafts',
+    liveWorkflowNames: ['whatsapp.reply'],
+  });
+  const calls = [];
+  const { sent, state, ctx } = dispatchHarness();
+  const handler = createWhatsAppReplyDispatchHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: {
+        id: 'wa-run-1', workflow_name: 'whatsapp.reply', status: 'completed',
+        output: { recipient: 'QC Test Guest', status: 'accepted_by_provider', effectId: 'effect-1' },
+      } };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', Surface: 'slack', AccountId: 'ig-drafts',
+      OriginatingChannel: 'slack', OriginatingTo: 'channel:C-WA',
+      MessageSidFull: '400.1', SenderId: 'U-JASON', SenderName: 'Jason',
+      BodyForCommands: '!wa 62 Hola, mensaje de prueba.',
+    },
+    sendPolicy: 'allow',
+  }, ctx);
+  assert.equal(result.handled, true);
+  assert.equal(result.queuedFinal, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workflow, 'whatsapp.reply');
+  assert.equal(calls[0].input.dmId, 62);
+  assert.equal(calls[0].input.message, 'Hola, mensaje de prueba.');
+  assert.equal(calls[0].input.actorName, 'Jason');
+  assert.equal(calls[0].context.actorUserId, 'U-JASON');
+  assert.equal(calls[0].context.entrypoint, 'slack_whatsapp_command');
+  assert.equal(calls[0].idempotencyKey, 'slack:C-WA:400.1:whatsapp.reply');
+  assert.match(sent[0].text, /WhatsApp request recorded for QC Test Guest/);
+  assert.match(sent[0].text, /Provider state: accepted_by_provider/);
+  assert.deepEqual(state.finalized, {
+    outcome: 'completed', details: { reason: 'whatsapp_workflow_reply_dispatch' },
+  });
+  assert.equal(state.idleReason, 'message_completed');
+});
+
+test('WhatsApp reply dispatch handles in-thread, wrapped, and prose shapes (F-063)', async () => {
+  const config = pluginConfig({
+    whatsappChannelIds: ['C-WA'], slackAccountId: 'ig-drafts',
+    liveWorkflowNames: ['whatsapp.reply'],
+  });
+  const calls = [];
+  const handler = createWhatsAppReplyDispatchHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: `wa-run-${calls.length}`, workflow_name: 'whatsapp.reply', status: 'completed', output: {} } };
+    },
+  });
+
+  // In a guest thread the command carries no dm id and binds the thread ts.
+  const thread = dispatchHarness();
+  const threaded = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-WA', MessageSidFull: '401.1',
+      MessageThreadId: '1786549495.693669', SenderId: 'U-JASON',
+      BodyForCommands: '!wa Ya lo reviso y te confirmo.',
+    },
+    sendPolicy: 'allow',
+  }, thread.ctx);
+  assert.equal(threaded.handled, true);
+  assert.equal(calls[0].input.message, 'Ya lo reviso y te confirmo.');
+  assert.equal(calls[0].input.threadTs, '1786549495.693669');
+  assert.equal(calls[0].input.dmId, undefined);
+
+  // The gateway metadata preamble (F-051 ii) must not hide the command.
+  const wrapped = dispatchHarness();
+  const wrappedResult = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-WA', MessageSidFull: '401.2', SenderId: 'U-JASON',
+      BodyForCommands: [
+        'Conversation info (untrusted metadata):',
+        '```json',
+        '{ "chat_id": "channel:C-WA", "sender_id": "U-JASON" }',
+        '```',
+        '',
+        '!wa 62 Segundo intento tras el preámbulo.',
+      ].join('\n'),
+    },
+    sendPolicy: 'allow',
+  }, wrapped.ctx);
+  assert.equal(wrappedResult.handled, true);
+  assert.equal(calls[1].input.dmId, 62);
+
+  // Ordinary prose is never claimed: the conversational agent keeps the turn.
+  const prose = dispatchHarness();
+  const untouched = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-WA', MessageSidFull: '401.3', SenderId: 'U-JASON',
+      BodyForCommands: 'gracias, ya quedó todo listo',
+    },
+    sendPolicy: 'allow',
+  }, prose.ctx);
+  assert.equal(untouched, undefined);
+  assert.equal(prose.state.finalized, null);
+  assert.equal(calls.length, 2);
+});
+
+test('paid-media confirmation reply dispatch claims exact and malformed !meta (F-063)', async () => {
+  const config = pluginConfig({
+    socialChannelIds: ['C-SOCIAL'], slackAccountId: 'ig-drafts',
+    liveWorkflowNames: ['marketing.change.confirm'],
+  });
+  const calls = [];
+  const exact = dispatchHarness();
+  const handler = createMarketingConfirmReplyDispatchHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'meta-run-1', workflow_name: 'marketing.change.confirm', status: 'completed', output: {} } };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-SOCIAL', MessageSidFull: '402.1', SenderId: 'U-JASON',
+      BodyForCommands: '!meta confirm 4df5fc31-c9f8-4b30-8dcc-0a13482beedd abcdef123456',
+    },
+    sendPolicy: 'allow',
+  }, exact.ctx);
+  assert.equal(result.handled, true);
+  assert.equal(calls[0].workflow, 'marketing.change.confirm');
+  assert.equal(calls[0].input.proposalId, '4df5fc31-c9f8-4b30-8dcc-0a13482beedd');
+  assert.equal(calls[0].context.entrypoint, 'slack_meta_campaign_confirm_command');
+  assert.equal(exact.state.finalized.details.reason, 'marketing_confirm_reply_dispatch');
+
+  const malformed = dispatchHarness();
+  const guidance = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-SOCIAL', MessageSidFull: '402.2', SenderId: 'U-JASON',
+      BodyForCommands: '!meta confirm yes-do-it',
+    },
+    sendPolicy: 'allow',
+  }, malformed.ctx);
+  assert.equal(guidance.handled, true);
+  assert.equal(calls.length, 1, 'malformed confirmations must not execute');
+  assert.match(malformed.sent[0].text, /exact `!meta confirm <proposal-id> <acceptance-hash>` command/);
+});
+
+test('OwnerRez confirmation reply dispatch executes live and refuses in shadow (F-063)', async () => {
+  const live = pluginConfig({
+    ownerrezChannelIds: ['C-RES'], slackAccountId: 'ig-drafts',
+    liveWorkflowNames: ['ownerrez.mutation.confirm'],
+  });
+  const calls = [];
+  const { sent, state, ctx } = dispatchHarness();
+  const handler = createOwnerRezReplyDispatchHandler({
+    config: live,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'or-run-1', workflow_name: 'ownerrez.mutation.confirm', status: 'completed', output: {} } };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-RES', MessageSidFull: '403.1', SenderId: 'U-JASON',
+      BodyForCommands: '!ownerrez confirm 4df5fc31-c9f8-4b30-8dcc-0a13482beedd abcdef12',
+    },
+    sendPolicy: 'allow',
+  }, ctx);
+  assert.equal(result.handled, true);
+  assert.equal(calls[0].workflow, 'ownerrez.mutation.confirm');
+  assert.equal(calls[0].idempotencyKey, 'slack:C-RES:403.1:ownerrez.mutation.confirm');
+  assert.equal(state.finalized.details.reason, 'ownerrez_workflow_reply_dispatch');
+  assert.equal(sent.length, 1);
+
+  const shadow = dispatchHarness();
+  const refused = await createOwnerRezReplyDispatchHandler({
+    config: pluginConfig({ ownerrezChannelIds: ['C-RES'], slackAccountId: 'ig-drafts' }),
+    execute: async () => assert.fail('shadow-mode confirmations must not execute'),
+  })({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-RES', MessageSidFull: '403.2', SenderId: 'U-JASON',
+      BodyForCommands: '!ownerrez confirm 4df5fc31-c9f8-4b30-8dcc-0a13482beedd abcdef12',
+    },
+    sendPolicy: 'allow',
+  }, shadow.ctx);
+  assert.equal(refused.handled, true);
+  assert.match(shadow.sent[0].text, /shadow mode/);
+});
+
+test('owner-expense confirmation reply dispatch claims the exact !receipt confirm (F-063)', async () => {
+  const config = pluginConfig({
+    ownerExpenseChannelIds: ['C-EXPENSE'], slackAccountId: 'ig-drafts',
+    liveWorkflowNames: ['receipt.owner_expense.confirm'],
+  });
+  const calls = [];
+  const { sent, state, ctx } = dispatchHarness();
+  const handler = createReceiptConfirmReplyDispatchHandler({
+    config,
+    execute: async (_config, request) => {
+      calls.push(request);
+      return { run: { id: 'receipt-run-1', workflow_name: 'receipt.owner_expense.confirm', status: 'queued' } };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-EXPENSE', MessageSidFull: '404.1', SenderId: 'U-JASON',
+      BodyForCommands: '!receipt confirm 3ce3ad0f-61e6-4113-8466-1b5c19a6494a 2026-08-01 MXN 1234.50 food_meals | OXXO Centro | Compra de prueba',
+    },
+    sendPolicy: 'allow',
+  }, ctx);
+  assert.equal(result.handled, true);
+  assert.equal(calls[0].workflow, 'receipt.owner_expense.confirm');
+  assert.equal(calls[0].input.transactionKind, 'owner_paid_expense');
+  assert.equal(calls[0].input.amount, 1234.50);
+  assert.match(sent[0].text, /Correction queued for durable processing and QBO readback/);
+  assert.equal(state.finalized.details.reason, 'receipt_confirm_reply_dispatch');
+});
+
+test('manual-review reply dispatch resolves a metadata-wrapped command (F-063)', async () => {
+  const resolutions = [];
+  const { sent, state, ctx } = dispatchHarness();
+  const handler = createManualReviewReplyDispatchHandler({
+    config: pluginConfig({ slackAccountId: 'ig-drafts', controlledChannelIds: ['C-REVIEW'] }),
+    resolve: async (_config, request) => {
+      resolutions.push(request);
+      return { review: { id: request.reviewId, resolution: request.resolution } };
+    },
+  });
+  const result = await handler({
+    ctx: {
+      Provider: 'slack', AccountId: 'ig-drafts', OriginatingChannel: 'slack',
+      OriginatingTo: 'channel:C-REVIEW', MessageSidFull: '405.1', SenderId: 'U-JASON',
+      BodyForCommands: [
+        'Conversation info (untrusted metadata):',
+        '```json',
+        '{ "chat_id": "channel:C-REVIEW", "sender_id": "U-JASON" }',
+        '```',
+        '',
+        '!review resolve 3ce3ad0f-61e6-4113-8466-1b5c19a6494a not-sent',
+      ].join('\n'),
+    },
+    sendPolicy: 'allow',
+  }, ctx);
+  assert.equal(result.handled, true);
+  assert.equal(resolutions.length, 1);
+  assert.equal(resolutions[0].resolution, 'confirmed_not_sent');
+  assert.equal(resolutions[0].channelId, 'C-REVIEW');
+  assert.match(sent[0].text, /resolved as confirmed_not_sent/);
+  assert.equal(state.finalized.details.reason, 'manual_review_reply_dispatch');
+});
+
+test('help reply dispatch answers !help at the pre-model boundary (F-063)', async () => {
+  const previous = process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+  process.env.RESORT_WORKFLOW_CONTROL_TOKEN = 'x'.repeat(40);
+  try {
+    const fetchCalls = [];
+    const { sent, state, ctx } = dispatchHarness();
+    const handler = createHelpReplyDispatchHandler({
+      config: helpConfig(),
+      fetchImpl: helpFetch(HELP_PAYLOAD, fetchCalls),
+    });
+    const result = await handler({
+      ctx: {
+        Provider: 'slack', AccountId: 'resort', OriginatingChannel: 'slack',
+        OriginatingTo: 'channel:C-SOCIAL', MessageSidFull: '406.1', SenderId: 'U-JASON',
+        BodyForCommands: '!help',
+      },
+      sendPolicy: 'allow',
+    }, ctx);
+    assert.equal(result.handled, true);
+    assert.equal(fetchCalls.length, 1);
+    assert.match(fetchCalls[0].url, /\/api\/workflows\/definitions\?channel=C-SOCIAL$/);
+    assert.match(sent[0].text, /Type these exactly/);
+    assert.equal(state.finalized.details.reason, 'help_reply_dispatch');
+
+    const prose = dispatchHarness();
+    assert.equal(await handler({
+      ctx: {
+        Provider: 'slack', AccountId: 'resort', OriginatingChannel: 'slack',
+        OriginatingTo: 'channel:C-SOCIAL', MessageSidFull: '406.2', SenderId: 'U-JASON',
+        BodyForCommands: 'help me plan the week',
+      },
+      sendPolicy: 'allow',
+    }, prose.ctx), undefined);
+  } finally {
+    if (previous === undefined) delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+    else process.env.RESORT_WORKFLOW_CONTROL_TOKEN = previous;
+  }
+});
+
+test('unknown-command reply dispatch guides unclaimed ! text only in controlled channels (F-063)', async () => {
+  const previous = process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+  process.env.RESORT_WORKFLOW_CONTROL_TOKEN = 'x'.repeat(40);
+  try {
+    const { sent, state, ctx } = dispatchHarness();
+    const handler = createUnknownCommandReplyDispatchHandler({
+      config: helpConfig(),
+      fetchImpl: helpFetch(),
+    });
+    const result = await handler({
+      ctx: {
+        Provider: 'slack', AccountId: 'resort', OriginatingChannel: 'slack',
+        OriginatingTo: 'channel:C-QUIET', MessageSidFull: '407.1', SenderId: 'U-JASON',
+        BodyForCommands: '!nope do something',
+      },
+      sendPolicy: 'allow',
+    }, ctx);
+    assert.equal(result.handled, true);
+    assert.match(sent[0].text, /`!nope` is not a command in this channel, so nothing ran/);
+    assert.equal(state.finalized.details.reason, 'unknown_command_reply_dispatch');
+
+    const prose = dispatchHarness();
+    assert.equal(await handler({
+      ctx: {
+        Provider: 'slack', AccountId: 'resort', OriginatingChannel: 'slack',
+        OriginatingTo: 'channel:C-QUIET', MessageSidFull: '407.2', SenderId: 'U-JASON',
+        BodyForCommands: 'what commands exist?',
+      },
+      sendPolicy: 'allow',
+    }, prose.ctx), undefined);
+
+    const uncontrolled = dispatchHarness();
+    assert.equal(await handler({
+      ctx: {
+        Provider: 'slack', AccountId: 'resort', OriginatingChannel: 'slack',
+        OriginatingTo: 'channel:C-PUBLIC', MessageSidFull: '407.3', SenderId: 'U-JASON',
+        BodyForCommands: '!nope',
+      },
+      sendPolicy: 'allow',
+    }, uncontrolled.ctx), undefined);
+  } finally {
+    if (previous === undefined) delete process.env.RESORT_WORKFLOW_CONTROL_TOKEN;
+    else process.env.RESORT_WORKFLOW_CONTROL_TOKEN = previous;
+  }
+});
+
+test('register wires a reply_dispatch twin for every command surface with the fallback last (F-063)', () => {
+  const registrations = [];
+  plugin.register({
+    pluginConfig: {},
+    logger: { info() {}, warn() {}, error() {} },
+    registerTool() {},
+    registerInteractiveHandler() {},
+    on(hook, _handler, opts = {}) { registrations.push({ hook, priority: opts.priority }); },
+  });
+  const replyDispatch = registrations.filter(r => r.hook === 'reply_dispatch').map(r => r.priority);
+  const inboundClaim = registrations.filter(r => r.hook === 'inbound_claim').map(r => r.priority);
+  // accounting ×3, task list, reservation, email + the seven F-063 twins:
+  // whatsapp, marketing, ownerrez, receipt, manual review, help, unknown.
+  assert.deepEqual(replyDispatch, [170, 175, 180, 185, 190, 195, 200, 207, 210, 215, 220, 225, 10]);
+  // Hook chains run higher priority first and stop at the first handled:true,
+  // so the unknown-command fallback must be the unique minimum.
+  const fallback = Math.min(...replyDispatch);
+  assert.equal(fallback, 10);
+  assert.equal(replyDispatch.filter(p => p === fallback).length, 1);
+  // The inbound_claim ladder is unchanged; it still serves plugin-bound
+  // conversations, and Meta DM deliberately keeps no reply_dispatch twin.
+  assert.deepEqual([...inboundClaim].sort((a, b) => a - b), [10, 190, 200, 205, 206, 207, 210, 215, 220, 225]);
 });

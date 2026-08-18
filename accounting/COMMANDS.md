@@ -45,8 +45,7 @@ confirmation is typed:
 ```
 
 `expense` may appear before the receipt id. An optional third `|` segment
-carries a longer memo. If the bot does not acknowledge within about thirty
-seconds, the command did not execute — check before retyping (F-051).
+carries a longer memo.
 
 ## The accounting channel
 
@@ -60,6 +59,18 @@ completeness question, ask in the channel — Sol runs
 `accounting.reconciliation.read` and reports its durable counts with the
 workflow/evidence id. Channel history is not an answer. QBO is never invoked
 through a shell or ad-hoc code from this channel.
+
+## Command timing (quiet-moment rule)
+
+Exact `!` commands are claimed by a deterministic pre-model layer in the
+gateway. Type them as their own top-level message, unmentioned, in a quiet
+moment — not while the bot is mid-turn in the channel. A message that arrives
+during an active bot turn can be coalesced into the next turn's conversation
+history and never becomes a command event for any handler (D-026; F-051 iii,
+accepted as an operational constraint). If the bot does not acknowledge within
+about thirty seconds, the command did not execute: check the state it would
+have changed — proposal, review, queue, or send ledger — before retyping any
+mutation command.
 
 <!-- BEGIN GENERATED: durable workflows on the accounting surface — regenerate with `npm run docs:commands` -->
 
