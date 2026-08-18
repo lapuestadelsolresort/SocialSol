@@ -164,28 +164,6 @@ def _fetch_banxico(d: date) -> Optional[float]:
     return None
 
 
-def _fetch_exchangerate_api(d: date) -> Optional[float]:
-    """Fallback for today's spot rate only.
-
-    This endpoint does not accept a historical date. Using it for an older
-    transaction silently rewrites that day's accounting FX rate to today's
-    spot rate, so historical lookups must fail closed when Banxico and cache
-    data are unavailable.
-    """
-    if d != date.today():
-        return None
-    try:
-        url = f"https://api.exchangerate-api.com/v4/latest/USD"
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-            rate = data.get('rates', {}).get('MXN')
-            if rate:
-                return float(rate)
-    except Exception:
-        pass
-    return None
-
-
 if __name__ == '__main__':
     import sys
     if len(sys.argv) > 1:

@@ -7,7 +7,7 @@ import os
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from job_health import get_status, record
@@ -78,10 +78,23 @@ def upload(path, config):
     subprocess.run(cmd, check=True, timeout=300, capture_output=True, text=True)
 
 
-def prune_local(keep=30):
+def prune_local(keep_days=30, min_keep=10):
+    # Retention is date-based (F-034): a deploy burst of --force backups made
+    # in one afternoon must not push whole days of point-in-time depth out of
+    # a fixed-size window. The newest min_keep files always survive, a file
+    # older than keep_days is deleted, and a name whose date cannot be parsed
+    # is never deleted.
     files = sorted(BACKUP_DIR.glob("crm-*.db.gz.enc"), reverse=True)
-    for old in files[keep:]:
-        old.unlink()
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=keep_days)
+    for index, old in enumerate(files):
+        if index < min_keep:
+            continue
+        try:
+            stamped = date.fromisoformat(old.name[4:14])
+        except ValueError:
+            continue
+        if stamped < cutoff:
+            old.unlink()
 
 
 def main():

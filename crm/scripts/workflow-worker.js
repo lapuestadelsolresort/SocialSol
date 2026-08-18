@@ -21,7 +21,8 @@ const { sendGmailReply, readSentMessage, searchEmailActivity } = require('../lib
 const { sendOwnerRezMessage, readOwnerRezMessage } = require('../lib/ownerrez-messages');
 const { authorize, loadPolicy } = require('../lib/channel-policy');
 const { effectClass, policySnapshot, reviewChannelId } = require('../lib/workflow-execution-policy');
-const { getDefinition } = require('../workflows/registry');
+const { assertSystemOriginAccounted, policyRegistryAgreementViolations } = require('../lib/policy-registry-agreement');
+const { getDefinition, listDefinitions } = require('../workflows/registry');
 
 const once = process.argv.includes('--once');
 const intervalMs = Math.max(500, Number(process.env.WORKFLOW_POLL_INTERVAL_MS || 2000));
@@ -57,6 +58,7 @@ function authorizeSystemRun(definition) {
     context: { origin: 'system' },
     policy,
   });
+  assertSystemOriginAccounted(definition);
   return { policy, snapshot: policySnapshot(policy, definition) };
 }
 
@@ -309,6 +311,18 @@ async function main() {
   await db.query(sql`PRAGMA journal_mode = WAL`);
   await db.query(sql`PRAGMA foreign_keys = ON`);
   await ensureSchemaAsync(db, sql);
+
+  // Surface policy↔registry autonomy disagreements at boot instead of at the
+  // first exercise attempt. Report-only here: the per-site guards deny the
+  // unaccounted grant itself, and a boot refusal would take every OTHER
+  // workflow down with it.
+  try {
+    for (const violation of policyRegistryAgreementViolations(loadPolicy({ fresh: true }), listDefinitions())) {
+      console.error(`[workflow-worker] policy/registry disagreement: ${violation}`);
+    }
+  } catch (error) {
+    console.error(`[workflow-worker] policy/registry agreement check failed: ${error.message}`);
+  }
 
   const stop = () => { stopping = true; };
   process.on('SIGTERM', stop);

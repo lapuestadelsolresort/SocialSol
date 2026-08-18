@@ -7,6 +7,7 @@ const { authorize, loadPolicy } = require('../lib/channel-policy');
 const { createRun, getRun, resolveManualReview } = require('../lib/workflow-store');
 const { policySnapshot, submissionDecision } = require('../lib/workflow-execution-policy');
 const { loadControlToken } = require('../lib/workflow-auth');
+const { assertSystemOriginAccounted } = require('../lib/policy-registry-agreement');
 const { getDefinition, listDefinitions } = require('../workflows/registry');
 
 function isLoopback(req) {
@@ -223,6 +224,7 @@ function buildRouter(getDb, services = {}) {
         workflowName: definition.name,
         context,
       });
+      if (context.origin === 'system') assertSystemOriginAccounted(definition);
       if (typeof definition.validate === 'function') {
         definition.validate(body.input && typeof body.input === 'object' ? body.input : {});
       }

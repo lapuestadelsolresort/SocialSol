@@ -214,7 +214,7 @@ operator entry point and the reason is stated.
 | `crm.sync` | `crm.write` | mutates · autonomous | _none — automatic ingestion and sync — provider webhooks and scheduled syncs, no operator entry point_ |
 | `email.activity.read` | `email.read` | read-only | prospector-paulina, sarah-email |
 | `email.message.classify` | `email.send` | read-only | prospector-paulina, sarah-email |
-| `email.message.observe` | `email.read` | read-only | prospector-paulina, sarah-email |
+| `email.message.observe` | `email.read` | read-only · autonomous | prospector-paulina, sarah-email |
 | `email.reply.confirm` | `email.send` | mutates | prospector-paulina, sarah-email |
 | `email.reply.propose` | `email.send` | read-only | prospector-paulina, sarah-email |
 | `guest.reply.draft` | `guest_messages.draft` | mutates | sarah-coach |

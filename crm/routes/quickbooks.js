@@ -8,6 +8,22 @@ const express = require('express');
 const { readStore, writeStore, getValidAccessToken, loadDevCreds } = require('../lib/quickbooks-store');
 const { createState, verifyState } = require('../lib/quickbooks-state');
 
+// Intuit realm IDs are numeric company identifiers; OAuth authorization codes
+// are short single-line VSCHAR strings (RFC 6749 §A.11). Anything else is
+// refused before the token exchange, never echoed, and never persisted —
+// the callback HTML and the token store are the sinks being protected (F-027).
+const REALM_ID_SHAPE = /^\d{1,32}$/;
+const AUTH_CODE_SHAPE = /^[\x21-\x7e]{1,512}$/;
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function buildRouter() {
   const router = express.Router();
 
@@ -50,6 +66,12 @@ function buildRouter() {
       if (!code || !realmId) {
         return res.status(400).json({ error: 'Missing code or realmId' });
       }
+      if (typeof realmId !== 'string' || !REALM_ID_SHAPE.test(realmId)) {
+        return res.status(400).json({ error: 'realmId must be a numeric Intuit realm identifier' });
+      }
+      if (typeof code !== 'string' || !AUTH_CODE_SHAPE.test(code)) {
+        return res.status(400).json({ error: 'authorization code has an unexpected shape' });
+      }
 
       // Exchange code for tokens
       const creds = await loadDevCreds();
@@ -90,7 +112,7 @@ function buildRouter() {
       res.send(`
         <html><body style="font-family:sans-serif;text-align:center;padding:60px">
           <h1>✅ QuickBooks Connected!</h1>
-          <p>Realm ID: <code>${realmId}</code></p>
+          <p>Realm ID: <code>${escapeHtml(realmId)}</code></p>
           <p>Tokens saved. You can close this window.</p>
           <p><a href="/api/quickbooks/status">Check status</a> · <a href="/api/quickbooks/test">Run test query</a></p>
         </body></html>

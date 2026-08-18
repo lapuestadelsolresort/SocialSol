@@ -16,7 +16,7 @@ Squarespace orders; they enter accounting only through Kapital statements.
 | `config.json` | All configuration: receipt channels, QBO accounts, vendors, salary patterns. **Add new channels/vendors here.** |
 | `kapital_parser.py` | Parses the quirky Kapital CSV format. Groups SPEI triplets (transfer + comisión + IVA). |
 | `classifier.py` | Three-tier rule engine: auto → guess → unknown. Also has `format_classification_report()`. |
-| `fx_rates.py` | MXN/USD exchange rate via the official Banxico FIX API and ignored cache. |
+| `fx_rates.py` | MXN/USD rate: local day cache → official Banxico FIX → previous FIX (≤4 business days back) → fail closed. No spot-rate source exists; `config.json` carries no FX keys. |
 | `run_classify.py` | Main entry point. Dry-run by default. |
 | `fx_cache/` | Cached daily FX rates (auto-created). |
 | `tests.py` | The weekly integrity control (see below). |
