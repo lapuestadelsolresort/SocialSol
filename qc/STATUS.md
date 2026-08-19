@@ -1,10 +1,14 @@
 # QC status
 
-Updated: 2026-08-18 (PDT) — session 27 (**QC-9 RO/FIXTURE core COMPLETE:
-OwnerRez webhooks/sync/occupancy/mutation-surface + Paloma audited at ba47469;
-F-066 (P2), F-067 (P3), F-068 (P3) opened; the authorized live
-`!ownerrez confirm` canary is DESIGNED and HANDED OFF — pending owner-typed
-execution**). Authorization consumed this session: the Authorizations line
+Updated: 2026-08-19 (PDT) — session 27 continued (**QC-9 RO/FIXTURE core
+COMPLETE at ba47469; F-066 (P2), F-067 (P3), F-068 (P3) opened; live canary
+round A attempt 1 executed by the owner and FAILED AT THE AGENT LAYER,
+fail-closed → F-069 (P2): Sol refused the valid catalog operation
+`TagDefinitions_Post` claiming an "allowed operation set" and "the control is
+holding" while the ledger shows ZERO propose runs and ZERO proposals ever —
+no control fired; root cause = no model-visible operation catalog or propose
+input contract. Runbook v2 (fully explicit phrasing) is below; D-028
+authorization remains open for the retry**). Authorization consumed this session: the Authorizations line
 granted the `!ownerrez confirm` live leg (D-028); everything else ran
 RO/FIXTURE. Zero production mutations by the executor — FIXTURE ran in an
 isolated scratchpad clone (removed after), prod verified clean at ba47469 at
@@ -49,20 +53,33 @@ per-op only — unchanged). Remaining: QC-9 live leg (runbook below), QC-6c
 CANARY (D-004-gated), F-031 drill (D-006 window), QC-10 + P2/P3 residual
 dispositions.
 
-## LIVE LEG RUNBOOK — owner-typed `!ownerrez confirm` canary (D-028)
+## LIVE LEG RUNBOOK v2 — owner-typed `!ownerrez confirm` canary (D-028)
 
-Two rounds in **#reservations**, quiet moments (D-026: top-level, unmentioned;
-no ack in ~30s = did not execute — check with the executor before retyping).
-Each confirm must be pasted within **15 minutes** of its proposal, by the
-same user who asked.
+Attempt 1 (natural-language ask) was refused by the agent without any tool
+call — F-069. Attempt 2 hands Sol the literal tool input so there is nothing
+to improvise. Two rounds in **#reservations**. The ASK is a normal
+conversational message; the quiet-moment rule (D-026) applies to the exact
+`!ownerrez confirm` paste (top-level, unmentioned; no ack in ~30s = did not
+execute — check with the executor before retyping). Each confirm must be
+pasted within **15 minutes** of its proposal, by the same user who asked.
 
-**Round A (create):** ask Sol:
-`Sol, propose an OwnerRez mutation: operation TagDefinitions_Post creating a
-tag definition named "QC Canary 2026-08-18" with color #888888. Reason: QC-9
-live confirmation canary.`
+**Round A (create), attempt 2 — ask Sol:**
+```
+Sol, please call your resort_workflow tool now with exactly:
+workflow: ownerrez.mutation.propose
+input: {"operationId": "TagDefinitions_Post", "body": {"name": "QC Canary 2026-08-18", "color": "#888888"}, "reason": "QC-9 live confirmation canary"}
+TagDefinitions_Post is one of the 34 operations in the fixed catalog
+(crm/lib/ownerrez-mutation-catalog.js); the operation id goes inside
+input.operationId — it is not a workflow name. The proposal step writes
+nothing to OwnerRez; it returns a confirmation command that only I can
+execute.
+```
 Sol replies with a proposal and an exact `!ownerrez confirm <id> <hash>`
 line. Paste that line top-level in #reservations. Expected: completed +
-verified-by-readback reply + reservations notification.
+verified-by-readback reply + reservations notification. If Sol refuses
+AGAIN: stop — do not coax further; F-069 escalates to
+inoperable-via-entrypoint and its fix session inherits this canary as live
+verification.
 
 **Round B (cleanup, after the executor verifies round A and reports the
 created id):** ask Sol:
@@ -82,10 +99,15 @@ notification outbox, tag inventory count.
 
 **NEW this session:**
 
-1. **The live `!ownerrez confirm` canary awaits your keyboard** (runbook
-   above). It is the first-ever firing of the mutation surface. If you skip
-   it this session, the next session needs a fresh Authorizations-line grant
-   (D-028).
+1. **Canary round A attempt 1 failed at the agent layer (F-069, P2):** Sol
+   refused the valid operation, invented an "allowed operation set", and
+   claimed "the control is holding" — no control fired (zero runs, zero
+   proposals, zero provider calls; fail-closed held). Root cause: nothing
+   Sol can see documents the 34-op catalog or the propose input contract.
+   **Runbook v2 above gives the literal tool input for the retry** (D-028
+   authorization still open for this leg). Sol's offer to "file adding
+   TagDefinitions_Post to the supported operations" is factually wrong —
+   it is already supported; decline it.
 2. **Paloma's scheduled trio has been silently broken since install
    (F-066, P2)** — the Monday follow-up/summary posts you may have expected
    yesterday never happened, and the 4h scan has failed every run. Task
@@ -115,19 +137,23 @@ load-bearing for QC-6c and QC-10), D-007 (accounting validator), D-010 (CI
 scope confirm).
 
 Open P1s: **NONE**. Open P2s: F-013 (gated on F-031 drill), F-023, F-025,
-F-006, F-029, F-033, F-035 (remainder), F-036 (three writers remain), F-040,
-F-044, F-059, F-061, **F-066 (new)**. Open P3s: F-019 (browser page-JS leg =
+F-006, F-029, F-033, F-035 (remainder; + two new observations: resort cron
+`meta-ads-geo-audit` lastStatus=error, chronic gateway memory-pressure
+warnings), F-036 (three writers remain), F-040, F-044, F-059, F-061,
+**F-066 (new)**, **F-069 (new — live-canary discovery)**. Open P3s: F-019 (browser page-JS leg =
 QC-6c CANARY), F-064 (monitor-only), F-065 (docs batch; + one-line rider:
 `!help` renders the inert-but-functional `ownerrez.mutation.propose` as
 "shadowed"), **F-067 (new)**, **F-068 (new)**.
 
 ## Next
 
-**(1) QC-9 live `!ownerrez confirm` canary** — the runbook above, owner-typed,
-then executor verification (ledger/provider/notification) recorded as QC9-09;
-that completes QC-9 and its phase-boundary batch-merge follows (Amendment 3).
-If deferred: it becomes the next session's first item with a fresh
-authorization grant.
+**(1) QC-9 live `!ownerrez confirm` canary — RETRY (runbook v2 above,
+attempt 2 with literal tool input)**, owner-typed, then executor verification
+(ledger/provider/notification) recorded as QC9-09; that completes QC-9 and
+its phase-boundary batch-merge follows (Amendment 3). If Sol refuses again or
+the leg is deferred: QC-9 closes RO/FIXTURE-complete with the live leg
+riding the F-069 fix session (D-026/D-027 precedent; fresh authorization
+grant with that session).
 
 **Then:** (2) QC-6c CANARY (D-004 first — still unanswered and load-bearing).
 (3) F-031 drill slot (D-006 window). (4) QC-10 (incl. the F-031 drill before
