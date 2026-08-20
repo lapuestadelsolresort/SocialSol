@@ -1,32 +1,142 @@
 # QC status
 
-Updated: 2026-08-16 (PDT) — session 15. **QC-7b (Regina outreach) COMPLETE → QC-7 COMPLETE (QC-7a + QC-7b).** Rows QC7B-01…05; evidence E-QC7B-01…03. Send-path verified: `regina.daily` (live_workflows + autonomous_workflows, registry autonomous:true, config auto_send.enabled=true) = full autopilot **MATCHED D-001**; two loaded producers (graph-regina 07:30 → durable workflow → anniversary-cron; regina-reconcile 10:00 Gmail read-only reconcile); legacy `regina-anniversary` NOT loaded (no reboot since Aug-7). **NO WhatsApp send path** (zero Twilio imports; whatsapp-channel contacts → Slack drafts only) and **NO Airbnb-thread send path** (provenance hard rule) — `!wa` invariant untouched, Airbnb-thread grant-only as designed. **FIXTURE battery 35/35** (eligibility matrix incl. 300d/status-set semantics; context matrix; consent battery: suppression/DNC/cap/risky-prefix/MX-fail-closed all cancel with ZERO provider calls; **F-047 does NOT extend to Regina** — case A3; happy path carries stable Idempotency-Key + full CAN-SPAM artifacts; 429→cancel, 5xx/network→ambiguous→durable review; e2e cron run + same-day re-fire idempotency; bare-`!batch` smoke probe inert). Suites 126/126 at the SHA. Live sweep: Regina auto-send **never production-fired** (31 May-era manual rows — production-unfired named, carried by FIXTURE); today's digest honest for the zero case; cohorts: 18-cancelled EXACT, "39/10/2" stale, **vip/feedback structurally inert → F-012 RESOLVED (product backlog)**.
+Updated: 2026-08-19 (PDT) — session 27 concluded (**QC-9 COMPLETE — the live
+`!ownerrez confirm` leg PASSED both rounds at ba47469: first-ever firing of
+the 34-op mutation surface, every gate held live (model-tool propose,
+same-user + hash + expiry, execute-once, created/deleted-entity readbacks,
+notifications incl. write_notifications mentions), and cleanup is proven by
+HASH EQUALITY — the provider tag-definition snapshot after the delete is
+byte-identical to the pre-canary baseline. F-069 severity revised P2→P3 (the
+literal-input retry succeeded; instruction-only gap). Post-canary sweep found
+a PRE-EXISTING SQLITE_BUSY review blocking the scheduled contact sync ~24h →
+F-064 RAISED P3→P2; resolution command handed to the owner below**). Authorization consumed this session: the Authorizations line
+granted the `!ownerrez confirm` live leg (D-028); everything else ran
+RO/FIXTURE. Zero production mutations by the executor — FIXTURE ran in an
+isolated scratchpad clone (removed after), prod verified clean at ba47469 at
+session start, policy sha `0dd75080` unchanged (fingerprint `match` +
+`agreement: ok`).
 
-**F-005 CLOSED verified-fixed** — QC-7 reconciliation complete: every transport dispositioned (matched / arming-pending fix-listed / quarantined). **F-047 CONFIRMED P2 (owner, D-015)** — fix in D-008 P2 batch. NEW P3s: **F-048** (sent/skip/defer commands have no live dispatch path — operator-terminal-only; reconcile sweep compensates), **F-049** (Regina gate-failure Slack summary cross-posts to Paulina's channel with wrong caption), **F-050** (re-selection edges: ambiguous/approved rows don't block batch re-pick; anniversary 429 = skipped year; smoke.json dead contact ids).
+**Delivered (QC9-01…QC9-08, E-QC9-01…04):** (1) OwnerRez webhook boundary:
+provider subscription manifest reconciled dynamically (24 subs = 8 types × 3
+actions, zero dupes, single URL = the mounted durable route), auth/durable-
+ack/idempotency/retry code-traced at ba47469 (byte-identical to the D-019 RO
+map's read — empty diff), live passive proof (event received 20:28Z →
+completed 20:31Z during the audit), 68/68 durable-era events completed;
+(2) contact sync proven contact-only (guestless/blocks excluded by
+construction; occupancy readers open no DB and go provider-direct; no
+duplicate producer — legacy plist not loaded); (3) mutation surface
+re-verified at ba47469: 34 fixed ops, full gate chain, confirm live + NOT
+autonomous (D-019 holds), 2-user allowlist, ZERO proposals ever
+(production-unfired); propose's absence from live_workflows traced
+behaviorally inert (all steps SAFE_IN_SHADOW); (4) FIXTURE battery 32/32
+shipped + **6 QC-authored negatives closing real gaps** (webhook
+missing/wrong/unconfigured auth ×3; wrong acceptance hash; expired proposal;
+re-confirm after completion — execute-once held) + plugin suite 90/90;
+(5) Paloma: dedicated identity, 13-channel dynamic membership, healthy
+10-min gateway cron (failure-alert configured, all 13 checkpoints fresh),
+SOUL contract present, anti-future triggers + UNIQUE source_ts backstops,
+deterministic bilingual task-report proven by live RO run; (6) **the D-012
+scheduled trio is broken end-to-end since install → F-066 (P2)**: scan dies
+on missing config + a masked code defect, both weeklies call nonexistent
+`openclaw run` and mask the failure (`|| log`), zero watchdog/job-status
+coverage; capture unaffected (real-time + cron compensate) but weekly
+follow-ups/summaries have never run; (7) F-067 (P3): #common-areas joined
+but not converged for real-time delivery/task-replies (cron covers capture);
+(8) F-068 (P3): 49 pre-cutover ownerrez_events rows permanently non-terminal
+and invisible to the worker (polling paths carried the data; durable era has
+zero backlog); (9) tasks.db recovery row confirmed MET (state-backup ok
+today 10:45Z) — RECOVERY_MATRIX updated.
 
-Authorizations session 15: blank line at start (RO+FIXTURE only) → held for all verification. All checks RO (static reads; live CRM DB readonly:true sweep) + FIXTURE (disposable DB from fresh live DDL dump; fetch/DNS stubbed; Slack no-op via empty account; healthchecks no-op; worktree gitignored fixture configs regina/config.json + prospector/config.json created then removed). Zero production writes verified post-session: prod clean @ 03fe3fe, policy sha 32c2bdfe unchanged, production regina/config.json untouched (Jul-30), Regina sends still 31. **D-015 recorded in-session (owner): F-047 = P2; QC-7 phase-boundary merge authorized agent-run end-to-end** (QC4B-04/QC5-07/QC6-11 pattern) — executed this session (QC7B-06 records the result).
+## Phase ledger — QC-0…QC-9 COMPLETE + fix sessions #1–#8 COMPLETE (runtime
+baseline ba47469; prod main ba47469; policy sha 0dd75080 ARMED marketing
+campaign_activate per-op only — unchanged). Remaining: QC-9 phase-boundary
+batch-merge (needs owner authorization — Amendment 3 pattern), QC-6c CANARY
+(D-004-gated), F-031 drill (D-006 window), QC-10 + P2/P3 residual
+dispositions (now incl. F-064 P2 grid-contention fix, F-066 Paloma trio,
+F-069 propose-instruction fix).
 
-## Phase ledger — QC-0…QC-7 COMPLETE including QC-0…QC-6 boundaries (runtime baseline 2983ed0; prod main advances docs-only at each boundary)
+## LIVE LEG — COMPLETE (QC9-09; runbook retired)
 
-## ⚠️ Standing advisory (until F-039 fixed)
+Round A: proposal caa17fd1… → owner confirm → execute-once → provider 200,
+created tag definition 40041, verified_by_readback. Round B: proposal
+ead7b569… → owner confirm → provider 204, deleted-entity readback; provider
+snapshot after delete byte-identical to the before baseline (sha 265a7c98…
+both). Surface history = exactly the canary pair. Attempt-1 agent refusal is
+F-069 (now P3); one wrong-window paste (QC terminal, `command not found`)
+was harmless and is recorded in QC9-09.
 
-**Do not re-post pre-August (June/July) Kapital statement CSVs to the accounting Slack channel.** The live pipeline stages and processes automatically and would create ~60 duplicate standalone fee Purchases (~9.50 USD for July; June similar). August-onward statements are fine (new format, full dedup).
+## Owner follow-ups
 
-## ⚠️ Standing advisory (until F-041 fixed)
+**NEW this session:**
 
-**A reboot/login of the Mac mini resurrects all six retired legacy producers** (squarespace-sync, ownerrez-sync, orchestrator, gtku, prospector-daily, **regina-anniversary outreach**) alongside their graph replacements — the on-disk plists keep live schedules and are not disabled. If an unplanned reboot occurs before the F-016/F-041 fix session: immediately `launchctl bootout` the six labels (or verify loaded set == SERVICE_MANIFEST expected set) before trusting producer exclusivity. (No reboot as of session 15: boot Aug-7 predates cutover.)
+1. **ACTION NEEDED — unblock the contact sync (5 seconds):** a SQLITE_BUSY
+   failure yesterday 6:26 PM PDT opened review 2a5467cd… and the 15-minute
+   OwnerRez contact-sync poll has been fail-closed-blocked since (webhook
+   syncs kept data flowing — nothing lost; QC9-10). In **#business-intel**,
+   quiet moment, paste:
+   `!review resolve 2a5467cd-fba2-4eb0-9d08-896e1ad37195 not-sent`
+   ("not-sent" is correct: the failed step was a local sync write; nothing
+   external happened; the next poll re-syncs idempotently.) This is the
+   second SQLITE_BUSY cadence-block in 2 days → F-064 raised to P2; the
+   busy_timeout/grid-de-phasing fix is now due in the next fix batch.
+2. **The canary succeeded end-to-end and cleaned up after itself** —
+   OwnerRez is byte-identical to its pre-canary state. Attempt 1's refusal
+   is F-069 (revised to P3): Sol lacks the operation catalog / propose
+   input contract in anything it can see; until the fix lands, propose asks
+   should use the literal form (workflow + input JSON, QC9-09 pattern).
+   Sol's "file an infrastructure gap to add TagDefinitions_Post" offer
+   remains factually wrong — decline it.
+3. **Paloma's scheduled trio has been silently broken since install
+   (F-066, P2)** — the Monday follow-up/summary posts you may have expected
+   yesterday never happened, and the 4h scan has failed every run. Task
+   capture is unaffected (the 10-minute reconciliation + real-time delivery
+   are healthy — live-verified today). Fix rides the next P2 batch.
+4. **Paloma joined #common-areas but real-time monitoring isn't converged
+   there (F-067, P3)** — tasks in that channel are caught by the 10-minute
+   sweep only, and task-list questions there get no deterministic report.
+5. `meta-ads-geo-audit` gateway cron (resort agent) shows lastStatus=error —
+   out of QC-9 scope, recorded as an F-035-remainder observation for that
+   finding's eventual disposition.
+
+**Still open from earlier sessions (unchanged):** weekly accounting control
+legitimately red until F-061 is worked (next fire Mon 2026-08-24 08:00 PT);
+campaign approvals still unrecorded (nothing can auto-activate);
+policy-fingerprint discipline after any hand edit; un-arm procedure for
+marketing activation in F001-FIX evidence; pre-scrub bundle +
+workspace-resort archive deletions are owner-anytime calls; `~/fix-worktree`
+carries merged branch `fix/f063-reply-dispatch-twins` (removable); 3 pending
+email_reply_proposals remain inert (do NOT confirm as tests).
 
 ## Blockers
 
-None. QC-7 gate satisfied and phase complete; boundary merge owner-authorized (D-015). Open D-rows: D-004 (blackout windows), D-007 (accounting validator), D-010 (CI scope confirm) — none block the fix-session sequence; D-004 becomes load-bearing at QC-6c/QC-10 CANARY/OUTAGE time.
+None for the committed work. The QC-9 phase-boundary merge awaits an owner
+authorization (past pattern: agent-run end-to-end, owner-run `!` fallback on
+classifier blocks). Open D-rows: D-004 (blackout windows — load-bearing for
+QC-6c and QC-10), D-007 (accounting validator), D-010 (CI scope confirm).
 
-Open P1s: F-001 (fix session; invariant-first per D-001), F-014, F-015, F-016, F-041, F-031, F-032. Open P2s: F-013, F-023, F-025, F-006, F-029, F-033, F-035, F-036, F-039, F-040, F-045, F-044 (register-vs-accept residual), F-047 (P2 confirmed, D-015). Open P3s: F-024, F-026, F-021, F-027, F-028, F-030, F-034, F-037, F-038, F-042, F-043, F-019, F-046, **F-048, F-049, F-050 (new — QC-7b)**. Hypotheses resolved: F-002, F-003, F-004, F-007 (largely; residual in F-019), F-008, F-010 (partially; rides F-044), **F-012 (RESOLVED — product backlog, QC-7b)**. Closed P1s this phase: F-005 (verified-fixed — reconciliation complete), F-020 (verified-fixed 2026-08-15).
+Open P1s: **NONE**. Open P2s: F-013 (gated on F-031 drill), F-023, F-025,
+F-006, F-029, F-033, F-035 (remainder; + two new observations: resort cron
+`meta-ads-geo-audit` lastStatus=error, chronic gateway memory-pressure
+warnings), F-036 (three writers remain), F-040, F-044, F-059, F-061,
+**F-066 (new)**, **F-064 (raised P3→P2 on recurrence)**. Open P3s (delta):
+F-069 (revised P2→P3; instruction fix queued). Open P3s: F-019 (browser page-JS leg =
+QC-6c CANARY), F-064 (monitor-only), F-065 (docs batch; + one-line rider:
+`!help` renders the inert-but-functional `ownerrez.mutation.propose` as
+"shadowed"), **F-067 (new)**, **F-068 (new)**.
 
 ## Next
 
-**Fix session #1 — service-layer bundle (F-016 + F-041 + F-015 + D-012 Paloma-trio install + F-035(c) auto-organic-ig-post retirement + D-009 #qc-scratch channel/policy entries).** Owner-agreed sequencing (2026-08-16): all fix sessions were delayed until QC-7 completed — that gate is now open. This bundle lands BEFORE QC-9 (Paloma dependency) and SOON (F-041 is calendar-time risk: any reboot resurrects six legacy producers). Requires BUSINESS (release path: template/manifest/plist changes, PR → CI → merge → deploy) + OUTAGE (launchctl bootout/bootstrap of affected jobs) authorization at session start. Scope per FINDINGS: canonical template set + SERVICE_MANIFEST convergence, six legacy plists disabled/removed durably (reboot-proof), daily-tests/media-rescan plist fixes, tracker-liveness exit-semantics + watchdog coverage, Paloma trio installed, auto-organic-ig-post retired, #qc-scratch created with channel-policy entries.
+**(1) QC-9 phase-boundary batch-merge** (Amendment 3): qc/ docs commits from
+sessions 27a-c → push → one PR → merge → docs-only fast-forward of production
+main, with ancestry + incoming-files proofs and post-ff runtime-baseline
+verification per the QC4B-04/QC5-07 pattern. Needs an owner authorization
+line (agent-run end-to-end; owner-run `!` fallback if the classifier blocks).
+Also pending owner: the `!review resolve 2a5467cd… not-sent` unblock (follow-up 1).
 
-**Then (order per owner-agreed sequencing):** (2) **Sarah/OwnerRez arming fix session** (Sarah auto-send both providers + OwnerRez mutation autopilot per D-001; config/release path) BEFORE QC-8/QC-9 audit those surfaces — fix-before-audit so the phases audit final config. (3) **F-001 session** (creative/landing-review invariant + regression + F-045 committed briefs, THEN Meta autonomous-activation arming) — any time; activation stays human-confirmed until it runs (zero exposure). (4) **F-014 rebuild**, **P2/P3 batch** (now incl. F-047 carve-out scoping + F-048/F-049/F-050 + F-039/F-042/F-043/F-046), and **QC-6c CANARY session** (browser-load funnel leg + test-phone WhatsApp leg per D-009; needs session-level CANARY approval + cleanup plan + suitable window; D-004 blackout windows should be recorded first) — float after the above. Then **QC-8** (WhatsApp `!wa` violation battery on fixtures, Sarah email, Meta DM quarantine re-verify, Sarah Coach) → **QC-9** (OwnerRez + Paloma).
+**Then:** (2) QC-6c CANARY (D-004 first — still unanswered and load-bearing).
+(3) F-031 drill slot (D-006 window). (4) QC-10 (incl. the F-031 drill before
+the stamp) + P2/P3 residual dispositions (owner + due date per DoD #10);
+F-066 fix session per D-008 P2 policy.
 
 **Exact next command** (start ritual, §8):
 
@@ -34,4 +144,31 @@ Open P1s: F-001 (fix session; invariant-first per D-001), F-014, F-015, F-016, F
 git -C ~/.openclaw/SocialSol status
 ```
 
-Expected: clean `main` @ the post-QC-7-boundary merge SHA (QC7B-06 / E-QC7B-04 record it; runtime baseline 2983ed0, newest deploy record 2026-08-15T21:39Z unchanged — docs-only ff, no release ceremony). Then `cd ~/qc-worktree`, read qc/STATUS.md + the FINDINGS rows for the service bundle (F-016, F-041, F-015, F-035, D-012, D-009), and begin fix session #1 with BUSINESS+OUTAGE authorization stated on the Authorizations line. F-041 advisory applies if any reboot occurred in the interim.
+Expected: clean `main` @ ba47469 (policy sha 0dd75080 unchanged;
+`node scripts/policy-fingerprint.js check` prints `match` + `agreement: ok`).
+Then `cd ~/qc-worktree`, read qc/STATUS.md, and run the QC-9 phase-boundary
+merge (owner authorization on the Authorizations line), then QC-6c/QC-10
+sequencing per Next.
+
+**⚠️ Standing QC-executor rules:** (QC8-INC-01) never `pkill -f` a shared
+substring — kill FIXTURE processes only by exact recorded PID. (QC8-07) a
+claim-path "verified live" needs a DISCRIMINATING artifact. (QCF063-02) the
+claim surface and the server-side authorization surface are different
+controls. (NEW, QC9-04) fixture timestamps that feed `new Date()` gates must
+be ISO strings — SQLite's space format parses as local time and silently
+defeats expiry tests.
+
+Method notes worth keeping (session 27):
+
+- **"Loaded" is not "working."** The Paloma trio passed its install-time
+  verification (loaded, drift-free) and then failed every functional run;
+  only a first-RUN verification would have caught it. F-066's closure
+  criterion encodes that.
+- **A green exit is only evidence when the script CAN fail.** Both weekly
+  wrappers `|| log`-mask their core action; their exit-0 history was
+  non-evidence (F-017 class, second occurrence).
+- **The same negative-coverage gap repeats across surfaces.** Wrong-hash /
+  expiry / re-confirm negatives were missing here exactly as wrong-hash /
+  wrong-user / re-confirm were missing on the email surface (E-QC8C-06);
+  when a gate chain is cloned between surfaces, its test gaps clone too —
+  audit the sibling surface's gaps first next time.
