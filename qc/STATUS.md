@@ -1,14 +1,15 @@
 # QC status
 
-Updated: 2026-08-19 (PDT) — session 27 continued (**QC-9 RO/FIXTURE core
-COMPLETE at ba47469; F-066 (P2), F-067 (P3), F-068 (P3) opened; live canary
-round A attempt 1 executed by the owner and FAILED AT THE AGENT LAYER,
-fail-closed → F-069 (P2): Sol refused the valid catalog operation
-`TagDefinitions_Post` claiming an "allowed operation set" and "the control is
-holding" while the ledger shows ZERO propose runs and ZERO proposals ever —
-no control fired; root cause = no model-visible operation catalog or propose
-input contract. Runbook v2 (fully explicit phrasing) is below; D-028
-authorization remains open for the retry**). Authorization consumed this session: the Authorizations line
+Updated: 2026-08-19 (PDT) — session 27 concluded (**QC-9 COMPLETE — the live
+`!ownerrez confirm` leg PASSED both rounds at ba47469: first-ever firing of
+the 34-op mutation surface, every gate held live (model-tool propose,
+same-user + hash + expiry, execute-once, created/deleted-entity readbacks,
+notifications incl. write_notifications mentions), and cleanup is proven by
+HASH EQUALITY — the provider tag-definition snapshot after the delete is
+byte-identical to the pre-canary baseline. F-069 severity revised P2→P3 (the
+literal-input retry succeeded; instruction-only gap). Post-canary sweep found
+a PRE-EXISTING SQLITE_BUSY review blocking the scheduled contact sync ~24h →
+F-064 RAISED P3→P2; resolution command handed to the owner below**). Authorization consumed this session: the Authorizations line
 granted the `!ownerrez confirm` live leg (D-028); everything else ran
 RO/FIXTURE. Zero production mutations by the executor — FIXTURE ran in an
 isolated scratchpad clone (removed after), prod verified clean at ba47469 at
@@ -46,77 +47,54 @@ and invisible to the worker (polling paths carried the data; durable era has
 zero backlog); (9) tasks.db recovery row confirmed MET (state-backup ok
 today 10:45Z) — RECOVERY_MATRIX updated.
 
-## Phase ledger — QC-0…QC-8 COMPLETE + fix sessions #1–#8 COMPLETE; QC-9
-RO/FIXTURE core COMPLETE, live confirm leg pending (runtime baseline ba47469;
-prod main ba47469; policy sha 0dd75080 ARMED marketing campaign_activate
-per-op only — unchanged). Remaining: QC-9 live leg (runbook below), QC-6c
-CANARY (D-004-gated), F-031 drill (D-006 window), QC-10 + P2/P3 residual
-dispositions.
+## Phase ledger — QC-0…QC-9 COMPLETE + fix sessions #1–#8 COMPLETE (runtime
+baseline ba47469; prod main ba47469; policy sha 0dd75080 ARMED marketing
+campaign_activate per-op only — unchanged). Remaining: QC-9 phase-boundary
+batch-merge (needs owner authorization — Amendment 3 pattern), QC-6c CANARY
+(D-004-gated), F-031 drill (D-006 window), QC-10 + P2/P3 residual
+dispositions (now incl. F-064 P2 grid-contention fix, F-066 Paloma trio,
+F-069 propose-instruction fix).
 
-## LIVE LEG RUNBOOK v2 — owner-typed `!ownerrez confirm` canary (D-028)
+## LIVE LEG — COMPLETE (QC9-09; runbook retired)
 
-Attempt 1 (natural-language ask) was refused by the agent without any tool
-call — F-069. Attempt 2 hands Sol the literal tool input so there is nothing
-to improvise. Two rounds in **#reservations**. The ASK is a normal
-conversational message; the quiet-moment rule (D-026) applies to the exact
-`!ownerrez confirm` paste (top-level, unmentioned; no ack in ~30s = did not
-execute — check with the executor before retyping). Each confirm must be
-pasted within **15 minutes** of its proposal, by the same user who asked.
-
-**Round A (create), attempt 2 — ask Sol:**
-```
-Sol, please call your resort_workflow tool now with exactly:
-workflow: ownerrez.mutation.propose
-input: {"operationId": "TagDefinitions_Post", "body": {"name": "QC Canary 2026-08-18", "color": "#888888"}, "reason": "QC-9 live confirmation canary"}
-TagDefinitions_Post is one of the 34 operations in the fixed catalog
-(crm/lib/ownerrez-mutation-catalog.js); the operation id goes inside
-input.operationId — it is not a workflow name. The proposal step writes
-nothing to OwnerRez; it returns a confirmation command that only I can
-execute.
-```
-Sol replies with a proposal and an exact `!ownerrez confirm <id> <hash>`
-line. Paste that line top-level in #reservations. Expected: completed +
-verified-by-readback reply + reservations notification. If Sol refuses
-AGAIN: stop — do not coax further; F-069 escalates to
-inoperable-via-entrypoint and its fix session inherits this canary as live
-verification.
-
-**Round B (cleanup, after the executor verifies round A and reports the
-created id):** ask Sol:
-`Sol, propose an OwnerRez mutation: operation TagDefinitions_Delete for tag
-definition id <ID>. Reason: QC-9 canary cleanup.`
-Paste the emitted confirm line. Expected: deleted + readback; provider tag
-inventory back to exactly 3 definitions (E-QC9-03 baseline).
-
-Contingencies: provider 4xx → run fails closed, one incident alert fires,
-zero state change — stop and report. Timeout/5xx → ambiguous → durable
-manual review + 409-block on the surface — resolve only with the executor.
-Executor verification after each round: proposal row status, run + effect
-`verified_by_readback`, evidence row, provider GET (present → absent),
-notification outbox, tag inventory count.
+Round A: proposal caa17fd1… → owner confirm → execute-once → provider 200,
+created tag definition 40041, verified_by_readback. Round B: proposal
+ead7b569… → owner confirm → provider 204, deleted-entity readback; provider
+snapshot after delete byte-identical to the before baseline (sha 265a7c98…
+both). Surface history = exactly the canary pair. Attempt-1 agent refusal is
+F-069 (now P3); one wrong-window paste (QC terminal, `command not found`)
+was harmless and is recorded in QC9-09.
 
 ## Owner follow-ups
 
 **NEW this session:**
 
-1. **Canary round A attempt 1 failed at the agent layer (F-069, P2):** Sol
-   refused the valid operation, invented an "allowed operation set", and
-   claimed "the control is holding" — no control fired (zero runs, zero
-   proposals, zero provider calls; fail-closed held). Root cause: nothing
-   Sol can see documents the 34-op catalog or the propose input contract.
-   **Runbook v2 above gives the literal tool input for the retry** (D-028
-   authorization still open for this leg). Sol's offer to "file adding
-   TagDefinitions_Post to the supported operations" is factually wrong —
-   it is already supported; decline it.
-2. **Paloma's scheduled trio has been silently broken since install
+1. **ACTION NEEDED — unblock the contact sync (5 seconds):** a SQLITE_BUSY
+   failure yesterday 6:26 PM PDT opened review 2a5467cd… and the 15-minute
+   OwnerRez contact-sync poll has been fail-closed-blocked since (webhook
+   syncs kept data flowing — nothing lost; QC9-10). In **#business-intel**,
+   quiet moment, paste:
+   `!review resolve 2a5467cd-fba2-4eb0-9d08-896e1ad37195 not-sent`
+   ("not-sent" is correct: the failed step was a local sync write; nothing
+   external happened; the next poll re-syncs idempotently.) This is the
+   second SQLITE_BUSY cadence-block in 2 days → F-064 raised to P2; the
+   busy_timeout/grid-de-phasing fix is now due in the next fix batch.
+2. **The canary succeeded end-to-end and cleaned up after itself** —
+   OwnerRez is byte-identical to its pre-canary state. Attempt 1's refusal
+   is F-069 (revised to P3): Sol lacks the operation catalog / propose
+   input contract in anything it can see; until the fix lands, propose asks
+   should use the literal form (workflow + input JSON, QC9-09 pattern).
+   Sol's "file an infrastructure gap to add TagDefinitions_Post" offer
+   remains factually wrong — decline it.
+3. **Paloma's scheduled trio has been silently broken since install
    (F-066, P2)** — the Monday follow-up/summary posts you may have expected
    yesterday never happened, and the 4h scan has failed every run. Task
    capture is unaffected (the 10-minute reconciliation + real-time delivery
    are healthy — live-verified today). Fix rides the next P2 batch.
-3. **Paloma joined #common-areas but real-time monitoring isn't converged
+4. **Paloma joined #common-areas but real-time monitoring isn't converged
    there (F-067, P3)** — tasks in that channel are caught by the 10-minute
    sweep only, and task-list questions there get no deterministic report.
-4. `meta-ads-geo-audit` gateway cron (resort agent) shows lastStatus=error —
+5. `meta-ads-geo-audit` gateway cron (resort agent) shows lastStatus=error —
    out of QC-9 scope, recorded as an F-035-remainder observation for that
    finding's eventual disposition.
 
@@ -131,29 +109,29 @@ email_reply_proposals remain inert (do NOT confirm as tests).
 
 ## Blockers
 
-The QC-9 live leg needs the owner's hands (same-user Slack gates — the
-executor cannot and must not type it). Open D-rows: D-004 (blackout windows —
-load-bearing for QC-6c and QC-10), D-007 (accounting validator), D-010 (CI
-scope confirm).
+None for the committed work. The QC-9 phase-boundary merge awaits an owner
+authorization (past pattern: agent-run end-to-end, owner-run `!` fallback on
+classifier blocks). Open D-rows: D-004 (blackout windows — load-bearing for
+QC-6c and QC-10), D-007 (accounting validator), D-010 (CI scope confirm).
 
 Open P1s: **NONE**. Open P2s: F-013 (gated on F-031 drill), F-023, F-025,
 F-006, F-029, F-033, F-035 (remainder; + two new observations: resort cron
 `meta-ads-geo-audit` lastStatus=error, chronic gateway memory-pressure
 warnings), F-036 (three writers remain), F-040, F-044, F-059, F-061,
-**F-066 (new)**, **F-069 (new — live-canary discovery)**. Open P3s: F-019 (browser page-JS leg =
+**F-066 (new)**, **F-064 (raised P3→P2 on recurrence)**. Open P3s (delta):
+F-069 (revised P2→P3; instruction fix queued). Open P3s: F-019 (browser page-JS leg =
 QC-6c CANARY), F-064 (monitor-only), F-065 (docs batch; + one-line rider:
 `!help` renders the inert-but-functional `ownerrez.mutation.propose` as
 "shadowed"), **F-067 (new)**, **F-068 (new)**.
 
 ## Next
 
-**(1) QC-9 live `!ownerrez confirm` canary — RETRY (runbook v2 above,
-attempt 2 with literal tool input)**, owner-typed, then executor verification
-(ledger/provider/notification) recorded as QC9-09; that completes QC-9 and
-its phase-boundary batch-merge follows (Amendment 3). If Sol refuses again or
-the leg is deferred: QC-9 closes RO/FIXTURE-complete with the live leg
-riding the F-069 fix session (D-026/D-027 precedent; fresh authorization
-grant with that session).
+**(1) QC-9 phase-boundary batch-merge** (Amendment 3): qc/ docs commits from
+sessions 27a-c → push → one PR → merge → docs-only fast-forward of production
+main, with ancestry + incoming-files proofs and post-ff runtime-baseline
+verification per the QC4B-04/QC5-07 pattern. Needs an owner authorization
+line (agent-run end-to-end; owner-run `!` fallback if the classifier blocks).
+Also pending owner: the `!review resolve 2a5467cd… not-sent` unblock (follow-up 1).
 
 **Then:** (2) QC-6c CANARY (D-004 first — still unanswered and load-bearing).
 (3) F-031 drill slot (D-006 window). (4) QC-10 (incl. the F-031 drill before
@@ -168,9 +146,9 @@ git -C ~/.openclaw/SocialSol status
 
 Expected: clean `main` @ ba47469 (policy sha 0dd75080 unchanged;
 `node scripts/policy-fingerprint.js check` prints `match` + `agreement: ok`).
-Then `cd ~/qc-worktree`, read qc/STATUS.md, and run the QC-9 live leg
-(session authorization required) or, if already completed, the QC-9
-phase-boundary merge.
+Then `cd ~/qc-worktree`, read qc/STATUS.md, and run the QC-9 phase-boundary
+merge (owner authorization on the Authorizations line), then QC-6c/QC-10
+sequencing per Next.
 
 **⚠️ Standing QC-executor rules:** (QC8-INC-01) never `pkill -f` a shared
 substring — kill FIXTURE processes only by exact recorded PID. (QC8-07) a
