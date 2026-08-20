@@ -135,9 +135,22 @@ two rows):**
 
 **Owner:** Max 20x; long sessions OK (2+ hours fine). Phases may run as single large sessions; the a/b splits remain available as fallbacks, and the ~70%-budget guardrail (§8) still applies.
 
-## D-004 — Blackout windows — OPEN
+## D-004 — Blackout windows — RECORDED 2026-08-20
 
-Live campaigns, warmup ramps, guest quiet hours; days/times when CANARY/OUTAGE/BUSINESS actions are forbidden.
+**Owner (2026-08-20, in-session start-of-session ask, session 28):** standing
+rule mirrors the D-006 drill window. **CANARY/OUTAGE/BUSINESS actions run only
+on weekdays 10:00–16:00 PT, never during active sends or guest quiet hours;
+every action still gets a live-state preflight** (active sends / queued work /
+deploy lock; guest quiet hours checked for anything guest-visible). Outside
+that window these action classes are forbidden unless the owner grants an
+explicit in-session widening (D-006 2026-08-16 widening precedent). Session-
+level authorization per §5 remains required in addition to the window — the
+window never substitutes for an Authorizations-line grant. Unblocks: QC-6c
+(browser-funnel CANARY, D-009), F-031 escrow-retrieval drill scheduling
+(D-006), QC-10 drills.
+
+(Seeded scope, for reference: live campaigns, warmup ramps, guest quiet hours;
+days/times when CANARY/OUTAGE/BUSINESS actions are forbidden.)
 
 ## D-005 — Reconciliation month for QC-4 — RECORDED 2026-08-15
 
