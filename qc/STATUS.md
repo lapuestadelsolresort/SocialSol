@@ -126,17 +126,24 @@ QC-6c CANARY), F-064 (monitor-only), F-065 (docs batch; + one-line rider:
 
 ## Next
 
-**(1) QC-9 phase-boundary batch-merge** (Amendment 3): qc/ docs commits from
-sessions 27a-c → push → one PR → merge → docs-only fast-forward of production
-main, with ancestry + incoming-files proofs and post-ff runtime-baseline
-verification per the QC4B-04/QC5-07 pattern. Needs an owner authorization
-line (agent-run end-to-end; owner-run `!` fallback if the classifier blocks).
-Also pending owner: the `!review resolve 2a5467cd… not-sent` unblock (follow-up 1).
+**(DONE 2026-08-19 evening, D-029)** Phase-boundary merge executed agent-run
+end-to-end: PR #92 (19 qc commits since the QC-7 boundary) → CI verify PASS →
+merged e04c2a8 → docs-only ff of production main; ancestry + incoming-files
+(8 qc/ files only) + code-identity (non-qc diff vs ba47469 EMPTY) + fingerprint
+match + healthz 200 all proven. One honest incident: the FIRST CI run FAILED on
+check-secrets — F-067's committed text carried a raw Slack channel id (§4.1
+violation, executor error); the id was scrubbed to an evidence pointer and CI
+passed — the scanner control worked exactly as designed. Review 2a5467cd was
+owner-resolved (confirmed_not_sent) and the contact sync RESUMED (first run
+completed 2026-08-20 01:56:57Z, back on 15-min cadence).
 
-**Then:** (2) QC-6c CANARY (D-004 first — still unanswered and load-bearing).
-(3) F-031 drill slot (D-006 window). (4) QC-10 (incl. the F-031 drill before
-the stamp) + P2/P3 residual dispositions (owner + due date per DoD #10);
-F-066 fix session per D-008 P2 policy.
+**(1) QC-6c CANARY** — blocked on D-004 (blackout windows; still unanswered
+and load-bearing).
+
+**Then:** (2) F-031 drill slot (D-006 window). (3) P2 fix batch per D-008 —
+now carrying F-064 (grid contention, DUE), F-066 (Paloma trio), F-069
+instruction fix, F-067 converge. (4) QC-10 (incl. the F-031 drill before the
+stamp) + P2/P3 residual dispositions (owner + due date per DoD #10).
 
 **Exact next command** (start ritual, §8):
 
@@ -146,9 +153,10 @@ git -C ~/.openclaw/SocialSol status
 
 Expected: clean `main` @ ba47469 (policy sha 0dd75080 unchanged;
 `node scripts/policy-fingerprint.js check` prints `match` + `agreement: ok`).
-Then `cd ~/qc-worktree`, read qc/STATUS.md, and run the QC-9 phase-boundary
-merge (owner authorization on the Authorizations line), then QC-6c/QC-10
-sequencing per Next.
+Expected HEAD after this boundary: e04c2a8 (docs-only merge of PR #92;
+serving code byte-identical to ba47469 — runtime baseline unchanged). Then
+`cd ~/qc-worktree`, read qc/STATUS.md, and take Next item (1): QC-6c needs
+D-004 answered first; otherwise the P2 fix batch is the ready-to-run item.
 
 **⚠️ Standing QC-executor rules:** (QC8-INC-01) never `pkill -f` a shared
 substring — kill FIXTURE processes only by exact recorded PID. (QC8-07) a
