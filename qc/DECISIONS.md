@@ -889,3 +889,19 @@ verified RO before handoff):**
   authorization is NOT carried forward — a fresh Authorizations-line grant
   accompanies the session that runs it (D-026 consumed-by-discovery
   precedent).
+
+## D-029 — QC-9 phase-boundary merge authorization + review 2a5467cd resolution — RECORDED 2026-08-19
+
+**Owner (2026-08-19, in-session, session 27):**
+
+- **QC-9 phase-boundary merge AUTHORIZED agent-run END-TO-END** ("yeah, I
+  authorize the merge") — push, PR create, merge, docs-only fast-forward of
+  production main; BUSINESS-scoped to this boundary only; owner-run `!`
+  fallback if the permission classifier blocks; ancestry + incoming-files
+  proofs and post-ff runtime-baseline verification required per the
+  QC4B-04/QC5-07/QC6-11 pattern.
+- **Review 2a5467cd (SQLITE_BUSY, ownerrez.crm.sync) resolved by the owner**
+  as `confirmed_not_sent` at 01:43:13Z via the Slack `!review resolve` path —
+  the F-064 cadence block lifted; the 15-min contact-sync poll resumes at the
+  next scheduled tick (executor verifies in-session). F-064 stands at P2 with
+  the grid-contention fix due in the next fix batch (QC9-10).
