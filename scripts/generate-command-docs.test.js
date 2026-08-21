@@ -71,6 +71,22 @@ test('a new capability with no surface and no recorded reason fails the generato
   assert.equal(main(['--check']), 0, 'the tree must be left untouched by the failure path');
 });
 
+test('the reservations surface documents the OwnerRez proposal contract and every catalog operation (F-069)', () => {
+  const { ENTRIES } = require('../crm/lib/ownerrez-mutation-catalog');
+  const reservations = render().find(file => file.docPath === 'docs/commands/reservations.md');
+  assert.ok(reservations, 'reservations surface missing');
+  assert.match(reservations.block, /`ownerrez\.mutation\.propose` input contract/);
+  assert.match(reservations.block, /`operationId`/);
+  assert.match(reservations.block, /`reason` — 4–500 characters/);
+  assert.match(reservations.block, /no per-operation allowlist at proposal time/);
+  for (const entry of ENTRIES) {
+    assert.match(reservations.block, new RegExp(`\\| \`${entry.operationId}\` \\| ${entry.method} \\|`), `${entry.operationId} missing`);
+  }
+  assert.equal(ENTRIES.length, 34);
+  const others = render().filter(file => file.docPath !== 'docs/commands/reservations.md');
+  assert.ok(others.every(file => !file.block.includes('input contract**')), 'contract block must stay on the reservations surface');
+});
+
 test('replaceBlock refuses a document whose markers are missing or inverted', () => {
   assert.throws(() => replaceBlock('no markers here', 'block', 'x.md'), /missing its generated markers/);
   assert.throws(

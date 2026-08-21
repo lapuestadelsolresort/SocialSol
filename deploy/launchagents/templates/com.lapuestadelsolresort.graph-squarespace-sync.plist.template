@@ -6,7 +6,23 @@
     <string>__NODE_BIN__</string><string>__SOCIALSOL_ROOT__/crm/scripts/workflow-trigger.js</string>
     <string>squarespace.crm.sync</string><string>--bucket</string><string>5m</string>
   </array>
-  <key>StartInterval</key><integer>300</integer>
+  <!-- F-064: fixed wall-clock minutes replace StartInterval so the CRM-writing graphs never share a
+       write slot (StartInterval phase-aligned every one of them at deploy time). The disjoint-minute
+       invariant is enforced by scripts/check-launchagents.py. -->
+  <key>StartCalendarInterval</key><array>
+    <dict><key>Minute</key><integer>2</integer></dict>
+    <dict><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Minute</key><integer>12</integer></dict>
+    <dict><key>Minute</key><integer>17</integer></dict>
+    <dict><key>Minute</key><integer>22</integer></dict>
+    <dict><key>Minute</key><integer>27</integer></dict>
+    <dict><key>Minute</key><integer>32</integer></dict>
+    <dict><key>Minute</key><integer>37</integer></dict>
+    <dict><key>Minute</key><integer>42</integer></dict>
+    <dict><key>Minute</key><integer>47</integer></dict>
+    <dict><key>Minute</key><integer>52</integer></dict>
+    <dict><key>Minute</key><integer>57</integer></dict>
+  </array>
   <key>RunAtLoad</key><true/>
   <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
   <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/graph-squarespace-sync.log</string>

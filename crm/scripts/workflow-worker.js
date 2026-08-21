@@ -21,6 +21,7 @@ const { sendGmailReply, readSentMessage, searchEmailActivity } = require('../lib
 const { sendOwnerRezMessage, readOwnerRezMessage } = require('../lib/ownerrez-messages');
 const { authorize, loadPolicy } = require('../lib/channel-policy');
 const { effectClass, policySnapshot, reviewChannelId } = require('../lib/workflow-execution-policy');
+const { connectionOptions } = require('../lib/sqlite-busy');
 const { assertSystemOriginAccounted, policyRegistryAgreementViolations } = require('../lib/policy-registry-agreement');
 const { getDefinition, listDefinitions } = require('../workflows/registry');
 
@@ -307,7 +308,9 @@ async function tick(db) {
 }
 
 async function main() {
-  const db = createDB(DB_PATH);
+  // F-064: wait for the shared write lock instead of failing after the
+  // driver's 1000 ms default; sibling graph children hold it for longer.
+  const db = createDB(DB_PATH, connectionOptions());
   await db.query(sql`PRAGMA journal_mode = WAL`);
   await db.query(sql`PRAGMA foreign_keys = ON`);
   await ensureSchemaAsync(db, sql);

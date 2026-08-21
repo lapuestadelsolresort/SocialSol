@@ -91,6 +91,37 @@ This is Paloma's periodic reconciliation backstop. Real-time Slack events are th
 9. When every joined channel was inspected successfully, finish with exactly NO_REPLY. On a partial failure, send exactly one concise alert to channel:${tracker} with openclaw message send --channel slack --account ${account} --target channel:${tracker} --message <FAILURE_SUMMARY>, naming the failing channel and operation, then finish with exactly NO_REPLY. Never claim a clean scan after a partial failure.`;
 }
 
+/**
+ * Everything the LaunchAgent scan needs to hand `openclaw agent` one
+ * reconciliation turn, derived from paloma/config.json. The tracker channel
+ * comes from `channels.tracker` — the contract's partial-failure alert target
+ * — which the scan entry point never passed before (F-066).
+ */
+function monitorInvocation({ config, env = process.env, root }) {
+  const monitoring = config?.monitoring || {};
+  if (monitoring.enabled === false) throw new Error('Paloma monitoring is disabled');
+  const accountId = env.PALOMA_SLACK_ACCOUNT || monitoring.slack_account;
+  if (!accountId) throw new Error('Paloma monitoring.slack_account is required');
+  const agentId = env.PALOMA_AGENT_ID || monitoring.agent_id || 'paloma';
+  const timeoutSeconds = Number(monitoring.timeout_seconds || 300);
+  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1) {
+    throw new Error('Paloma monitoring.timeout_seconds must be a positive integer');
+  }
+  const message = monitorPrompt({
+    accountId,
+    databasePath: path.join(requiredString(root, 'SocialSol root'), 'paloma', 'data', 'tasks.db'),
+    trackerChannelId: config?.channels?.tracker,
+    lookbackMinutes: Number(monitoring.initial_lookback_minutes || 60),
+  });
+  return {
+    accountId,
+    agentId,
+    timeoutSeconds,
+    message,
+    args: ['agent', '--agent', agentId, '--message', message, '--timeout', String(timeoutSeconds), '--json'],
+  };
+}
+
 function durationMilliseconds(value) {
   const match = String(value || '').trim().match(/^(\d+)(ms|s|m|h)$/);
   if (!match) throw new Error('Paloma monitor interval must use ms, s, m, or h');
@@ -200,6 +231,7 @@ module.exports = {
   joinedChannels,
   mergeSoulMonitoringBlock,
   monitorCronConfig,
+  monitorInvocation,
   monitorPrompt,
   monitoredChannelConfig,
   slackChannelId,

@@ -6,7 +6,23 @@
     <string>__NODE_BIN__</string><string>__SOCIALSOL_ROOT__/crm/scripts/accounting-inbox.js</string>
   </array>
   <key>WatchPaths</key><array><string>__SOCIALSOL_ROOT__/accounting/inbox</string></array>
-  <key>StartInterval</key><integer>300</integer>
+  <!-- F-064: fixed wall-clock minutes replace StartInterval so the CRM-writing graphs never share a
+       write slot (StartInterval phase-aligned every one of them at deploy time). The disjoint-minute
+       invariant is enforced by scripts/check-launchagents.py. -->
+  <key>StartCalendarInterval</key><array>
+    <dict><key>Minute</key><integer>4</integer></dict>
+    <dict><key>Minute</key><integer>9</integer></dict>
+    <dict><key>Minute</key><integer>14</integer></dict>
+    <dict><key>Minute</key><integer>19</integer></dict>
+    <dict><key>Minute</key><integer>24</integer></dict>
+    <dict><key>Minute</key><integer>29</integer></dict>
+    <dict><key>Minute</key><integer>34</integer></dict>
+    <dict><key>Minute</key><integer>39</integer></dict>
+    <dict><key>Minute</key><integer>44</integer></dict>
+    <dict><key>Minute</key><integer>49</integer></dict>
+    <dict><key>Minute</key><integer>54</integer></dict>
+    <dict><key>Minute</key><integer>59</integer></dict>
+  </array>
   <key>WorkingDirectory</key><string>__SOCIALSOL_ROOT__</string>
   <key>StandardOutPath</key><string>__SOCIALSOL_ROOT__/logs/graph-accounting-inbox.log</string>
   <key>StandardErrorPath</key><string>__SOCIALSOL_ROOT__/logs/graph-accounting-inbox.error.log</string>

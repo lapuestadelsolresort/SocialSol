@@ -61,6 +61,60 @@ real or is shadowed is runtime state, not repo state: ask `!help` in the channel
 
   The exact emitted command, from the same proposer, inside the 15-minute window.
 
+**Proposing an OwnerRez change — `ownerrez.mutation.propose` input contract**
+
+Ask in the channel; the agent calls the `resort_workflow` tool with
+`workflow: "ownerrez.mutation.propose"` and an `input` carrying:
+
+- `operationId` — one of the 34 catalog ids below, spelled exactly
+- `pathParams` — the `{…}` fields of the operation path (integers)
+- `query` — only for operations that declare query parameters
+- `body` — an object (or array where allowed) for POST/PATCH operations; omitted for DELETE
+- `reason` — 4–500 characters, recorded with the proposal
+
+There is no per-operation allowlist at proposal time: every id below may be
+proposed, the server validates the id and the request shape before any
+provider call, and nothing changes in OwnerRez until the same user types the
+emitted `!ownerrez confirm <request-id> <hash>` within 15 minutes. The catalog
+itself lives in `crm/lib/ownerrez-mutation-catalog.js`.
+
+| Operation id | Method | Path | Path params | Query params | Body |
+| --- | --- | --- | --- | --- | --- |
+| `Bookings_Patch` | PATCH | `/v2/bookings/{id}` | `id` | — | object or array |
+| `Bookings_Post` | POST | `/v2/bookings` | — | — | object |
+| `Discounts_Delete` | DELETE | `/v2/discounts/{id}` | `id` | — | — |
+| `Discounts_Patch` | PATCH | `/v2/discounts/{id}` | `id` | — | object or array |
+| `Discounts_Post` | POST | `/v2/discounts` | — | — | object |
+| `FieldDefinitions_Delete` | DELETE | `/v2/fielddefinitions/{id}` | `id` | — | — |
+| `FieldDefinitions_Patch` | PATCH | `/v2/fielddefinitions/{id}` | `id` | — | object or array |
+| `FieldDefinitions_Post` | POST | `/v2/fielddefinitions` | — | — | object |
+| `Fields_ByDefinition` | DELETE | `/v2/fields/bydefinition` | — | `field_definition_id`, `entity_id`, `entity_type` | — |
+| `Fields_Delete` | DELETE | `/v2/fields/{id}` | `id` | — | — |
+| `Fields_Patch` | PATCH | `/v2/fields/{id}` | `id` | — | object or array |
+| `Fields_Post` | POST | `/v2/fields` | — | — | object |
+| `Guests_Delete` | DELETE | `/v2/guests/{id}` | `id` | — | — |
+| `Guests_DeleteAddress` | DELETE | `/v2/guests/{id}/addresses/{address_id}` | `id`, `address_id` | — | — |
+| `Guests_DeleteEmailAddress` | DELETE | `/v2/guests/{id}/emailaddresses/{email_address_id}` | `id`, `email_address_id` | — | — |
+| `Guests_DeletePhone` | DELETE | `/v2/guests/{id}/phones/{phone_id}` | `id`, `phone_id` | — | — |
+| `Guests_Patch` | PATCH | `/v2/guests/{id}` | `id` | — | object or array |
+| `Guests_Post` | POST | `/v2/guests` | — | — | object |
+| `Messages_Post` | POST | `/v2/messages` | — | — | object |
+| `Quotes_Delete` | DELETE | `/v2/quotes/{id}` | `id` | — | — |
+| `Quotes_Patch` | PATCH | `/v2/quotes/{id}` | `id` | — | object or array |
+| `Quotes_Post` | POST | `/v2/quotes` | — | — | object |
+| `SpotRates_Patch` | PATCH | `/v2/spotrates` | — | — | — |
+| `Surcharges_Delete` | DELETE | `/v2/surcharges/{id}` | `id` | — | — |
+| `Surcharges_Patch` | PATCH | `/v2/surcharges/{id}` | `id` | — | object or array |
+| `Surcharges_Post` | POST | `/v2/surcharges` | — | — | object |
+| `TagDefinitions_Delete` | DELETE | `/v2/tagdefinitions/{id}` | `id` | — | — |
+| `TagDefinitions_Patch` | PATCH | `/v2/tagdefinitions/{id}` | `id` | — | object or array |
+| `TagDefinitions_Post` | POST | `/v2/tagdefinitions` | — | — | object |
+| `Tags_ByName` | DELETE | `/v2/tags/byname` | — | `name`, `entity_id`, `entity_type` | — |
+| `Tags_Delete` | DELETE | `/v2/tags/{id}` | `id` | — | — |
+| `Tags_Post` | POST | `/v2/tags` | — | — | object |
+| `WebhookSubscriptions_Delete` | DELETE | `/v2/webhooksubscriptions/{id}` | `id` | — | — |
+| `WebhookSubscriptions_Post` | POST | `/v2/webhooksubscriptions` | — | — | object |
+
 **Available in every controlled channel**
 
 - `!review resolve <review-id> sent <provider-ref>`

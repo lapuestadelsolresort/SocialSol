@@ -1,6 +1,7 @@
 'use strict';
 
 const { loadPolicy } = require('../lib/channel-policy');
+const { withBusyRetry } = require('../lib/sqlite-busy');
 
 const RETRYABLE_COMMAND_EFFECT_CLASSES = new Set([
   'external_idempotent',
@@ -131,13 +132,13 @@ function makeDurableJob(options) {
               const [currentStep] = await db.query(require('@databases/sqlite').sql`SELECT attempts, max_attempts
                 FROM workflow_steps WHERE run_id=${run.id} AND step_key=${stepKey}`);
               if (currentStep && Number(currentStep.attempts) >= Number(currentStep.max_attempts)) {
-                await store.transitionEffect(db, {
+                await withBusyRetry(() => store.transitionEffect(db, {
                   effectId,
                   status: 'failed',
                   providerStatus: 'command_failed',
                   errorCode: error.code,
                   errorMessage: error.message,
-                });
+                }), { label: `${name}:execute:command-failed-projection` });
               }
             } else {
               error.code = 'ambiguous_external_result';
@@ -146,8 +147,13 @@ function makeDurableJob(options) {
             throw error;
           }
           const providerRef = `job:${run.id}`;
+          // The command has already run. These two writes are the local
+          // projection of that fact; losing the SQLite write-lock race here
+          // (F-064: every historical SQLITE_BUSY failure landed in this block)
+          // must be retried before it becomes a manual review, because the
+          // projection is idempotent and the provider call is never repeated.
           try {
-            await store.transitionEffect(db, {
+            await withBusyRetry(() => store.transitionEffect(db, {
               effectId,
               providerRef,
               status: 'accepted_by_provider',
@@ -157,8 +163,8 @@ function makeDurableJob(options) {
                 stdoutHash: store.sha256(result.stdout),
                 stderrHash: store.sha256(result.stderr),
               },
-            });
-            await store.createEvidence(db, {
+            }), { label: `${name}:execute:projection` });
+            await withBusyRetry(() => store.createEvidence(db, {
               runId: run.id,
               stepKey,
               source: `${provider}.command`,
@@ -168,7 +174,7 @@ function makeDurableJob(options) {
                 stdout: result.stdout,
                 stderr: result.stderr,
               },
-            });
+            }), { label: `${name}:execute:evidence` });
           } catch (error) {
             error.code = error.code || 'post_dispatch_projection_failed';
             error.retryable = false;

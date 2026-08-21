@@ -43,11 +43,14 @@ async function withDb(run, { policy = null } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'email-reply-workflow-'));
   const db = createDB(path.join(directory, 'crm.db'));
   const priorPolicyPath = process.env.RESORT_WORKFLOW_POLICY_PATH;
-  if (policy) {
-    const policyPath = path.join(directory, 'policy.json');
-    fs.writeFileSync(policyPath, JSON.stringify(policy));
-    process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
-  }
+  // The policy path always points inside the fixture directory: at the fixture
+  // policy when one is supplied, otherwise at a file that does not exist. The
+  // "no policy file" contract is then identical in CI, in a worktree, and in
+  // the production checkout where a real runtime workflow/policy.json is
+  // installed (F-070: that checkout made the daily test control false-red).
+  const policyPath = path.join(directory, 'policy.json');
+  if (policy) fs.writeFileSync(policyPath, JSON.stringify(policy));
+  process.env.RESORT_WORKFLOW_POLICY_PATH = policyPath;
   try {
     await db.query(sql`PRAGMA foreign_keys=ON`);
     await db.query(sql`CREATE TABLE contacts (
