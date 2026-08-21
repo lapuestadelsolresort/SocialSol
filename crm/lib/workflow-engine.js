@@ -3,10 +3,25 @@
 const crypto = require('node:crypto');
 const store = require('./workflow-store');
 const { loadPolicy } = require('./channel-policy');
-const { reviewChannelId, stepExecutionDecision, triggerDecision } = require('./workflow-execution-policy');
+const {
+  SAFE_IN_SHADOW, effectClass, reviewChannelId, stepExecutionDecision, triggerDecision,
+} = require('./workflow-execution-policy');
+const { isSqliteBusy, withBusyRetry } = require('./sqlite-busy');
+
+// F-064: a step whose effect class carries no provider effect (read,
+// external_read, local_write, internal_notification) may be repeated after a
+// SQLite write-lock loss. It gets this many attempts for that one error class
+// regardless of its own maxAttempts; every other failure keeps the step's
+// declared budget and provider-effect steps keep the fail-closed path.
+const LOCAL_EFFECT_CLASSES = SAFE_IN_SHADOW;
+const BUSY_LOCAL_STEP_MAX_ATTEMPTS = 4;
 
 function retryDelayMs(attempts) {
   return Math.min(15 * 60_000, 5_000 * (2 ** Math.max(0, attempts - 1)));
+}
+
+function busyStepRetryDelayMs(attempts, random = Math.random) {
+  return Math.min(30_000, 2_000 * (2 ** Math.max(0, attempts - 1))) + Math.floor(random() * 1_000);
 }
 
 function startLeaseHeartbeat(db, runId, stepKey, leaseToken, leaseMs) {
@@ -125,16 +140,28 @@ async function executeGraph(db, definition, runId, services = {}) {
       const output = result?.output ?? result ?? {};
       state = { ...state, [stepDefinition.key]: output };
       await heartbeat.stop();
-      await store.completeStep(db, runId, stepDefinition.key, output, state, { leaseToken: lease.leaseToken });
+      // Local bookkeeping: the step already finished, and a lost write-lock
+      // race must not turn a completed step into a failed run (F-064).
+      await withBusyRetry(
+        () => store.completeStep(db, runId, stepDefinition.key, output, state, { leaseToken: lease.leaseToken }),
+        { label: `${definition.name}:${stepDefinition.key}:complete` },
+      );
     } catch (error) {
       try {
         await heartbeat.stop();
       } catch (leaseError) {
         error = leaseError;
       }
-      const latest = await store.getRun(db, runId);
+      const latest = await withBusyRetry(() => store.getRun(db, runId), { label: `${definition.name}:${stepDefinition.key}:reload` });
       const current = latest.steps.find(item => item.step_key === stepDefinition.key);
-      const retryable = error?.retryable === true && current.attempts < current.max_attempts;
+      const busy = isSqliteBusy(error);
+      const localBusy = busy
+        && error?.retryable !== false
+        && LOCAL_EFFECT_CLASSES.has(effectClass(definition, stepDefinition));
+      const maxAttempts = localBusy
+        ? Math.max(Number(current.max_attempts), BUSY_LOCAL_STEP_MAX_ATTEMPTS)
+        : Number(current.max_attempts);
+      const retryable = (error?.retryable === true || localBusy) && current.attempts < maxAttempts;
       const leaseAmbiguous = error?.code === 'workflow_lease_lost'
         && ['external_non_idempotent', 'guest_message'].includes(policyDecision.effectClass);
       const reviewRequired = error?.code === 'ambiguous_external_result'
@@ -145,16 +172,16 @@ async function executeGraph(db, definition, runId, services = {}) {
           || (error?.code === 'ambiguous_external_result' || leaseAmbiguous
             ? 'ambiguous_external_result' : 'manual_review_required');
         const channelId = reviewChannelId(policy || {}, definition, run);
-        const review = await store.createManualReview(db, {
+        const review = await withBusyRetry(() => store.createManualReview(db, {
           runId,
           stepKey: stepDefinition.key,
           reviewChannelId: channelId,
           reasonCode,
           reasonMessage: error.message,
-        });
+        }), { label: `${definition.name}:${stepDefinition.key}:review` });
         if (channelId) {
           const threadTs = state.resolve_conversation?.threadTs || null;
-          await store.enqueueOutbox(db, {
+          await withBusyRetry(() => store.enqueueOutbox(db, {
             runId,
             topic: 'slack.notification',
             idempotencyKey: `${runId}:manual-review:${stepDefinition.key}:slack`,
@@ -163,7 +190,7 @@ async function executeGraph(db, definition, runId, services = {}) {
               threadTs,
               message: `⚠️ Workflow ${runId} has an external-effect result requiring human review (${reasonCode}). Do not resend or repeat the mutation until review ${review.id} is resolved. After checking the provider console, use \`!review resolve ${review.id} sent <provider-id>\`, \`!review resolve ${review.id} not-sent\`, or \`!review resolve ${review.id} abandon\`.`,
             },
-          });
+          }), { label: `${definition.name}:${stepDefinition.key}:review-notice` });
         } else {
           // A channel-less run (a scheduled graph) whose policy resolves no
           // write_notifications channel opens a review nobody is told about —
@@ -171,24 +198,24 @@ async function executeGraph(db, definition, runId, services = {}) {
           // and workflow-health still alerts on open reviews; this records the
           // missing notice durably so the gap is attributable instead of
           // invisible.
-          await store.recordEvent(db, {
+          await withBusyRetry(() => store.recordEvent(db, {
             runId,
             stepKey: stepDefinition.key,
             type: 'manual_review_unnotified',
             payload: { reviewId: review.id, reasonCode, reason: 'no_review_channel_resolved' },
-          });
+          }), { label: `${definition.name}:${stepDefinition.key}:review-event` });
           console.warn(`[workflow-engine] run ${runId} opened manual review ${review.id} with no notification channel — set write_notifications.channel_ids`);
         }
       }
       if (error?.code === 'workflow_lease_lost') return store.getRun(db, runId);
       const retryAt = retryable
-        ? new Date(Date.now() + retryDelayMs(current.attempts)).toISOString()
+        ? new Date(Date.now() + (busy ? busyStepRetryDelayMs(current.attempts) : retryDelayMs(current.attempts))).toISOString()
         : null;
-      await store.failStep(db, runId, stepDefinition.key, error, {
+      await withBusyRetry(() => store.failStep(db, runId, stepDefinition.key, error, {
         retry: retryable,
         retryAt,
         leaseToken: lease.leaseToken,
-      });
+      }), { label: `${definition.name}:${stepDefinition.key}:fail` });
       return store.getRun(db, runId);
     }
   }
@@ -207,4 +234,12 @@ async function startGraph(db, definition, request, services = {}) {
   return executeGraph(db, definition, created.run.id, services);
 }
 
-module.exports = { executeGraph, executionPolicy, retryDelayMs, startGraph, startLeaseHeartbeat };
+module.exports = {
+  BUSY_LOCAL_STEP_MAX_ATTEMPTS,
+  busyStepRetryDelayMs,
+  executeGraph,
+  executionPolicy,
+  retryDelayMs,
+  startGraph,
+  startLeaseHeartbeat,
+};

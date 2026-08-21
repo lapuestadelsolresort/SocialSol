@@ -91,6 +91,22 @@ test('workflow tool exposes email activity and full CRM contact lookup as model-
   assert.match(tool.parameters.properties.workflow.description, /do not defer those requests to another channel/);
 });
 
+test('workflow tool documents the OwnerRez proposal input contract to the model (F-069)', () => {
+  const tool = createWorkflowTool({
+    config: pluginConfig({}),
+    ctx: { deliveryContext: { to: 'channel:CRESERVATIONS' }, requesterSenderId: 'U-JASON' },
+  });
+  assert.ok(tool.parameters.properties.workflow.enum.includes('ownerrez.mutation.propose'));
+  const input = tool.parameters.properties.input.description;
+  assert.match(input, /ownerrez\.mutation\.propose pass operationId/);
+  assert.match(input, /crm\/lib\/ownerrez-mutation-catalog\.js/);
+  assert.match(input, /TagDefinitions_Post/);
+  assert.match(input, /pathParams/);
+  assert.match(input, /reason \(4-500 characters\)/);
+  assert.match(input, /every catalog operation may be proposed/);
+  assert.match(tool.parameters.properties.workflow.description, /never tell a user an operation is outside an allowed set/);
+});
+
 test('CRM contact lookup works inside a WhatsApp thread without receiving unsupported thread input', async () => {
   const tokenEnv = 'TEST_CRM_CONTACT_CONTROL_TOKEN';
   const prior = process.env[tokenEnv];

@@ -129,6 +129,7 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'crm.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const { sql } = require('@databases/sqlite');
+const { connectionOptions } = require('./lib/sqlite-busy');
 const { ensureSchemaAsync: ensureSquarespaceSchema } = require('./lib/squarespace-schema');
 const { ensureSchemaAsync: ensureWorkflowSchema } = require('./lib/workflow-schema');
 
@@ -136,7 +137,10 @@ const { ensureSchemaAsync: ensureWorkflowSchema } = require('./lib/workflow-sche
 let db;
 
 async function initDB() {
-  db = createDB(DB_PATH);
+  // F-064: the server is the busiest writer on the shared file (tracker
+  // beacons, webhooks, workflow submissions); wait for the lock rather than
+  // failing after the driver's 1000 ms default.
+  db = createDB(DB_PATH, connectionOptions());
 
   await db.query(sql`PRAGMA journal_mode = WAL`);
   await db.query(sql`PRAGMA foreign_keys = ON`);

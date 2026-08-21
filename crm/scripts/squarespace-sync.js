@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const Database = require('better-sqlite3');
+const { betterSqliteOptions } = require('../lib/sqlite-busy');
 const { ensureSchemaBetterSqlite } = require('../lib/squarespace-schema');
 const {
   applyTransactionSummaries,
@@ -117,7 +118,7 @@ async function run(args = process.argv.slice(2), injected = {}) {
   if (!secrets.api_key) throw new Error('squarespace.json does not contain api_key');
   const client = injected.client || createSquarespaceClient({ apiKey: secrets.api_key });
   // --dry-run performs no writes, so it takes a read-only handle (F-042).
-  const db = injected.db || new Database(DB_PATH, dryRun ? { readonly: true } : {});
+  const db = injected.db || new Database(DB_PATH, betterSqliteOptions(dryRun ? { readonly: true } : {})); // F-064
   const ownsDb = !injected.db;
   const startedAt = new Date().toISOString();
   const now = new Date().toISOString();

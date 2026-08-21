@@ -129,10 +129,11 @@ async function fetchBookings(sinceUtc) {
 
 // ─── Database ────────────────────────────────────────────────────────────────
 const Database = require('better-sqlite3');
+const { betterSqliteOptions } = require('../lib/sqlite-busy');
 let db;
 
 function openDb() {
-  db = new Database(DB_PATH);
+  db = new Database(DB_PATH, betterSqliteOptions()); // F-064: wait for the shared write lock
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 }

@@ -72,6 +72,9 @@
     "resort-media-rescan": { "max_age_hours": 192 },
     "resort-state-backup": { "max_age_hours": 30 },
     "resort-media-backup-verify": { "max_age_hours": 192 },
-    "resort-kapital-tests": { "max_age_hours": 192 }
+    "resort-kapital-tests": { "max_age_hours": 192 },
+    "resort-paloma-scan": { "max_age_hours": 9 },
+    "resort-paloma-followup": { "max_age_hours": 192 },
+    "resort-paloma-summary": { "max_age_hours": 192 }
   }
 }

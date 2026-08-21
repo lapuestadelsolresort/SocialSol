@@ -11,6 +11,7 @@ const {
   monitorCronConfig,
   monitoredChannelConfig,
   soulMonitoringBlock,
+  monitorInvocation,
 } = require('./monitoring-contract');
 const {
   accountChannelPath,
@@ -167,4 +168,41 @@ test('task reply configuration is identity-driven and compares only its owned fi
   });
   assert.equal(taskTrackerConfigMatches({ ...expected, unrelated: true }, expected), true);
   assert.equal(taskTrackerConfigMatches({ ...expected, taskTrackerAgentIds: ['other'] }, expected), false);
+});
+
+test('scan invocation carries the tracker channel and runs one agent turn (F-066)', () => {
+  const config = {
+    channels: { tracker: 'CTRACK123456', maintenance: 'CMAINT123456' },
+    users: {},
+    monitoring: { enabled: true, slack_account: 'paloma-account', agent_id: 'paloma', timeout_seconds: 120, initial_lookback_minutes: 45 },
+  };
+  const invocation = monitorInvocation({ config, env: {}, root: '/srv/socialsol' });
+  assert.equal(invocation.accountId, 'paloma-account');
+  assert.equal(invocation.agentId, 'paloma');
+  assert.equal(invocation.timeoutSeconds, 120);
+  assert.deepEqual(invocation.args.slice(0, 3), ['agent', '--agent', 'paloma']);
+  assert.deepEqual(invocation.args.slice(-3), ['--timeout', '120', '--json']);
+  assert.match(invocation.message, /channel:CTRACK123456/);
+  assert.match(invocation.message, /\/srv\/socialsol\/paloma\/data\/tasks\.db/);
+  assert.match(invocation.message, /begin 45 minutes before/);
+  // Environment overrides win, matching configure-paloma-monitoring.js.
+  const overridden = monitorInvocation({ config, env: { PALOMA_SLACK_ACCOUNT: 'env-account', PALOMA_AGENT_ID: 'env-agent' }, root: '/srv/socialsol' });
+  assert.equal(overridden.accountId, 'env-account');
+  assert.equal(overridden.agentId, 'env-agent');
+});
+
+test('scan invocation fails loudly on the config gaps that silently broke the trio', () => {
+  const base = { channels: { tracker: 'CTRACK123456' }, monitoring: { slack_account: 'paloma-account' } };
+  assert.throws(
+    () => monitorInvocation({ config: { ...base, monitoring: {} }, env: {}, root: '/srv/socialsol' }),
+    /monitoring\.slack_account is required/,
+  );
+  assert.throws(
+    () => monitorInvocation({ config: { ...base, channels: {} }, env: {}, root: '/srv/socialsol' }),
+    /tracker Slack channel id is invalid/,
+  );
+  assert.throws(
+    () => monitorInvocation({ config: { ...base, monitoring: { ...base.monitoring, enabled: false } }, env: {}, root: '/srv/socialsol' }),
+    /monitoring is disabled/,
+  );
 });

@@ -17,6 +17,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { listDefinitions } = require('../crm/workflows/registry');
+const { ENTRIES: OWNERREZ_MUTATION_ENTRIES } = require('../crm/lib/ownerrez-mutation-catalog');
 const { QUARANTINED_LIVE_WORKFLOWS } = require('../lib/quarantined-workflows');
 const { SURFACES, UNSURFACED, GLOBAL_COMMANDS, triggerInfo, commandsFor } = require('../lib/command-surfaces');
 
@@ -69,6 +70,55 @@ function globalCommandLines() {
   return lines;
 }
 
+// F-069: the first live use of ownerrez.mutation.propose failed closed because
+// nothing the model or the operator could read documented the proposal input
+// contract or the operation catalog. The catalog module is repo code, so the
+// generated reference can list it byte-reproducibly.
+const PROPOSE_WORKFLOW = 'ownerrez.mutation.propose';
+
+function describeParams(params) {
+  const names = Object.keys(params || {});
+  return names.length ? names.map(name => `\`${name}\``).join(', ') : '—';
+}
+
+function describeBody(bodyType) {
+  if (bodyType === 'object') return 'object';
+  if (bodyType === 'object_or_array') return 'object or array';
+  return '—';
+}
+
+function ownerRezProposalLines() {
+  const entries = [...OWNERREZ_MUTATION_ENTRIES].sort((left, right) => left.operationId.localeCompare(right.operationId));
+  const lines = [
+    '',
+    `**Proposing an OwnerRez change — \`${PROPOSE_WORKFLOW}\` input contract**`,
+    '',
+    'Ask in the channel; the agent calls the `resort_workflow` tool with',
+    `\`workflow: "${PROPOSE_WORKFLOW}"\` and an \`input\` carrying:`,
+    '',
+    `- \`operationId\` — one of the ${entries.length} catalog ids below, spelled exactly`,
+    '- `pathParams` — the `{…}` fields of the operation path (integers)',
+    '- `query` — only for operations that declare query parameters',
+    '- `body` — an object (or array where allowed) for POST/PATCH operations; omitted for DELETE',
+    '- `reason` — 4–500 characters, recorded with the proposal',
+    '',
+    'There is no per-operation allowlist at proposal time: every id below may be',
+    'proposed, the server validates the id and the request shape before any',
+    'provider call, and nothing changes in OwnerRez until the same user types the',
+    'emitted `!ownerrez confirm <request-id> <hash>` within 15 minutes. The catalog',
+    'itself lives in `crm/lib/ownerrez-mutation-catalog.js`.',
+    '',
+    '| Operation id | Method | Path | Path params | Query params | Body |',
+    '| --- | --- | --- | --- | --- | --- |',
+  ];
+  for (const entry of entries) {
+    lines.push(
+      `| \`${entry.operationId}\` | ${entry.method} | \`${entry.path}\` | ${describeParams(entry.pathParams)} | ${describeParams(entry.queryParams)} | ${describeBody(entry.bodyType)} |`,
+    );
+  }
+  return lines;
+}
+
 function surfaceBlock(surface, definitions) {
   const rows = definitions
     .filter(definition => surface.capabilities.includes(definition.capability))
@@ -95,6 +145,7 @@ function surfaceBlock(surface, definitions) {
     lines.push('the release path — an owner-visible change, never a runtime toggle.');
   }
   lines.push(...commandLines(rows));
+  if (rows.some(row => row.name === PROPOSE_WORKFLOW)) lines.push(...ownerRezProposalLines());
   lines.push(...globalCommandLines());
   lines.push('');
   lines.push(END);

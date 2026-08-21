@@ -45,6 +45,7 @@ const { execFile, execFileSync } = require('child_process');
 
 const createDB = require('@databases/sqlite');
 const { sql } = require('@databases/sqlite');
+const { connectionOptions } = require('../crm/lib/sqlite-busy');
 
 const { evaluateCompliance, recordComplianceFailure } = require('./lib/compliance');
 const { verifyEmail } = require('./lib/email-verification');
@@ -511,7 +512,8 @@ async function main() {
   const config = loadConfig();
   const tickLimit = config.orchestrator?.tick_limit ?? 5;
 
-  const db = createDB(DB_PATH);
+  // F-064: this child shares the CRM file with the worker that spawned it.
+  const db = createDB(DB_PATH, connectionOptions());
   let processed = 0, sent = 0, failed = 0, ambiguous = 0;
   try {
     // Fetch due rows (with joined contact + campaign data — single SELECT is cheaper).

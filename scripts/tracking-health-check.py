@@ -18,7 +18,7 @@ from campaign_measurement import crm_metrics, meta_metrics  # noqa: E402
 from campaign_registry import fetch_live_snapshot, group_registry, load_meta_secrets, load_registry  # noqa: E402
 from campaign_config import compare_brief_to_live  # noqa: E402
 from capi_health import meta_capi_delivery_health, meta_capi_failure_message  # noqa: E402
-from meta_campaign_control import fetch_live_configuration  # noqa: E402
+from meta_campaign_control import fetch_live_for_brief  # noqa: E402
 from job_health import record  # noqa: E402
 from runtime_paths import runtime_state_path  # noqa: E402
 
@@ -148,6 +148,45 @@ def post_slack(message, dry_run):
     ], check=True, timeout=30, capture_output=True)
 
 
+def configuration_checks(records, live, secrets, fetch_live=fetch_live_for_brief, briefs_dir=None):
+    """Verify every live registry row that has a committed brief against Meta.
+
+    Dispatch follows the brief's shape, exactly as the mutation gate does
+    (meta_campaign_control.fetch_live_for_brief): a multi-ad brief describes a
+    campaign/adset-level registry row that carries no ad_id/creative_id by
+    design, so its ad and creative population is resolved from the adset;
+    a single-ad brief keeps the exact ad/creative comparison. Calling the
+    single-ad fetcher for every brief is what kept this control red and the
+    autonomous safety net fail-closed from 2026-08-18 (F-071).
+
+    Returns (failures, infra): failure strings for the daily report plus one
+    infrastructure entry per checked brief.
+    """
+    briefs_dir = Path(briefs_dir) if briefs_dir else ROOT / "campaigns"
+    failures, infra = [], []
+    for record in records:
+        cid = str(record.get("campaign_id") or "")
+        brief_id = str(record.get("brief_id") or "")
+        brief_path = briefs_dir / f"{brief_id}.json"
+        if cid not in live or not brief_id or not brief_path.exists():
+            continue
+        try:
+            brief = read_json(brief_path, {}) or {}
+            configuration = fetch_live(brief, record, secrets=secrets)
+            drift = compare_brief_to_live(brief, configuration)
+            if drift:
+                failures.append(
+                    f"campaign configuration drift: {brief_id} ({', '.join(row['field'] for row in drift)})"
+                )
+                infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": False, "drift": drift})
+            else:
+                infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": True})
+        except Exception as exc:
+            failures.append(f"campaign configuration could not be verified: {brief_id}: {exc}")
+            infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": False, "error": str(exc)})
+    return failures, infra
+
+
 def run(day, dry_run=False, no_post=False):
     records = load_registry()
     secrets = load_meta_secrets()
@@ -173,26 +212,9 @@ def run(day, dry_run=False, no_post=False):
     infra.append({"name": "meta_capi_delivery", **capi_health})
     if not capi_health["ok"]:
         infra_failures.append(meta_capi_failure_message(capi_health))
-    for record in records:
-        cid = str(record.get("campaign_id") or "")
-        brief_id = str(record.get("brief_id") or "")
-        brief_path = ROOT / "campaigns" / f"{brief_id}.json"
-        if cid not in live or not brief_id or not brief_path.exists():
-            continue
-        try:
-            brief = read_json(brief_path, {}) or {}
-            configuration = fetch_live_configuration(record, secrets=secrets)
-            drift = compare_brief_to_live(brief, configuration)
-            if drift:
-                infra_failures.append(
-                    f"campaign configuration drift: {brief_id} ({', '.join(row['field'] for row in drift)})"
-                )
-                infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": False, "drift": drift})
-            else:
-                infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": True})
-        except Exception as exc:
-            infra_failures.append(f"campaign configuration could not be verified: {brief_id}: {exc}")
-            infra.append({"name": "campaign_configuration", "brief_id": brief_id, "ok": False, "error": str(exc)})
+    configuration_failures, configuration_infra = configuration_checks(records, live, secrets)
+    infra_failures.extend(configuration_failures)
+    infra.extend(configuration_infra)
     failures = list(infra_failures)
     per_campaign = {}
     for campaign in campaigns:
