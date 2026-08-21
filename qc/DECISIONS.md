@@ -918,3 +918,71 @@ verified RO before handoff):**
   the F-064 cadence block lifted; the 15-min contact-sync poll resumes at the
   next scheduled tick (executor verifies in-session). F-064 stands at P2 with
   the grid-contention fix due in the next fix batch (QC9-10).
+
+## D-030 — QC-6c CANARY session authorization — RECORDED 2026-08-20
+
+**Owner (2026-08-20, in-session start-of-session ask, session 29; asked
+because the session's Authorizations line was blank and STATUS.md Next (1)
+is CANARY-class):**
+
+- **CANARY AUTHORIZED for `qc/QC6C_CANARY_SESSION_PLAN.md` by name** —
+  browser-funnel leg (§5), single owner-phone WhatsApp inbound (§6), and the
+  plan's §8 mark+DELETE cleanup of `qc6c-` rows, exactly as written. No
+  guest-bound send, no Meta mutation, no CAPI emission, no report `--apply`
+  flag (plan §1 exclusions stand).
+- **Timing: non-RO work starts at 10:00 PT** (the D-004 window opening);
+  everything before that is RO prep (destination map, pre-canary snapshot,
+  browser-tool dry run on a non-tracked text document only). The owner chose
+  this over an in-session D-004 widening. Live-state preflight is re-run
+  immediately before each leg (Paulina's historical dispatch hours overlap
+  the window).
+- **Owner available in-window for the WhatsApp leg** (D-009 personal phone;
+  raw number stays in `~/qc-evidence/` only — aliased in committed text).
+- D-028 consumption rule applies: if a leg does not run this session, this
+  grant is consumed, not carried forward; the §11 split point (after §5,
+  cleanup same session) governs a partial run.
+- **Timestamp correction (executor, same session):** the in-session ask was
+  posed at ~08:25 PDT and the owner's answer arrived at ~13:30 PDT — already
+  inside the D-004 window — so "start at 10:00 PT" resolves to "start
+  immediately on answer"; non-RO work begins ~13:35 PDT with the hard stop
+  (cleanup complete) before 16:00 PDT.
+- **Outcome addendum (2026-08-21):** the grant was CONSUMED UNUSED. The
+  browser leg could not start — no Chrome extension instance was paired to
+  this account (`list_connected_browsers` empty after three connection
+  attempts; the extension is installed in two local Chrome profiles but
+  pairing is per claude.ai account) — and the owner then chose D-031 instead
+  of pairing/retrying. Zero non-RO actions ran under D-030.
+
+## D-031 — F-019 browser page-JS residual: ACCEPTED-RISK; QC-6c CANARY retired — RECORDED 2026-08-21
+
+**Owner (2026-08-21 07:35 PDT, in-session, after asking "why are we doing
+this — is it necessary to complete the audit/fix session?" and hearing the
+executor's assessment): "Go with option 1 — accept-risk and close out."**
+
+- **Decision:** the remaining F-019 leg (proof that the DEPLOYED page JS
+  executes in a real browser per destination, incl. the two zero-delivery ad
+  variants, plus one marked end-to-end WhatsApp linkage) is **accepted-risk**
+  under plan §12 #10. F-019 closes as an accepted-risk residual; the
+  dedicated QC-6c CANARY session is retired from the queue.
+- **Basis presented and accepted:** severity P3; open P0/P1 = zero with or
+  without it; genuine paid traffic already evidences page-JS execution on
+  every delivering destination (≈7.4k `page_sessions`, 11
+  `attribution_events`, 5 `conversion_deliveries` through the real funnel);
+  the two zero-delivery variants are a Meta delivery matter, not a tracking
+  defect (F-019 text, tracker-liveness delivery-warning class); the canary's
+  marginal evidence is confirmatory; cost = pairing friction + ~60–90 min of
+  owner/window time per attempt.
+- **Owner of the residual:** Jason. **Revalidation cadence (executor-proposed
+  default, owner may amend):** the daily `tracker-liveness` control remains
+  the standing monitor (beacon round-trip per destination + delivery-aware
+  cold-start classification); genuine-session presence per delivering
+  destination is the page-JS evidence; the two zero-delivery variants are
+  re-checked when they begin delivering (tracker-liveness flips them from
+  delivery warning to capture check automatically). **Due date:** QC-10
+  sign-off reviews this row (DoD #10 — owner + due date + accepted-risk);
+  an optional single real-browser load of one delivering destination may be
+  folded into QC-10's soak if an extension instance is paired at that time.
+- **Runbook retained:** `qc/QC6C_CANARY_SESSION_PLAN.md` stays committed as a
+  reusable runbook (mechanics verified at e04c2a8) should the owner ever want
+  the leg run; it would need a fresh CANARY grant + D-004 window + a paired
+  Chrome extension BEFORE the window opens.

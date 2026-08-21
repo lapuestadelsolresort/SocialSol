@@ -1,5 +1,14 @@
 # QC-6c CANARY session plan — browser-funnel leg (F-019 closure)
 
+> **STATUS 2026-08-21 — RETIRED FROM THE QUEUE, KEPT AS A RUNBOOK (D-031).**
+> The browser page-JS residual of F-019 was accepted as accepted-risk by the
+> owner on 2026-08-21 after the 2026-08-20 attempt (D-030 grant, inside the
+> D-004 window) could not start: no Chrome extension instance was paired to
+> the executor's claude.ai account (`list_connected_browsers` empty). Nothing
+> in this plan ran; zero production writes. If the leg is ever wanted, it
+> needs a fresh CANARY grant, a D-004 window, and a paired extension BEFORE
+> the window opens. Mechanics below remain as verified at e04c2a8.
+
 Authored: 2026-08-20 (session 28, RO prep — D-004 answered the same session).
 Mechanics verified read-only at production HEAD `e04c2a8` (serving code
 byte-identical to runtime baseline `ba47469`; policy sha `0dd75080…`
